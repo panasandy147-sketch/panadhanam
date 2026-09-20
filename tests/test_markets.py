@@ -148,6 +148,7 @@ def test_us_equity_sizes_in_single_shares(cfg):
     cfg.switch_market("US")
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
     rm = RiskManager(cfg)
+    rm.set_capital(100_000)      # this test is about share semantics, not size
     sig = rm.evaluate(_ctx("AAPL", 232.0), Bias.BULLISH, [], 0.6, ["a", "b"])
     assert sig.instrument.instrument_type == InstrumentType.EQUITY
     assert sig.unit_size == 1
@@ -159,6 +160,7 @@ def test_indian_equity_keeps_its_lot_semantics(cfg):
     cfg.switch_market("IN")
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
     rm = RiskManager(cfg)
+    rm.set_capital(100_000)
     sig = rm.evaluate(_ctx("RELIANCE", 2950.0), Bias.BULLISH, [], 0.6, ["a", "b"])
     assert sig.unit_size == 1          # cash equity is still 1 share
     assert sig.capital_at_risk_pct <= 1.01
@@ -224,3 +226,29 @@ async def test_switching_back_and_forth_is_stable(engine):
         assert eng.cfg.active_market == expected
         assert len(eng.cfg.watchlist()) > 0
         assert eng.risk.snapshot()["capital"] > 0
+
+
+def test_an_index_is_never_proposed_as_a_cash_trade(cfg):
+    """You cannot buy NIFTY or FINNIFTY at spot — only its options or futures.
+    Showing a cash projection for one invites an order that cannot be placed."""
+    cfg.switch_market("IN")
+    cfg.settings["system"]["no_new_entry_after"] = "23:59"
+    rm = RiskManager(cfg)
+    rm.set_capital(1_000_000)          # big enough that size is not the blocker
+
+    sig = rm.evaluate(_ctx("FINNIFTY", 23_100.0), Bias.BULLISH, [], 0.6, ["a", "b"])
+    assert sig.instrument.instrument_type == InstrumentType.EQUITY
+    assert sig.status.value == "REJECTED"
+    assert any("index" in r.lower() for r in sig.rejection_reasons)
+
+
+def test_us_index_etfs_are_ordinary_shares(cfg):
+    """SPY and QQQ are ETFs, not indices — they must stay tradeable as shares."""
+    cfg.switch_market("US")
+    cfg.settings["system"]["no_new_entry_after"] = "23:59"
+    rm = RiskManager(cfg)
+    rm.set_capital(100_000)
+
+    sig = rm.evaluate(_ctx("SPY", 585.0), Bias.BULLISH, [], 0.6, ["a", "b"])
+    assert sig.quantity > 0
+    assert not any("index" in r.lower() for r in sig.rejection_reasons)

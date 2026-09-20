@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core import clock
-from app.core.bus import bus
+from app.core.bus import Topic, bus
 from app.core.config import get_config, reload_config
 from app.storage import db
 
@@ -225,6 +225,21 @@ async def calculate(request: Request, body: SizingRequest) -> dict[str, Any]:
 @router.get("/risk/state")
 async def risk_state(request: Request) -> dict[str, Any]:
     return _engine(request).risk.snapshot()
+
+
+class CapitalRequest(BaseModel):
+    capital: float
+
+
+@router.post("/risk/capital")
+async def set_capital(request: Request, body: CapitalRequest) -> dict[str, Any]:
+    """Change the account size the desk sizes positions against."""
+    engine = _engine(request)
+    result = engine.risk.set_capital(body.capital)
+    if not result["ok"]:
+        raise HTTPException(409, result["reason"])
+    await bus.publish(Topic.RISK_STATE, engine.risk.snapshot())
+    return result
 
 
 @router.post("/risk/resume")

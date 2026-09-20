@@ -534,13 +534,14 @@ input:focus, select:focus {
 .log.err .topic { color: var(--critical); }
 
 .banner {
-  padding: 9px 14px;
+  padding: 10px 14px;
   font-size: 12px;
+  line-height: 1.55;
   border-radius: var(--radius-sm);
   margin: 12px 14px 0;
-  display: flex;
-  gap: 9px;
-  align-items: flex-start;
+  /* Deliberately NOT flex: these banners are prose, and flex breaks a
+     sentence into columns wherever a <b> appears. */
+  display: block;
 }
 .banner.warn {
   background: color-mix(in srgb, var(--warning) 14%, transparent);
@@ -794,3 +795,32 @@ button.primary {
 @media (max-width: 900px) {
   .market-switch button span.label { display: none; }
 }
+
+
+/* Inline "edit" affordance on a stat tile. */
+.tiny-edit {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  margin-left: 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+.tiny-edit:hover {
+  color: var(--market-accent, var(--series-1));
+  border-color: var(--market-accent, var(--series-1));
+  background: var(--market-accent-soft, transparent);
+}
+
+
+/* Informational banner — data provenance when everything is healthy. */
+.banner.ok-note {
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 45%, transparent);
+  color: var(--text-secondary);
+}
+.banner.ok-note b { color: var(--good); }

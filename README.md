@@ -4,9 +4,11 @@ A hedge-fund-style multi-agent pipeline for Indian equity and F&O intraday
 analysis, with **deterministic, non-negotiable risk controls** and a real-time
 dashboard.
 
-It runs on your PC. It runs with **zero API keys** (simulated market + rule-based
-agents), and upgrades to live data, Claude-powered reasoning and real broker
-orders one environment variable at a time.
+It runs on your PC. It uses **real market data out of the box** — NSE India's
+official option chain and Yahoo Finance, neither of which needs an API key —
+with **simulated execution**, so nothing reaches a broker until you explicitly
+turn that on. Claude-powered reasoning and live orders are each one environment
+variable away.
 
 > **This is analysis and decision-support software, not investment advice.**
 > It ships in paper / alert-only mode. Placing real orders requires three
@@ -106,14 +108,15 @@ every gate) or **WATCH** plus the exact reason it didn't.
 Then **Replay last 5 sessions** shows what the rules would have caught recently,
 graded in R-multiples, with its own limitations printed alongside.
 
-**Read [docs/HOW-TO-READ-IT.md](docs/HOW-TO-READ-IT.md) before acting on any of
-it.** It explains what the tiers mean (risk of a messy exit, not size of the
+**New here? [docs/BUTTONS.md](docs/BUTTONS.md) explains every control and when
+to click it.** Then read
+**[docs/HOW-TO-READ-IT.md](docs/HOW-TO-READ-IT.md) before acting on any of it.** It explains what the tiers mean (risk of a messy exit, not size of the
 prize), why a WATCH is not a weak buy, and what the replay honestly cannot tell
 you.
 
-> **Check the data-source badge.** With `BROKER=paper` it reads *SIMULATED DATA*
-> — those prices come from a random-walk generator, not the market. Connect a
-> broker before treating any number as real.
+> **Check the banner at the top of the dashboard.** Green means real market
+> data; red means the feeds could not connect and the prices are synthetic.
+> See [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md).
 
 ---
 
@@ -255,6 +258,7 @@ Some worked examples:
 
 | You want | Change |
 |---|---|
+| Change the account size | Capital tile → `edit` on the dashboard, or `risk.total_capital` |
 | Risk 0.5% instead of 1% | `risk.risk_per_trade_pct: 0.5` |
 | Demand 1:3 reward | `risk.min_risk_reward: 3.0` |
 | Require 3 confirmations | `consensus.min_confirmations: 3` |
@@ -421,11 +425,13 @@ tests/         60 tests, risk logic covered hardest
 
 | Symptom | Cause |
 |---|---|
+| Red "NOT real market prices" banner | no data feed connected. Check internet/firewall and restart. Real data needs no key. |
+| NSE unreachable, Yahoo works | NSE blocks many non-Indian IPs. You keep real prices but lose the per-strike OI-change read. |
 | "No news / macro unavailable" | outbound HTTPS blocked. Agents correctly abstain. |
 | Everything says NEUTRAL | working as intended — 2 confirmations + score ≥ 0.35 required. Lower `consensus.min_composite_score` to see more. |
 | Low-risk tier is empty | also normal — it means nothing currently has aligned timeframes AND a clean stop AND cheap premium. Retune `opportunities.low_risk_max_points` if your tolerance differs. |
 | Replay shows negative expectancy | on `BROKER=paper` that is expected: a random walk has no edge. On real data it means the configuration needs work — don't trade it. |
-| "Position sizes to 0 lots" | capital too small for that stop distance. The calculator explains it. |
+| "Position sizes to 0 lots/shares" | capital too small for that stop distance. The message names the capital you'd need. |
 | Broker won't connect | check `.env`; Kite/Upstox tokens expire **daily**. |
 | Market switch refused | you have open positions. The new broker can't manage them — close first. |
 | US prices look thin | Alpaca's free IEX feed is a partial tape. Volume is understated; set `ALPACA_FEED=sip` if you pay for it. |

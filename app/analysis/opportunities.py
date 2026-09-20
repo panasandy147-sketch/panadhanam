@@ -390,12 +390,17 @@ class OpportunityScanner:
     def _provenance(self) -> dict[str, Any]:
         """Tell the user, unambiguously, where these numbers came from."""
         broker = self.engine.broker.name
-        simulated = broker == "paper" and getattr(
-            self.engine.broker, "data_source", None) is None
+        feed = getattr(self.engine.broker, "data_source", None)
+        simulated = broker == "paper" and feed is None
+        sources = getattr(feed, "sources", None) if feed else None
         return {
             "broker": broker,
             "simulated": simulated,
+            "sources": sources or ([broker] if not simulated else []),
             "label": ("SIMULATED DATA — these are not real market prices"
-                      if simulated else f"Live data via {broker}"),
+                      if simulated
+                      else f"Real market data via {', '.join(sources or [broker])}"),
+            "execution": ("simulated fills (paper)" if broker == "paper"
+                          else f"live broker: {broker}"),
             "llm": "claude" if self.cfg.llm_enabled else "rule-based",
         }

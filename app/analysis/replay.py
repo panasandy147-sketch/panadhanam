@@ -217,12 +217,15 @@ class WeeklyReplay:
 
     def _provenance(self) -> dict[str, Any]:
         broker = self.engine.broker.name
-        simulated = broker == "paper" and getattr(
-            self.engine.broker, "data_source", None) is None
+        feed = getattr(self.engine.broker, "data_source", None)
+        simulated = broker == "paper" and feed is None
+        sources = getattr(feed, "sources", None) if feed else None
         return {
             "broker": broker,
             "simulated": simulated,
+            "sources": sources or ([broker] if not simulated else []),
             "label": ("SIMULATED DATA — this is a mechanical demo on a synthetic "
                       "market, NOT real historical performance"
-                      if simulated else f"Real historical data via {broker}"),
+                      if simulated
+                      else f"Real historical data via {', '.join(sources or [broker])}"),
         }

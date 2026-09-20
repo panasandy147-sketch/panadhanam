@@ -22,7 +22,16 @@ system:
 # talked out of these numbers by any prompt.
 # --------------------------------------------------------------------------
 risk:
-  total_capital: 100000          # INR
+  # Account size every position is sized against. Change it here, or live from
+  # the dashboard (Capital tile → "edit"), or per-machine via TOTAL_CAPITAL
+  # in .env, which overrides this file.
+  #
+  # NOTE at very small values: risk_per_trade_pct of a tiny account rounds to
+  # zero shares for most instruments, so the board will show WATCH with
+  # "cannot fit even one share". That is the sizing maths being honest, not a
+  # fault. Small capital does not make live trading safer — staying in paper
+  # mode does.
+  total_capital: 100
   risk_per_trade_pct: 1.0        # 1% of capital risked per trade
   max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
   max_daily_loss_pct: 3.0        # kill-switch: halt all new trades for the day
@@ -177,6 +186,21 @@ learning:
   lookback_days: 60
   # Feed the last N graded signals back into the CMIO prompt as context.
   recall_examples: 8
+
+# --------------------------------------------------------------------------
+# MARKET DATA
+# Where prices come from. Real data needs no API key and no signup.
+# --------------------------------------------------------------------------
+data:
+  # true  = real prices from Yahoo Finance and (for India) NSE's own API
+  # false = the synthetic demo market, for offline tinkering only
+  use_real_data: true
+  # NSE's official option chain gives genuine OI / IV per strike, which is what
+  # makes PCR, Max Pain and buildup readings meaningful. It blocks some
+  # networks and most non-Indian IPs; the stack falls back to Yahoo.
+  use_nse: true
+  # Seconds to cache a quote before re-fetching. Be considerate to free feeds.
+  quote_cache_seconds: 20
 
 # --------------------------------------------------------------------------
 # OPPORTUNITY BOARD — how setups are bucketed into low/medium/high risk.

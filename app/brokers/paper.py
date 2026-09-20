@@ -212,10 +212,15 @@ class PaperBroker(BrokerAdapter):
         return self._market(symbol).candles(timeframe, count)
 
     async def get_expiries(self, underlying: str) -> list[str]:
-        """Weekly expiries on this market's expiry weekday.
+        """Real expiries when a feed is attached, otherwise synthetic weeklies.
 
         NSE weeklies land on Thursday; US weeklies on Friday.
         """
+        if self.data_source:
+            real = await self.data_source.get_expiries(underlying)
+            if real:
+                return real
+
         weekday = get_config().market.weekly_expiry_weekday
         out: list[str] = []
         d = datetime.now().date()

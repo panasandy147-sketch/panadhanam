@@ -169,6 +169,13 @@ class RiskManager:
         # ---- desk-level gates ----
         reasons.extend(self.desk_checks())
 
+        # ---- can this instrument actually be bought? ----
+        if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):
+            reasons.append(
+                f"{ctx.symbol} is an index — there is no cash instrument to buy. "
+                f"Trade it through an option or future; no option leg was "
+                f"available this cycle (the derivatives analyst had no chain).")
+
         # ---- stop-loss sanity ----
         stop_points = abs(entry - stop_loss)
         if stop_points <= 0:
@@ -224,16 +231,28 @@ class RiskManager:
                 quantity = lots * lot_size
                 if lots < 1:
                     unit_word = "lot" if self.cfg.market.lot_based else "contract"
+                    cur = self.cfg.market.currency_symbol
+                    needed = stop_points * lot_size * 100.0 / max(risk_pct, 0.01)
                     reasons.append(
-                        f"Position sizes to 0 {unit_word}s: risk budget "
-                        f"{risk_amount:,.0f} / {stop_points:.2f} pts = "
-                        f"{raw_qty:.1f} units, but one {unit_word} is {lot_size}. "
-                        f"Capital is too small for this stop distance.")
+                        f"Position sizes to 0 {unit_word}s: {cur}{risk_amount:,.0f} "
+                        f"of risk / {cur}{stop_points:,.2f} stop = {raw_qty:.1f} units, "
+                        f"but one {unit_word} is {lot_size}. One {unit_word} needs "
+                        f"about {cur}{needed:,.0f} of capital at {risk_pct:.1f}% risk — "
+                        f"you have {cur}{self.state.capital:,.0f}.")
             else:
                 quantity = int(math.floor(raw_qty))
                 lots = quantity
                 if quantity < 1:
-                    reasons.append("Position sizes to 0 shares — stop is too wide for the risk budget")
+                    # Say exactly what would have to change. "Too wide" alone
+                    # sends people widening their risk instead of noticing the
+                    # account is simply too small for this instrument.
+                    cur = self.cfg.market.currency_symbol
+                    needed = stop_points * 100.0 / max(risk_pct, 0.01)
+                    reasons.append(
+                        f"Position sizes to 0 shares: {cur}{risk_amount:,.2f} of risk / "
+                        f"{cur}{stop_points:,.2f} stop = {raw_qty:.2f} shares. "
+                        f"One share needs about {cur}{needed:,.0f} of capital at "
+                        f"{risk_pct:.1f}% risk — you have {cur}{self.state.capital:,.0f}.")
 
 
         # ---- capital caps TRIM the size, they don't veto the idea ----------
@@ -354,6 +373,20 @@ class RiskManager:
         return instrument, spot, None
 
     @staticmethod
+    def _index_is_untradeable(meta: dict[str, Any], instrument: Instrument) -> bool:
+        """An index has no cash instrument.
+
+        You cannot buy NIFTY or FINNIFTY at spot — only its futures or options.
+        US index exposure goes through ETFs (SPY, QQQ), which ARE ordinary
+        shares, so this only applies to a true index with no option leg chosen.
+        """
+        if not meta.get("is_index"):
+            return False
+        if meta.get("cash_tradeable"):
+            return False          # an ETF: SPY/QQQ are ordinary shares
+        return instrument.instrument_type == InstrumentType.EQUITY
+
+    @staticmethod
     def _option_tradingsymbol(underlying: str, expiry: str, strike: float,
                               opt: str, market: str = "IN") -> str:
         """Each market names its option contracts differently.
@@ -462,6 +495,38 @@ class RiskManager:
 
     def set_unrealised(self, value: float) -> None:
         self.state.unrealised_pnl = value
+
+    def set_capital(self, capital: float) -> dict[str, Any]:
+        """Change the account size the desk sizes against.
+
+        Everything derived from capital — the per-trade risk budget, the daily
+        loss limit, the exposure ceiling — is recomputed here. Refused while
+        positions are open: those were sized against the OLD capital, so
+        changing it underneath them would misstate how much is actually at risk.
+        """
+        if capital <= 0:
+            return {"ok": False, "reason": "Capital must be greater than zero"}
+        if self.state.open_positions > 0:
+            return {
+                "ok": False,
+                "reason": (f"{self.state.open_positions} position(s) are open and "
+                           f"were sized against the current capital. Close them "
+                           f"before changing the account size."),
+            }
+
+        previous = self.state.capital
+        self.state.capital = float(capital)
+        self.state.daily_loss_limit = (
+            float(capital) * float(self.cfg.get("risk.max_daily_loss_pct", 3.0)) / 100.0)
+        # Keep the live config in step so a restart-free reload agrees.
+        self.cfg.settings.setdefault("risk", {})["total_capital"] = float(capital)
+
+        log.info("capital changed: %.2f → %.2f (risk/trade %.2f, daily limit %.2f)",
+                 previous, capital,
+                 capital * float(self.cfg.get("risk.risk_per_trade_pct", 1.0)) / 100,
+                 self.state.daily_loss_limit)
+        return {"ok": True, "previous": previous, "capital": float(capital),
+                "snapshot": self.snapshot()}
 
     def snapshot(self) -> dict[str, Any]:
         self.roll_day_if_needed()

@@ -13,6 +13,10 @@ def rm(cfg):
     # These tests run at arbitrary wall-clock times; the entry cutoff has its
     # own test, so push it out of the way here.
     m.cfg.settings["system"]["no_new_entry_after"] = "23:59"
+    # Pin the account size rather than inheriting whatever settings.yaml
+    # currently says — the sizing assertions below are about the maths, not
+    # about the shipped default.
+    m.set_capital(100_000)
     return m
 
 
@@ -186,3 +190,64 @@ def test_leverage_widens_position_but_never_risk(rm, cfg):
     assert levered.capital_at_risk_pct <= 1.01             # same risk budget
     assert unlevered.capital_at_risk_pct <= 1.01
     cfg.settings["risk"]["intraday_leverage"] = 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Changing the account size at runtime
+# --------------------------------------------------------------------------- #
+def test_set_capital_recomputes_everything_derived_from_it(rm):
+    rm.set_capital(100_000)
+    before = rm.snapshot()
+
+    result = rm.set_capital(50_000)
+    after = rm.snapshot()
+
+    assert result["ok"] is True
+    assert after["capital"] == 50_000
+    # The per-trade budget, the daily halt and the exposure ceiling all follow.
+    assert after["risk_per_trade"] == before["risk_per_trade"] / 2
+    assert after["daily_loss_limit"] == before["daily_loss_limit"] / 2
+    assert after["max_exposure"] == before["max_exposure"] / 2
+
+
+def test_set_capital_rejects_nonsense(rm):
+    assert rm.set_capital(0)["ok"] is False
+    assert rm.set_capital(-500)["ok"] is False
+
+
+def test_set_capital_refused_while_positions_are_open(rm):
+    """Open positions were sized against the old capital; changing it underneath
+    them would misreport how much is actually at risk."""
+    rm.set_capital(100_000)
+    sig = rm.evaluate(_ctx(), Bias.BULLISH, [], 0.6, ["a", "b"])
+    rm.register_open(sig)
+
+    result = rm.set_capital(10_000)
+    assert result["ok"] is False
+    assert "open" in result["reason"].lower()
+    assert rm.state.capital == 100_000, "capital must not have moved"
+
+
+def test_tiny_capital_rejects_and_says_what_is_needed(rm):
+    """A 100-unit account cannot take a 2950-priced share. The rejection must
+    name the capital required, not just say the stop is 'too wide'."""
+    rm.set_capital(100)
+    sig = rm.evaluate(_ctx(price=2950.0, atr=30.0), Bias.BULLISH, [], 0.6, ["a", "b"])
+
+    assert sig.status == SignalStatus.REJECTED
+    assert sig.quantity == 0
+    reason = " ".join(sig.rejection_reasons)
+    assert "0 shares" in reason
+    assert "capital" in reason.lower()
+    assert "you have" in reason.lower()
+
+
+def test_risk_percentage_holds_at_every_account_size(rm):
+    """The invariant that makes the whole system safe: whatever the capital,
+    a single trade never risks more than the configured percentage."""
+    for capital in (5_000, 50_000, 500_000, 5_000_000):
+        rm.set_capital(capital)
+        rm.state.exposure = 0.0
+        sig = rm.evaluate(_ctx(price=1000.0, atr=8.0), Bias.BULLISH, [], 0.6, ["a", "b"])
+        if sig.quantity > 0:
+            assert sig.capital_at_risk_pct <= 1.01, f"breached at capital {capital}"

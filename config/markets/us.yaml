@@ -89,10 +89,12 @@ news:
 
 universe:
   indices:
+    # These are ETFs, not indices: they trade as ordinary shares, so
+    # cash_tradeable is true. A true index (NIFTY) has no cash instrument.
     # Tracked via the liquid ETFs — that is what you can actually trade options on.
-    - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  note: "S&P 500 ETF" }
-    - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  note: "Nasdaq 100 ETF" }
-    - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  note: "Russell 2000 ETF" }
+    - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  cash_tradeable: true, note: "S&P 500 ETF" }
+    - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  cash_tradeable: true, note: "Nasdaq 100 ETF" }
+    - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  cash_tradeable: true, note: "Russell 2000 ETF" }
   stocks:
     - { symbol: "AAPL",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 232 }
     - { symbol: "MSFT",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 428 }

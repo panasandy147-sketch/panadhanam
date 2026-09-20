@@ -43,7 +43,33 @@ async def build_broker(cfg: Config | None = None, force: str | None = None) -> B
         broker = paper_cls(config={"total_capital": cfg.get("risk.total_capital", 100_000)})
         await broker.connect()
 
+    # The paper broker simulates FILLS. It should not also invent PRICES when a
+    # real feed is available — attach one so you get genuine last-traded data
+    # with risk-free execution.
+    if broker.name == "paper":
+        await _attach_real_data(broker, cfg)
+
     return broker
+
+
+async def _attach_real_data(broker: BrokerAdapter, cfg: Config) -> None:
+    from app.data.feeds.stack import build_feed_stack
+    try:
+        stack = await build_feed_stack()
+    except Exception as exc:
+        log.warning("could not build the market-data feed: %s", exc)
+        stack = None
+
+    if stack is not None:
+        broker.data_source = stack
+        log.info("paper broker is using REAL market data (%s) with simulated fills",
+                 ", ".join(stack.sources))
+    else:
+        log.warning("=" * 68)
+        log.warning("No real market-data feed is available — falling back to the")
+        log.warning("SYNTHETIC demo market. Prices on screen are NOT real.")
+        log.warning("Check your internet connection, then restart.")
+        log.warning("=" * 68)
 
 
 async def get_broker(cfg: Config | None = None) -> BrokerAdapter:

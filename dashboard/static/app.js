@@ -235,6 +235,22 @@ function applyStatus(s) {
 
 function renderBanners(s) {
   const out = [];
+
+  // The most consequential thing on the page: are these real prices?
+  const ds = s.data_source;
+  if (ds && ds.simulated) {
+    out.push(`<div class="banner crit">
+      <b>These are NOT real market prices.</b> No data feed could connect, so the
+      system is generating a synthetic market from a random-walk model. Every
+      price, signal and replay result on this screen refers to nothing real —
+      <b>do not place trades based on it.</b> Check your internet connection and
+      restart. Real data needs no API key.</div>`);
+  } else if (ds && ds.sources?.length) {
+    out.push(`<div class="banner ok-note">
+      <b>Real market data</b> via ${esc(ds.sources.join(", "))} ·
+      ${esc(ds.execution || "")}. When the market is closed these are
+      last-traded prices.</div>`);
+  }
   if (s.risk?.halted) {
     out.push(`<div class="banner crit"><b>Desk halted.</b> ${esc(s.risk.halt_reason)}
       No new positions will be opened. Clear it deliberately from the API
@@ -244,7 +260,7 @@ function renderBanners(s) {
     out.push(`<div class="banner crit"><b>Live order placement is ON.</b>
       Real orders will be sent to ${esc(s.desk?.broker)}. Real money is at risk.</div>`);
   }
-  if (s.desk?.reasoning !== "claude") {
+  if (s.desk?.reasoning !== "claude" && !(s.data_source?.simulated)) {
     out.push(`<div class="banner warn">Agents are running on their deterministic rule
       engines. Add <code>ANTHROPIC_API_KEY</code> to <code>.env</code> to enable
       Claude reasoning and the learning-from-context features.</div>`);
@@ -261,8 +277,9 @@ function renderRisk(r) {
 
   $("risk-stats").innerHTML = `
     <div class="stat">
-      <div class="label">Capital</div>
-      <div class="value">${money(Math.round(r.capital))}</div>
+      <div class="label">Capital <button class="tiny-edit" id="btn-edit-capital"
+            title="Change the account size the desk sizes against">edit</button></div>
+      <div class="value" id="capital-value">${money(Math.round(r.capital))}</div>
       <div class="sub">${fmt(r.risk_per_trade_pct, 1)}% risked per trade</div>
     </div>
     <div class="stat">
@@ -294,7 +311,39 @@ function renderRisk(r) {
       <div class="value ${r.halted ? "neg" : "pos"}">${r.halted ? "HALTED" : "ACTIVE"}</div>
       <div class="sub">exposure ${money(Math.round(r.exposure))}</div>
     </div>`;
-  $("risk-updated").textContent = new Date().toLocaleTimeString("en-IN");
+  $("risk-updated").textContent = new Date().toLocaleTimeString(locale());
+  const editBtn = $("btn-edit-capital");
+  if (editBtn) editBtn.onclick = promptCapital;
+}
+
+async function promptCapital() {
+  const current = state.status?.risk?.capital ?? 100000;
+  const raw = window.prompt(
+    `Account size to size positions against (${cur()}).\n\n` +
+    `This is the number every position size is derived from. It does not move ` +
+    `any money — in paper mode nothing real is traded either way.`,
+    String(Math.round(current)));
+  if (raw === null) return;
+
+  const value = Number(String(raw).replace(/[^0-9.]/g, ""));
+  if (!value || value <= 0) {
+    alert("Enter a number greater than zero.");
+    return;
+  }
+
+  const res = await fetch("/api/risk/capital", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ capital: value }),
+  });
+  const d = await res.json();
+  if (!res.ok) {
+    alert(d.detail || "Could not change capital.");
+    return;
+  }
+  renderRisk(d.snapshot);
+  $("c-capital").value = value;      // keep the sizing calculator in step
+  runCalc();
+  loadOpportunities(false);
 }
 
 /* ====================================================================== */
