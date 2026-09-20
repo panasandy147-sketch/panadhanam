@@ -4,6 +4,7 @@ The property under test throughout: PROCESS is judged, not profit.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -226,3 +227,114 @@ def test_analytics_handle_an_empty_journal():
     stats = compute_analytics(limit=0)
     assert stats["total"] == 0
     assert stats["mistake_cost_index"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Live trades are journalled automatically
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_a_closed_live_trade_is_graded_automatically(cfg, tmp_path):
+    """A P&L number alone teaches nothing. Every completed trade must produce
+    a card without the trader having to remember to log it."""
+    from app.agents.risk import RiskManager
+    from app.brokers.paper import PaperBroker
+    from app.journal import store
+    from app.learning.outcomes import OutcomeTracker
+    from app.storage import db
+
+    db.init_db()
+    store.init_journal()
+    store.JOURNAL_DIR = tmp_path
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    risk = RiskManager(cfg)
+    risk.set_capital(100_000)
+    tracker = OutcomeTracker(broker, cfg, risk_manager=risk)
+
+    row = {
+        "id": "SIG-AUTO-1",
+        "ts": "2026-09-18T10:00:00",
+        "symbol": "RELIANCE",
+        "tradingsymbol": "RELIANCE",
+        "side": "BUY",
+        "entry": 1000.0,
+        "stop_loss": 980.0,
+        "target": 1040.0,
+        "quantity": 50,
+        "regime": "trending_up",
+        "confirmations": '["candlestick breakout"]',
+        "rationale": "breakout with volume",
+    }
+    await tracker._journal(row, exit_price=1040.0, outcome="CLOSED_TARGET")
+
+    entries = store.entries(limit=10)
+    assert any(e["id"] == "LIVE-SIG-AUTO-1" for e in entries)
+
+    logged = next(e for e in entries if e["id"] == "LIVE-SIG-AUTO-1")
+    assert logged["r_multiple"] == pytest.approx(2.0)
+    assert logged["verdict"] == "GOOD_WIN"
+    assert logged["execution_score"] is not None
+    # The setup was inferred from what the desk recorded, not left blank.
+    assert logged["setup"] == "Breakout"
+
+
+@pytest.mark.asyncio
+async def test_a_square_off_is_not_punished_as_an_early_exit(cfg, tmp_path):
+    """The desk squaring off at the bell is correct behaviour, not a mistake."""
+    from app.agents.risk import RiskManager
+    from app.brokers.paper import PaperBroker
+    from app.journal import store
+    from app.learning.outcomes import OutcomeTracker
+    from app.storage import db
+
+    db.init_db()
+    store.init_journal()
+    store.JOURNAL_DIR = tmp_path
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    risk = RiskManager(cfg)
+    risk.set_capital(100_000)
+    tracker = OutcomeTracker(broker, cfg, risk_manager=risk)
+
+    row = {
+        "id": "SIG-AUTO-2", "ts": "2026-09-18T10:00:00", "symbol": "TCS",
+        "tradingsymbol": "TCS", "side": "BUY", "entry": 1000.0,
+        "stop_loss": 980.0, "target": 1040.0, "quantity": 50,
+        "regime": "rangebound", "confirmations": "[]", "rationale": "",
+    }
+    # Small win, closed by the clock rather than at target.
+    await tracker._journal(row, exit_price=1005.0, outcome="CLOSED_TIME")
+
+    logged = next(e for e in store.entries(limit=10) if e["id"] == "LIVE-SIG-AUTO-2")
+    mistakes = json.loads(logged["mistakes"] or "[]")
+    assert "Exited Before Target" not in mistakes
+
+
+@pytest.mark.asyncio
+async def test_journalling_failure_never_breaks_the_polling_loop(cfg, monkeypatch):
+    """Marking and closing positions must survive a journal problem."""
+    from app.agents.risk import RiskManager
+    from app.brokers.paper import PaperBroker
+    from app.learning.outcomes import OutcomeTracker
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    tracker = OutcomeTracker(broker, cfg, risk_manager=RiskManager(cfg))
+
+    import app.journal.store as store_mod
+    monkeypatch.setattr(store_mod, "init_journal",
+                        lambda: (_ for _ in ()).throw(RuntimeError("disk full")))
+
+    # Must not raise.
+    await tracker._journal({"id": "X", "symbol": "Y", "side": "BUY",
+                            "entry": 1.0, "stop_loss": 0.9, "target": 1.2,
+                            "quantity": 1, "ts": "2026-09-18T10:00:00"},
+                           exit_price=1.2, outcome="CLOSED_TARGET")
+
+
+def test_auto_logging_can_be_switched_off(cfg):
+    cfg.settings.setdefault("journal", {})["auto_log_live_trades"] = False
+    assert cfg.get("journal.auto_log_live_trades") is False
+    cfg.settings["journal"]["auto_log_live_trades"] = True

@@ -1,5 +1,14 @@
 # Practice Day
 
+> **This is a REPLAY of a past session, not live trading.**
+>
+> It does **not** run during market hours waiting for signals. It takes a day
+> that already happened and fast-forwards through it so you can get reps.
+>
+> For live paper trading during market hours, see
+> [Live paper trading](#live-paper-trading-the-other-thing) at the bottom —
+> that is the normal engine, and it is already running whenever the app is open.
+
 Replays a **real** trading session bar by bar, running the full agent desk at
 each step, and streams it to the dashboard as if it were happening live.
 
@@ -114,3 +123,57 @@ Commit `journal/` as you go — that history is the record of what you learned.
 - Intraday history is limited by your data feed. Yahoo gives roughly 60 days of
   5-minute bars, so pick a date inside that window.
 - Practice trades **never reach a broker**, whatever your execution settings.
+
+
+---
+
+## Live paper trading (the other thing)
+
+If what you want is *"be trading when the US market opens tomorrow"*, that is
+not this button — it is the **normal engine**, which runs automatically whenever
+the app is open.
+
+### How to set it up
+
+```bash
+# .env
+ACTIVE_MARKET=US
+BROKER=alpaca
+ALPACA_API_KEY=PK...
+ALPACA_API_SECRET=...
+ALPACA_PAPER=true
+```
+
+```yaml
+# config/settings.yaml
+execution:
+  auto_place_orders: true     # the only switch a paper account needs
+```
+
+Then just leave the app running. At 09:30 ET it starts cycling every
+60 seconds: the analysts run, the CMIO synthesises, the risk desk sizes, and an
+approved signal becomes a simulated order in your Alpaca paper account.
+
+### What is tracked, automatically
+
+| Where | What |
+|---|---|
+| **Risk & Capital** tiles | Day P&L, realised vs open, wins/losses, room before halt |
+| **Signals** panel | Every signal, with rejections and their reasons |
+| **Open Positions** | Live positions with entry, stop and target |
+| **Trade Journal** | **Every closed trade is graded automatically** and written to `journal/cards/` |
+
+That last one matters: when a live trade hits its stop or target, the system
+writes a Mistake Card for it without you having to remember. Your Mistake Cost
+Index and R-multiple history build up on their own.
+
+Turn it off with `journal.auto_log_live_trades: false` if you'd rather log by
+hand.
+
+### The two are complementary
+
+- **Practice Day** — many reps, fast, on days that already happened.
+- **Live paper** — one day at a time, in real time, with real order flow.
+
+Use Practice Day to learn the system and tune thresholds. Use live paper to see
+whether it holds up when you can't skip ahead.

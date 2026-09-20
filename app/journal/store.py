@@ -116,7 +116,13 @@ def save_card(card: MistakeCard) -> Path:
     (JOURNAL_DIR / "cards").mkdir(exist_ok=True)
     path = JOURNAL_DIR / "cards" / f"{card.ts:%Y-%m-%d}-{card.trade_id}.md"
     path.write_text(markdown, encoding="utf-8")
-    log.info("mistake card written: %s", path.relative_to(ROOT))
+    try:
+        shown = path.relative_to(ROOT)
+    except ValueError:
+        # The journal can be configured outside the repo; a cosmetic path
+        # calculation must never abort a save that already succeeded.
+        shown = path
+    log.info("mistake card written: %s", shown)
     return path
 
 

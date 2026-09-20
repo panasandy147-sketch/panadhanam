@@ -100,6 +100,11 @@ a third market (one YAML file).
 
 ## Practice Day
 
+> **Practice Day replays a PAST session — it is not live trading.** For live
+> paper trading during market hours, just leave the app running with a broker
+> configured; that is the normal engine. See
+> [docs/PRACTICE.md](docs/PRACTICE.md#live-paper-trading-the-other-thing).
+
 **▶ Start practice day** replays a real session bar by bar, running the full
 agent desk at each step with **no lookahead** — at bar N the agents see bars
 0..N and nothing else. A day takes ~6 minutes at 60x, so you can practise at

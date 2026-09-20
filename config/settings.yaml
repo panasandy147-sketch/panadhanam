@@ -254,6 +254,14 @@ execution:
   confirm_before_live: true
 
 # --------------------------------------------------------------------------
+# JOURNAL
+# --------------------------------------------------------------------------
+journal:
+  # Grade every live trade the moment it closes, and write a Mistake Card to
+  # journal/cards/. Turn this off only if you prefer logging by hand.
+  auto_log_live_trades: true
+
+# --------------------------------------------------------------------------
 # ALERTING
 # --------------------------------------------------------------------------
 alerts:

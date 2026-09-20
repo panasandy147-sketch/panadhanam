@@ -87,10 +87,15 @@ class OutcomeTracker:
                     except Exception as exc:
                         log.debug("risk close bookkeeping failed: %s", exc)
 
-                log.info("CLOSED %s %s @ %.2f → %s (%.2fR, ₹%.0f)",
+                cur = self.cfg.market.currency_symbol
+                log.info("CLOSED %s %s @ %.2f → %s (%.2fR, %s%.0f)",
                          row["symbol"], row["side"], exit_price, status.value,
-                         r_multiple, pnl)
+                         r_multiple, cur, pnl)
                 await bus.publish(Topic.POSITION_UPDATE, closed[-1])
+
+                # Every completed trade gets graded, automatically. A P&L
+                # number alone teaches nothing; the card is the learning.
+                await self._journal(row, exit_price, status.value)
             else:
                 direction = 1 if is_long else -1
                 unrealised += (price - entry) * qty * direction
@@ -100,6 +105,85 @@ class OutcomeTracker:
             await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
 
         return closed
+
+    async def _journal(self, row: dict[str, Any], exit_price: float,
+                       outcome: str) -> None:
+        """Write a closed trade into the journal and grade it.
+
+        Never allowed to break the polling loop: a journalling failure must not
+        stop positions being marked or closed.
+        """
+        if not bool(self.cfg.get("journal.auto_log_live_trades", True)):
+            return
+        try:
+            from datetime import datetime as _dt
+
+            from app.journal import store
+            from app.journal.models import JournalEntry
+            from app.journal.postmortem import PostMortemEngine
+
+            store.init_journal()
+
+            def _ts(value: Any) -> _dt | None:
+                if not value:
+                    return None
+                try:
+                    parsed = _dt.fromisoformat(str(value))
+                    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+                except ValueError:
+                    return None
+
+            entry = JournalEntry(
+                id=f"LIVE-{row['id']}",
+                market=self.cfg.active_market,
+                symbol=row["symbol"],
+                instrument=row.get("tradingsymbol") or row["symbol"],
+                setup=self._infer_setup(row),
+                side=row["side"],
+                planned_entry=row["entry"],
+                planned_stop=row["stop_loss"],
+                planned_target=row["target"],
+                planned_quantity=row["quantity"] or 0,
+                actual_entry=row["entry"],
+                actual_exit=round(exit_price, 2),
+                actual_quantity=row["quantity"] or 0,
+                entry_ts=_ts(row.get("ts")),
+                exit_ts=_dt.now(),
+                notes=(f"Auto-logged from a live signal. Exit: {outcome}. "
+                       f"{(row.get('rationale') or '')[:200]}"),
+                context={
+                    "capital": self.risk.state.capital if self.risk else 0.0,
+                    "regime": row.get("regime"),
+                    "auto_logged": True,
+                    # The desk always honours its own stop, so a time-based or
+                    # square-off exit is correct behaviour, not an early exit.
+                    "time_stop_hit": outcome in {"CLOSED_TIME", "SQUARE_OFF"},
+                },
+                signal_id=row["id"],
+            )
+
+            card = await PostMortemEngine(self.cfg).build(entry)
+            entry.execution_score = card.execution_score
+            store.save_entry(entry)
+            store.save_card(card)
+            store.export_summary()
+            log.info("journalled %s → %s (%d/10)", row["symbol"],
+                     card.verdict.value, card.execution_score)
+        except Exception as exc:
+            log.warning("could not journal %s: %s", row.get("id"), exc)
+
+    @staticmethod
+    def _infer_setup(row: dict[str, Any]) -> Any:
+        """Best-effort setup tag from what the desk recorded at entry."""
+        from app.journal.models import SetupType
+        blob = f"{row.get('confirmations') or ''} {row.get('rationale') or ''}".lower()
+        if "breakout" in blob or "flag" in blob:
+            return SetupType.BREAKOUT
+        if "vwap" in blob or "reversion" in blob or "oversold" in blob:
+            return SetupType.MEAN_REVERSION
+        if "news" in blob or "sentiment" in blob:
+            return SetupType.NEWS_MOMENTUM
+        return SetupType.OTHER
 
     async def _current_price(self, row: dict[str, Any]) -> float | None:
         """Mark to market.
