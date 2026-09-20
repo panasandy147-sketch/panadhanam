@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+data/runtime/*.db
+data/runtime/*.db-*
+data/runtime/*.jsonl
+data/runtime/tokens/
+logs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+node_modules/
+*.log
+
+# caches
+.pytest_cache/
+.ruff_cache/

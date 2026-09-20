@@ -1,0 +1,27 @@
+[project]
+name = "panadhanam"
+version = "1.0.0"
+description = "Multi-agent stock & F&O trading intelligence for Indian markets"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "dashboard", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+  "E501",   # line length is handled by the formatter
+  "B008",   # FastAPI's Depends() idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+"scripts/*" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]

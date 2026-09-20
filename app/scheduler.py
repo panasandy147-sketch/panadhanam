@@ -1,0 +1,293 @@
+"""The engine loop: market-hours scheduling, cycle execution, learning.
+
+One cycle =
+    refresh shared data (news + macro, fetched once for all symbols)
+      → for each symbol: build context → run the agent graph
+      → persist everything
+      → poll open positions → grade closed ones → re-weight agents
+"""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime
+from datetime import time as dtime
+from typing import Any
+
+from app.agents.graph import TradingDesk
+from app.agents.risk import RiskManager
+from app.brokers.base import BrokerAdapter
+from app.core.bus import Topic, bus
+from app.core.config import Config, get_config
+from app.core.logging import get_logger
+from app.core.models import Fundamentals
+from app.data.macro import MacroCollector
+from app.data.market import MarketDataService, fetch_fundamentals
+from app.data.news import NewsCollector
+from app.learning.feedback import FeedbackLoop
+from app.learning.outcomes import OutcomeTracker
+from app.storage import db
+
+log = get_logger("scheduler")
+
+
+def _parse_time(value: str, default: dtime) -> dtime:
+    try:
+        h, m = (int(x) for x in str(value).split(":"))
+        return dtime(h, m)
+    except Exception:
+        return default
+
+
+class TradingEngine:
+    def __init__(self, broker: BrokerAdapter, cfg: Config | None = None) -> None:
+        self.cfg = cfg or get_config()
+        self.broker = broker
+        self.risk = RiskManager(self.cfg)
+        self.desk = TradingDesk(broker, self.cfg, risk_manager=self.risk)
+        self.data = MarketDataService(broker, self.cfg)
+        self.news = NewsCollector(self.cfg)
+        self.macro = MacroCollector(self.cfg)
+        self.feedback = FeedbackLoop(self.cfg)
+        self.outcomes = OutcomeTracker(broker, self.cfg, risk_manager=self.risk)
+
+        self.running = False
+        self.paused = False
+        self._task: asyncio.Task | None = None
+        self._fundamentals: dict[str, Fundamentals] = {}
+        self._premarket_done_on: str | None = None
+        self.last_cycle: dict[str, Any] = {}
+        self.cycle_count = 0
+
+    # ------------------------------------------------------------------ #
+    # Market hours
+    # ------------------------------------------------------------------ #
+    def market_open_now(self) -> bool:
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        open_t = _parse_time(self.cfg.get("system.market_open", "09:15"), dtime(9, 15))
+        close_t = _parse_time(self.cfg.get("system.market_close", "15:30"), dtime(15, 30))
+        return open_t <= now.time() <= close_t
+
+    def session_phase(self) -> str:
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return "weekend"
+        t = now.time()
+        pre = _parse_time(self.cfg.get("system.premarket_scan_time", "08:45"), dtime(8, 45))
+        open_t = _parse_time(self.cfg.get("system.market_open", "09:15"), dtime(9, 15))
+        close_t = _parse_time(self.cfg.get("system.market_close", "15:30"), dtime(15, 30))
+        if t < pre:
+            return "closed"
+        if t < open_t:
+            return "premarket"
+        if t <= close_t:
+            return "open"
+        return "postmarket"
+
+    # ------------------------------------------------------------------ #
+    # Pre-market
+    # ------------------------------------------------------------------ #
+    async def run_premarket_scan(self) -> dict[str, Any]:
+        """Fundamental screen + macro read, once a day before the open."""
+        log.info("running pre-market scan")
+        watch = self.cfg.watchlist()
+        stocks = [w["symbol"] for w in watch if not w.get("is_index")]
+
+        results = await asyncio.gather(
+            *[fetch_fundamentals(s) for s in stocks], return_exceptions=True)
+        eligible, screened_out = [], []
+        for sym, res in zip(stocks, results, strict=False):
+            if isinstance(res, Exception) or res is None:
+                screened_out.append({"symbol": sym, "reason": "no fundamental data"})
+                continue
+            self._fundamentals[sym] = res
+
+        macro = await self.macro.fetch()
+        await bus.publish(Topic.MACRO, macro)
+
+        # Grade eligibility using the same agent the desk uses intraday.
+        from app.agents.fundamental import FundamentalAgent
+        from app.core.models import MarketContext
+        agent = FundamentalAgent(self.cfg)
+        for sym in stocks:
+            ctx = MarketContext(symbol=sym, cycle_id="premarket",
+                                fundamentals=self._fundamentals.get(sym))
+            report = agent.analyse_rules(ctx)
+            if report.extra.get("eligible"):
+                eligible.append({"symbol": sym, "quality": report.extra.get("quality_score")})
+            else:
+                screened_out.append({"symbol": sym,
+                                     "reason": ", ".join(report.extra.get("fails", []))
+                                     or report.rationale})
+
+        self._premarket_done_on = datetime.now().date().isoformat()
+        summary = {
+            "ts": datetime.now().isoformat(),
+            "eligible": eligible,
+            "screened_out": screened_out,
+            "macro_notes": macro.notes,
+        }
+        log.info("pre-market: %d eligible, %d screened out",
+                 len(eligible), len(screened_out))
+        await bus.publish("premarket.scan", summary)
+        return summary
+
+    # ------------------------------------------------------------------ #
+    # One full cycle
+    # ------------------------------------------------------------------ #
+    async def run_cycle(self, symbols: list[str] | None = None) -> list[dict[str, Any]]:
+        cycle_id = f"CY-{datetime.now():%H%M%S}-{uuid.uuid4().hex[:4]}"
+        self.cycle_count += 1
+
+        # Shared data fetched once per cycle, not once per symbol.
+        news_items, macro_snap = await asyncio.gather(
+            self.news.fetch(), self.macro.fetch(), return_exceptions=True)
+        if isinstance(news_items, Exception):
+            log.warning("news fetch failed: %s", news_items)
+            news_items = []
+        if isinstance(macro_snap, Exception):
+            log.warning("macro fetch failed: %s", macro_snap)
+            macro_snap = None
+
+        if news_items:
+            for item in news_items[:10]:
+                await bus.publish(Topic.NEWS, item)
+        if macro_snap:
+            await bus.publish(Topic.MACRO, macro_snap)
+
+        # Keep the CMIO's weights current with what the learning loop has found.
+        self.feedback.apply_learned_weights()
+
+        targets = symbols or [w["symbol"] for w in self.cfg.watchlist()]
+        outcomes: list[dict[str, Any]] = []
+
+        for symbol in targets:
+            try:
+                result = await self._cycle_for_symbol(
+                    symbol, cycle_id, news_items, macro_snap)
+                outcomes.append(result)
+            except Exception as exc:
+                log.exception("cycle failed for %s: %s", symbol, exc)
+                await bus.publish(Topic.ERROR, {"symbol": symbol, "error": str(exc)})
+
+        # Grade what resolved, then learn from it.
+        try:
+            closed = await self.outcomes.poll()
+            if closed:
+                await self.feedback.update_from_closed(closed)
+        except Exception as exc:
+            log.warning("outcome polling failed: %s", exc)
+
+        self.last_cycle = {
+            "cycle_id": cycle_id, "ts": datetime.now().isoformat(),
+            "symbols": len(targets), "results": outcomes,
+        }
+        return outcomes
+
+    async def _cycle_for_symbol(self, symbol: str, cycle_id: str,
+                                news_items: list, macro_snap: Any) -> dict[str, Any]:
+        symbol_news = self.news.for_symbol(news_items, symbol) if news_items else []
+        recall = self.feedback.recall_for(symbol)
+
+        ctx = await self.data.build_context(
+            symbol=symbol, cycle_id=cycle_id, news=symbol_news, macro=macro_snap,
+            fundamentals=self._fundamentals.get(symbol), recall=recall,
+        )
+        if ctx.quote:
+            await bus.publish(Topic.QUOTE, ctx.quote)
+
+        result = await self.desk.run_cycle(ctx, cycle_id=f"{cycle_id}-{symbol}")
+
+        # Persist
+        try:
+            db.save_cycle(result, proceeded=result.signal is not None)
+            signal_id = result.signal.id if result.signal else None
+            db.save_reports(result.reports, symbol, result.cycle_id, signal_id)
+            if result.signal:
+                db.save_signal(result.signal)
+                self.risk.register_open(result.signal)
+        except Exception as exc:
+            log.warning("persistence failed for %s: %s", symbol, exc)
+
+        return {
+            "symbol": symbol,
+            "bias": result.bias.value,
+            "composite_score": result.composite_score,
+            "signal": result.signal.alert_line() if result.signal else None,
+            "signal_id": result.signal.id if result.signal else None,
+            "rejected": result.rejected,
+            "duration_ms": result.duration_ms,
+        }
+
+    # ------------------------------------------------------------------ #
+    # The loop
+    # ------------------------------------------------------------------ #
+    async def _loop(self) -> None:
+        interval = int(self.cfg.get("system.cycle_seconds", 60))
+        log.info("engine started — cycling every %ds", interval)
+
+        while self.running:
+            try:
+                phase = self.session_phase()
+                today = datetime.now().date().isoformat()
+
+                if phase == "premarket" and self._premarket_done_on != today:
+                    await self.run_premarket_scan()
+
+                elif phase == "open" and not self.paused:
+                    if self._premarket_done_on != today:
+                        await self.run_premarket_scan()
+                    await self.run_cycle()
+
+                elif phase in {"closed", "weekend", "postmarket"}:
+                    # Outside hours we still mark and grade open positions.
+                    closed = await self.outcomes.poll()
+                    if closed:
+                        await self.feedback.update_from_closed(closed)
+
+                await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.exception("engine loop error: %s", exc)
+                await bus.publish(Topic.ERROR, {"error": str(exc)})
+
+            sleep_for = interval if self.session_phase() == "open" else max(interval, 120)
+            await asyncio.sleep(sleep_for)
+
+    async def start(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        db.init_db()
+        self.feedback.apply_learned_weights()
+        self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        log.info("engine stopped")
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "running": self.running,
+            "paused": self.paused,
+            "phase": self.session_phase(),
+            "market_open": self.market_open_now(),
+            "cycle_count": self.cycle_count,
+            "last_cycle": self.last_cycle,
+            "premarket_done": self._premarket_done_on,
+            "desk": self.desk.describe(),
+            "risk": self.risk.snapshot(),
+            "trading_mode": self.cfg.trading_mode,
+            "live_orders": self.cfg.live_orders_enabled,
+            "auto_place_orders": self.cfg.get("execution.auto_place_orders", False),
+        }

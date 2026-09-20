@@ -1,0 +1,201 @@
+# ==========================================================================
+# MASTER CONFIG — tune the whole system from this one file.
+# Everything here is hot-reloadable via POST /api/config/reload
+# ==========================================================================
+
+system:
+  name: "panadhanam"
+  timezone: "Asia/Kolkata"
+  # How often the CMIO runs a full analysis cycle during market hours.
+  cycle_seconds: 60
+  # Pre-market scan (fundamental filter + macro/gap read) runs once at this time.
+  premarket_scan_time: "08:45"
+  market_open: "09:15"
+  market_close: "15:30"
+  # Stop opening NEW positions this many minutes before close.
+  no_new_entry_after: "15:00"
+  square_off_time: "15:15"
+
+# --------------------------------------------------------------------------
+# CAPITAL & RISK — the non-negotiable guardrails.
+# The Risk Manager is deterministic Python, NOT an LLM. It cannot be
+# talked out of these numbers by any prompt.
+# --------------------------------------------------------------------------
+risk:
+  total_capital: 100000          # INR
+  risk_per_trade_pct: 1.0        # 1% of capital risked per trade
+  max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
+  max_daily_loss_pct: 3.0        # kill-switch: halt all new trades for the day
+  max_open_positions: 3
+  max_exposure_pct: 50.0         # max notional as % of (capital x intraday_leverage)
+  # Your broker's intraday (MIS) margin multiplier. 1.0 = assume NO leverage,
+  # which is the safe default: a 1L account can then hold at most 50k of stock.
+  # Indian brokers typically allow ~5x on MIS for liquid names — set it to what
+  # YOUR broker actually gives you. This only widens position size; it never
+  # relaxes the per-trade risk limit, which stays 1-2% of real capital.
+  intraday_leverage: 1.0
+  min_risk_reward: 2.0           # 1:2 minimum, rejected below this
+  max_risk_reward: 10.0          # sanity ceiling (implausible targets rejected)
+  # Stop loss must be a real structural level, not a round number guess.
+  min_stop_distance_pct: 0.15    # SL closer than this = "ill-defined", rejected
+  max_stop_distance_pct: 3.0     # SL further than this = position too small/risky
+  atr_stop_multiplier: 1.5       # fallback SL = entry -/+ 1.5 * ATR(14)
+  # Trailing
+  trail_after_r: 1.0             # start trailing once trade is +1R
+  trail_step_r: 0.5
+  # Options-specific
+  options_max_premium_pct: 25.0  # max % of capital in option premium at once
+  reject_if_iv_percentile_above: 85.0
+
+# --------------------------------------------------------------------------
+# CONFIRMATION POLICY — how many agents must agree before a signal fires.
+# --------------------------------------------------------------------------
+consensus:
+  min_confirmations: 2           # e.g. Candlestick breakout + OI buildup
+  min_composite_score: 0.35      # weighted score threshold (-1..+1)
+  veto_on_high_impact_news: true # a -0.7 news score kills a long, and vice versa
+  require_macro_alignment: false # set true to demand macro bias agreement too
+  conflict_policy: "flat"        # flat | side_with_technicals | side_with_macro
+
+# --------------------------------------------------------------------------
+# AGENT WEIGHTS — the learning loop nudges these over time (see learning:).
+# Edit freely; values are normalised at runtime.
+# --------------------------------------------------------------------------
+weights:
+  candlestick: 1.0
+  derivatives: 1.0
+  news_sentiment: 0.8
+  macro_flow: 0.7
+  fundamental: 0.5
+
+# --------------------------------------------------------------------------
+# TECHNICAL ANALYSIS
+# --------------------------------------------------------------------------
+technical:
+  timeframes: ["1m", "5m", "15m", "1d"]
+  primary_timeframe: "5m"
+  emas: [9, 21, 50]
+  rsi_period: 14
+  atr_period: 14
+  vwap: true
+  volume_surge_multiplier: 1.8   # vs 20-period average volume
+  breakout_lookback: 20
+  patterns_enabled:
+    - bullish_engulfing
+    - bearish_engulfing
+    - hammer
+    - shooting_star
+    - doji
+    - morning_star
+    - evening_star
+    - inside_bar
+    - flag
+
+# --------------------------------------------------------------------------
+# DERIVATIVES / OPTION CHAIN
+# --------------------------------------------------------------------------
+derivatives:
+  strikes_around_atm: 10
+  pcr_bullish_above: 1.2
+  pcr_bearish_below: 0.7
+  oi_change_significant_pct: 15.0
+  iv_spike_pct: 20.0
+  risk_free_rate: 0.065
+  preferred_moneyness: "ATM"     # ATM | ITM | OTM
+  max_days_to_expiry: 10
+  min_days_to_expiry: 1
+  avoid_expiry_day_after: "14:00"
+
+# --------------------------------------------------------------------------
+# NEWS & MACRO
+# --------------------------------------------------------------------------
+news:
+  lookback_minutes: 180
+  max_items_per_cycle: 40
+  high_impact_threshold: 0.7
+  sources:
+    - name: "Moneycontrol Markets"
+      type: rss
+      url: "https://www.moneycontrol.com/rss/marketreports.xml"
+    - name: "Moneycontrol Business"
+      type: rss
+      url: "https://www.moneycontrol.com/rss/business.xml"
+    - name: "Economic Times Markets"
+      type: rss
+      url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+    - name: "Livemint Markets"
+      type: rss
+      url: "https://www.livemint.com/rss/markets"
+    - name: "Business Standard Markets"
+      type: rss
+      url: "https://www.business-standard.com/rss/markets-106.rss"
+    - name: "Google News — NSE"
+      type: rss
+      url: "https://news.google.com/rss/search?q=NSE+OR+Nifty+OR+Sensex+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+
+macro:
+  # Symbols pulled for the global read. Adapter maps these per-provider.
+  global_indices:
+    - { key: "gift_nifty",   label: "GIFT Nifty" }
+    - { key: "us_sp500",     label: "S&P 500 Futures" }
+    - { key: "us_nasdaq",    label: "Nasdaq Futures" }
+    - { key: "dow",          label: "Dow Futures" }
+    - { key: "crude",        label: "Brent Crude" }
+    - { key: "dxy",          label: "Dollar Index" }
+    - { key: "usdinr",       label: "USD/INR" }
+    - { key: "india_vix",    label: "India VIX" }
+  vix_panic_level: 20.0
+  vix_calm_level: 12.0
+
+# --------------------------------------------------------------------------
+# FUNDAMENTAL PRE-MARKET FILTER
+# --------------------------------------------------------------------------
+fundamental:
+  enabled: true
+  min_roe: 20.0
+  max_pe_vs_industry_ratio: 1.2   # P/E must be <= 1.2x industry average
+  max_absolute_pe: 60.0
+  require_positive_eps: true
+  min_profit_growth_pct: 5.0
+  min_avg_volume: 500000
+  max_debt_to_equity: 1.5
+
+# --------------------------------------------------------------------------
+# LEARNING LOOP — the system grades its own signals and re-weights agents.
+# --------------------------------------------------------------------------
+learning:
+  enabled: true
+  # Exponentially weighted update of agent weights from realised outcomes.
+  method: "ewma"                 # ewma | thompson | off
+  alpha: 0.08                    # learning rate
+  min_samples_before_update: 15
+  weight_floor: 0.2
+  weight_ceiling: 2.0
+  # Regime detection: the system keeps separate stats per market regime so a
+  # strategy that works in a trend isn't punished for a chop day.
+  regimes: ["trending_up", "trending_down", "rangebound", "volatile"]
+  lookback_days: 60
+  # Feed the last N graded signals back into the CMIO prompt as context.
+  recall_examples: 8
+
+# --------------------------------------------------------------------------
+# EXECUTION
+# --------------------------------------------------------------------------
+execution:
+  broker: "paper"
+  order_type: "LIMIT"            # LIMIT | MARKET | SL-M
+  limit_slippage_pct: 0.1
+  product: "MIS"                 # MIS (intraday) | NRML | CNC
+  variety: "regular"
+  auto_place_orders: false       # false = dashboard alert only (recommended)
+  confirm_before_live: true
+
+# --------------------------------------------------------------------------
+# ALERTING
+# --------------------------------------------------------------------------
+alerts:
+  dashboard: true
+  sound: true
+  webhook_url: ""                # optional: Slack/Discord/Telegram relay
+  telegram_bot_token: ""
+  telegram_chat_id: ""

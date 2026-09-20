@@ -1,0 +1,45 @@
+# ==========================================================================
+# TRADING UNIVERSE — what the desk is allowed to look at.
+# Change the watchlist here; no code changes needed.
+# ==========================================================================
+
+indices:
+  - symbol: "NIFTY 50"
+    trading_symbol: "NIFTY"
+    exchange: "NSE"
+    lot_size: 75
+    fno: true
+    tick_size: 0.05
+  - symbol: "NIFTY BANK"
+    trading_symbol: "BANKNIFTY"
+    exchange: "NSE"
+    lot_size: 30
+    fno: true
+    tick_size: 0.05
+  - symbol: "FINNIFTY"
+    trading_symbol: "FINNIFTY"
+    exchange: "NSE"
+    lot_size: 65
+    fno: true
+    tick_size: 0.05
+
+stocks:
+  - { symbol: "RELIANCE",   exchange: "NSE", lot_size: 500,  fno: true, sector: "Energy" }
+  - { symbol: "HDFCBANK",   exchange: "NSE", lot_size: 550,  fno: true, sector: "Banking" }
+  - { symbol: "ICICIBANK",  exchange: "NSE", lot_size: 700,  fno: true, sector: "Banking" }
+  - { symbol: "INFY",       exchange: "NSE", lot_size: 400,  fno: true, sector: "IT" }
+  - { symbol: "TCS",        exchange: "NSE", lot_size: 175,  fno: true, sector: "IT" }
+  - { symbol: "SBIN",       exchange: "NSE", lot_size: 750,  fno: true, sector: "Banking" }
+  - { symbol: "TATAMOTORS", exchange: "NSE", lot_size: 550,  fno: true, sector: "Auto" }
+  - { symbol: "AXISBANK",   exchange: "NSE", lot_size: 625,  fno: true, sector: "Banking" }
+  - { symbol: "LT",         exchange: "NSE", lot_size: 150,  fno: true, sector: "Infra" }
+  - { symbol: "BHARTIARTL", exchange: "NSE", lot_size: 475,  fno: true, sector: "Telecom" }
+
+# Names never to be traded regardless of signal (illiquid, in ASM/GSM, banned F&O).
+blacklist: []
+
+# Sector caps — don't put the whole book in one sector.
+sector_max_positions:
+  Banking: 2
+  IT: 2
+  default: 2

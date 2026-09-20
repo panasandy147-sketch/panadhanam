@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>panadhanam — Trading Desk</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<!-- Charts are vendored so the dashboard works with no internet connection.
+     The CDN line is only a fallback if the local file is ever removed. -->
+<script src="/static/vendor-lightweight-charts.js"></script>
+<script>
+  if (typeof LightweightCharts === "undefined") {
+    document.write('<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0'
+      + '/dist/lightweight-charts.standalone.production.js"><\/script>');
+  }
+</script>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>panadhanam</h1>
+    <span class="tag">Multi-Agent Trading Intelligence</span>
+  </div>
+
+  <span class="badge" id="conn"><span class="dot off" id="conn-dot"></span><span id="conn-text">connecting</span></span>
+  <span class="badge" id="mode-badge">mode</span>
+  <span class="badge" id="phase-badge">phase</span>
+  <span class="badge" id="broker-badge">broker</span>
+  <span class="badge" id="brain-badge">reasoning</span>
+
+  <button id="btn-cycle" class="primary">Run cycle</button>
+  <button id="btn-premarket">Pre-market scan</button>
+  <button id="btn-pause">Pause</button>
+  <button id="btn-theme" title="Toggle light/dark">◐</button>
+</header>
+
+<div id="banners"></div>
+
+<main>
+
+  <!-- ============================ RISK ============================ -->
+  <section class="card span-all">
+    <h2>Risk &amp; Capital <span class="count" id="risk-updated"></span></h2>
+    <div class="stats" id="risk-stats"></div>
+  </section>
+
+  <!-- ========================== COLUMN 1 ========================== -->
+  <section class="card">
+    <h2>Agent Desk <span class="count" id="agent-symbol"></span></h2>
+    <div class="agent-grid" id="agents">
+      <div class="empty">Waiting for the first analysis cycle…</div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--good)"></i>bullish</span>
+      <span><i style="background:var(--critical)"></i>bearish</span>
+      <span><i style="background:var(--baseline)"></i>neutral / abstained</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Position Sizing Calculator</h2>
+    <div class="card-body">
+      <div class="calc-grid">
+        <label><span>Capital ₹</span><input type="number" id="c-capital" value="100000" step="1000"></label>
+        <label><span>Risk %</span><input type="number" id="c-risk" value="1" step="0.1" min="0.1" max="2"></label>
+        <label><span>Entry</span><input type="number" id="c-entry" value="24500" step="0.05"></label>
+        <label><span>Stop loss</span><input type="number" id="c-stop" value="24450" step="0.05"></label>
+        <label><span>Lot size</span><input type="number" id="c-lot" value="75" step="1" min="1"></label>
+        <label><span>R:R</span><input type="number" id="c-rr" value="2" step="0.5" min="1"></label>
+      </div>
+      <div class="calc-out" id="calc-out"></div>
+    </div>
+  </section>
+
+  <!-- ========================== COLUMN 2 ========================== -->
+  <section class="card">
+    <h2>Signals <span class="count" id="signal-count"></span></h2>
+    <div class="scroll" id="signals">
+      <div class="empty">No signals yet. Approved setups and the reasons for rejections appear here.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Open Positions</h2>
+    <div class="scroll flush" id="positions">
+      <div class="empty">No open positions.</div>
+    </div>
+  </section>
+
+  <!-- ========================== COLUMN 3 ========================== -->
+  <section class="card">
+    <h2>News &amp; Sentiment <span class="count" id="news-count"></span></h2>
+    <div class="scroll" id="news">
+      <div class="empty">No headlines in the lookback window.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Macro Backdrop</h2>
+    <div class="card-body" id="macro">
+      <div class="empty">Macro feed not yet loaded.</div>
+    </div>
+  </section>
+
+  <!-- ============================ CHART =========================== -->
+  <section class="card span-all">
+    <h2>Price Action</h2>
+    <div class="chart-toolbar">
+      <label class="sr-only" for="chart-symbol">Symbol</label>
+      <select id="chart-symbol"></select>
+      <div class="tf-group" id="tf-group">
+        <button data-tf="1m">1m</button>
+        <button data-tf="5m" aria-pressed="true">5m</button>
+        <button data-tf="15m">15m</button>
+        <button data-tf="1d">1D</button>
+      </div>
+    </div>
+    <div id="chart"></div>
+    <div class="legend">
+      <span><i style="background:var(--series-1)"></i>EMA 9</span>
+      <span><i style="background:var(--series-2)"></i>EMA 21</span>
+      <span><i style="background:var(--series-4)"></i>EMA 50</span>
+      <span><i style="background:var(--series-6)"></i>VWAP</span>
+    </div>
+  </section>
+
+  <!-- ====================== CHAIN + LEARNING ====================== -->
+  <section class="card">
+    <h2>Option Chain <span class="count" id="chain-meta"></span></h2>
+    <div class="card-body" id="chain-metrics"></div>
+    <div class="scroll flush" id="chain-table"></div>
+  </section>
+
+  <section class="card">
+    <h2>Agent Scorecard <span class="count">learned from outcomes</span></h2>
+    <div class="scroll flush" id="scorecard">
+      <div class="empty">The desk re-weights agents once enough trades have been graded.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Activity Log</h2>
+    <div class="scroll flush" id="log"></div>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

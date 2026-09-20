@@ -1,0 +1,17 @@
+services:
+  panadhanam:
+    build: .
+    container_name: panadhanam
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+    volumes:
+      # Config and data are mounted so you can edit thresholds and keep your
+      # trade history without rebuilding the image.
+      - ./config:/app/config
+      - ./data:/app/data
+    restart: unless-stopped

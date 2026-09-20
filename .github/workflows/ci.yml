@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check app tests scripts run.py
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Smoke test — one full cycle with no credentials
+        run: |
+          # The whole system must run end to end with zero API keys.
+          # If this step fails, the "clone and run" promise is broken.
+          timeout 180 python run.py --cycle
+
+      - name: Smoke test — position sizing
+        run: python run.py --size 100000 1 24500 24400 75
