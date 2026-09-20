@@ -46,6 +46,26 @@
     <div class="stats" id="risk-stats"></div>
   </section>
 
+  <!-- ====================== OPPORTUNITY BOARD ===================== -->
+  <section class="card span-all">
+    <h2>Trade Opportunities
+      <span class="count" id="opp-meta"></span>
+    </h2>
+    <div class="chart-toolbar">
+      <button id="btn-scan" class="primary">Scan watchlist</button>
+      <span id="opp-source" class="badge"></span>
+      <span style="font-size:11.5px;color:var(--text-muted)">
+        Tier = how much can go wrong structurally, not how much you'll make.
+        Rupee risk is already equalised by position sizing.
+      </span>
+    </div>
+    <div class="tiers" id="opp-tiers">
+      <div class="empty" style="grid-column:1/-1">
+        Hit <b>Scan watchlist</b> to rank every symbol into low / medium / high risk.
+      </div>
+    </div>
+  </section>
+
   <!-- ========================== COLUMN 1 ========================== -->
   <section class="card">
     <h2>Agent Desk <span class="count" id="agent-symbol"></span></h2>
@@ -137,6 +157,27 @@
     <h2>Agent Scorecard <span class="count">learned from outcomes</span></h2>
     <div class="scroll flush" id="scorecard">
       <div class="empty">The desk re-weights agents once enough trades have been graded.</div>
+    </div>
+  </section>
+
+  <section class="card span-all">
+    <h2>Historical Replay <span class="count" id="replay-meta"></span></h2>
+    <div class="chart-toolbar">
+      <button id="btn-replay">Replay last 5 sessions</button>
+      <label class="sr-only" for="replay-days">Sessions</label>
+      <select id="replay-days">
+        <option value="1">1 session</option>
+        <option value="5" selected>5 sessions (1 week)</option>
+        <option value="10">10 sessions (2 weeks)</option>
+        <option value="20">20 sessions (1 month)</option>
+      </select>
+      <span id="replay-source" class="badge"></span>
+    </div>
+    <div id="replay-body">
+      <div class="empty">
+        Replays the rules bar-by-bar over recent history and grades every setup
+        that fired. Shows what the system <em>would</em> have caught.
+      </div>
     </div>
   </section>
 

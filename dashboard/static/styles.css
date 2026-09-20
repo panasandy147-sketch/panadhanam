@@ -557,3 +557,135 @@ input:focus, select:focus {
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
+
+
+/* ==========================================================================
+   Opportunity board
+   ========================================================================== */
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+@media (max-width: 1100px) { .tiers { grid-template-columns: 1fr; } }
+
+.tier { background: var(--surface-1); min-width: 0; }
+
+.tier > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Tier colour is the reserved status palette — it signals state, not series. */
+.tier.low    > header { color: var(--good);     border-top: 2px solid var(--good); }
+.tier.medium > header { color: var(--warning);  border-top: 2px solid var(--warning); }
+.tier.high   > header { color: var(--critical); border-top: 2px solid var(--critical); }
+.tier > header .n { margin-left: auto; color: var(--text-muted); font-weight: 500; }
+
+.opp {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--grid);
+}
+.opp:last-child { border-bottom: none; }
+
+.opp .head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
+}
+.opp .sym { font-weight: 650; font-size: 13.5px; }
+.opp .lean {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.opp .lean.bull { color: var(--good);     background: color-mix(in srgb, var(--good) 16%, transparent); }
+.opp .lean.bear { color: var(--critical); background: color-mix(in srgb, var(--critical) 16%, transparent); }
+.opp .state {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.opp .state.go   { color: #fff; background: var(--good); }
+.opp .state.wait { color: var(--text-muted); background: var(--surface-3); }
+
+.opp .trade {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  margin: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.opp .trade .row { display: flex; justify-content: space-between; gap: 10px; }
+.opp .trade .row span:first-child { color: var(--text-muted); }
+.opp .trade b { font-weight: 650; }
+
+.opp .blocked {
+  font-size: 11px;
+  color: var(--warning);
+  margin-top: 5px;
+  line-height: 1.45;
+}
+.opp .factors { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.opp .factor {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.opp .factor.bad  { color: var(--critical); }
+.opp .factor.good { color: var(--good); }
+
+/* ==========================================================================
+   Replay
+   ========================================================================== */
+.replay-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--border);
+}
+.replay-totals div { background: var(--surface-1); padding: 11px 14px; }
+.replay-totals .k {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.replay-totals .v {
+  font-family: var(--mono); font-size: 18px; font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.caveats {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.caveats b { color: var(--warning); }
+.caveats ul { margin: 5px 0 0; padding-left: 17px; }
+
+.badge.sim {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}

@@ -179,6 +179,19 @@ learning:
   recall_examples: 8
 
 # --------------------------------------------------------------------------
+# OPPORTUNITY BOARD — how setups are bucketed into low/medium/high risk.
+# Each setup accumulates "risk points" from named factors (option vs cash,
+# IV level, timeframe agreement, stop quality, confirmation depth, expiry
+# proximity...). Lower = safer. Retune to your own tolerance.
+# --------------------------------------------------------------------------
+opportunities:
+  low_risk_max_points: 1
+  medium_risk_max_points: 4
+  per_tier: 5                    # how many to show in each bucket
+  # Minimum |composite score| for a symbol to appear on the board at all.
+  min_conviction: 0.15
+
+# --------------------------------------------------------------------------
 # EXECUTION
 # --------------------------------------------------------------------------
 execution:

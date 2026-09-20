@@ -444,6 +444,195 @@ function strikes_step(chain) {
   return Number.isFinite(step) && step > 0 ? step : 50;
 }
 
+
+/* ====================================================================== */
+/* Opportunity board                                                      */
+/* ====================================================================== */
+const TIER_LABEL = {
+  low:    "Low risk",
+  medium: "Medium risk",
+  high:   "High risk",
+};
+const TIER_BLURB = {
+  low:    "Liquid, aligned timeframes, clean stop",
+  medium: "A normal setup with one or two things against it",
+  high:   "Thin evidence, rich premium, or a volatile tape",
+};
+
+function renderOpportunities(d) {
+  const src = d.data_source || {};
+  const badge = $("opp-source");
+  badge.textContent = src.label || "";
+  badge.className = "badge " + (src.simulated ? "sim" : "ok");
+
+  $("opp-meta").textContent =
+    `${d.scanned} scanned · ${d.found} with a directional lean · ${d.actionable} tradeable now`;
+
+  $("opp-tiers").innerHTML = ["low", "medium", "high"].map((tier) => {
+    const items = (d.tiers && d.tiers[tier]) || [];
+    return `
+      <div class="tier ${tier}">
+        <header>${TIER_LABEL[tier]}<span class="n">${items.length}</span></header>
+        ${items.length
+          ? items.map((o) => oppCard(o)).join("")
+          : `<div class="empty" style="padding:18px 14px">
+               Nothing in this bucket right now.<br>
+               <span style="font-size:11px">${esc(TIER_BLURB[tier])}</span>
+             </div>`}
+      </div>`;
+  }).join("");
+}
+
+function oppCard(o) {
+  const t = o.trade;
+  const bull = o.lean === "BULLISH";
+  const factors = (o.factors || []).map((f) => {
+    const cls = f.points > 0 ? "bad" : f.points < 0 ? "good" : "";
+    return `<span class="factor ${cls}" title="${esc(f.detail)}">
+              ${f.points > 0 ? "+" : ""}${f.points} ${esc(f.label)}
+            </span>`;
+  }).join("");
+
+  return `
+    <div class="opp">
+      <div class="head">
+        <span class="sym">${esc(o.symbol)}</span>
+        <span class="lean ${bull ? "bull" : "bear"}">${bull ? "▲ LONG" : "▼ SHORT"}</span>
+        <span style="font-size:11px;color:var(--text-muted)">
+          conviction ${fmt(o.conviction, 2)} · ${esc(o.regime)}</span>
+        <span class="state ${o.actionable ? "go" : "wait"}">
+          ${o.actionable ? "TRADEABLE" : "WATCH"}</span>
+      </div>
+
+      ${t ? `
+        <div class="trade">
+          <div class="row"><span>Instrument</span><b>${esc(t.instrument)}</b></div>
+          <div class="row"><span>Entry</span><b>${fmt(t.entry)}</b></div>
+          <div class="row"><span>Stop loss</span><b class="neg">${fmt(t.stop_loss)}</b></div>
+          <div class="row"><span>Target (${fmt(t.risk_reward, 1)}R)</span><b class="pos">${fmt(t.target)}</b></div>
+          <div class="row"><span>Quantity</span><b>${fmtInt(t.quantity)}${t.lots > 1 ? ` (${t.lots} lots)` : ""}</b></div>
+          <div class="row"><span>Risk</span><b>₹${fmtInt(Math.round(t.total_risk))} (${fmt(t.capital_at_risk_pct, 2)}%)</b></div>
+        </div>` : ""}
+
+      ${!o.actionable && o.blocked_reason
+        ? `<div class="blocked">⚠ ${esc(o.blocked_reason)}</div>` : ""}
+
+      ${o.counter_argument
+        ? `<div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.45">
+             <b style="color:var(--text-secondary)">Against:</b> ${esc(o.counter_argument.slice(0, 150))}
+           </div>` : ""}
+
+      <div class="factors">${factors}</div>
+    </div>`;
+}
+
+async function loadOpportunities(refresh = false) {
+  const btn = $("btn-scan");
+  if (refresh) { btn.disabled = true; btn.textContent = "Scanning…"; }
+  try {
+    const res = await fetch(refresh ? "/api/opportunities/scan" : "/api/opportunities",
+                            { method: refresh ? "POST" : "GET" });
+    if (res.ok) renderOpportunities(await res.json());
+  } finally {
+    btn.disabled = false; btn.textContent = "Scan watchlist";
+  }
+}
+
+/* ====================================================================== */
+/* Historical replay                                                      */
+/* ====================================================================== */
+function renderReplay(d) {
+  const src = d.data_source || {};
+  const badge = $("replay-source");
+  badge.textContent = src.label || "";
+  badge.className = "badge " + (src.simulated ? "sim" : "ok");
+
+  const t = d.totals || {};
+  $("replay-meta").textContent =
+    `${d.window?.from ?? ""} → ${d.window?.to ?? ""} · ${d.window?.timeframe ?? ""}`;
+
+  const best = (d.best_trades || []).slice(0, 10);
+  const worst = (d.worst_trades || []).slice(0, 5);
+  const rows = (list) => list.map((x) => `
+    <tr>
+      <td>${esc(x.symbol)}</td>
+      <td class="${x.side === "BUY" ? "pos" : "neg"}">${esc(x.side)}</td>
+      <td class="num">${fmt(x.entry)}</td>
+      <td class="num">${fmt(x.exit)}</td>
+      <td class="num ${signClass(x.r_multiple)}"><b>${x.r_multiple >= 0 ? "+" : ""}${fmt(x.r_multiple, 2)}R</b></td>
+      <td>${esc(x.setup)}</td>
+      <td class="num" title="bars held to exit">${fmtInt(x.bars_held)}</td>
+    </tr>`).join("");
+
+  $("replay-body").innerHTML = `
+    <div class="replay-totals">
+      <div><div class="k">Setups fired</div><div class="v">${fmtInt(t.trades)}</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(t.win_rate, 1)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(t.total_r)}">${t.total_r >= 0 ? "+" : ""}${fmt(t.total_r, 1)}R</div></div>
+      <div><div class="k">Avg R / trade</div>
+           <div class="v ${signClass(t.avg_r)}">${t.avg_r >= 0 ? "+" : ""}${fmt(t.avg_r, 3)}</div></div>
+      <div><div class="k">Expectancy</div>
+           <div class="v ${t.expectancy === "positive" ? "pos" : "neg"}"
+                style="font-size:14px">${esc((t.expectancy || "").toUpperCase())}</div></div>
+      <div><div class="k">Break-even needs</div><div class="v" style="font-size:14px">33.4%</div>
+           <div class="k" style="margin-top:3px">at 2:1 R:R</div></div>
+    </div>
+
+    ${best.length ? `
+      <table style="margin-top:2px">
+        <thead><tr><th colspan="7" style="color:var(--good)">Best setups in the window</th></tr>
+        <tr><th>Symbol</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th>
+            <th class="num">Result</th><th>Setup</th><th class="num">Bars</th></tr></thead>
+        <tbody>${rows(best)}</tbody>
+      </table>` : `<div class="empty">No setups fired in this window.</div>`}
+
+    ${worst.length ? `
+      <table>
+        <thead><tr><th colspan="7" style="color:var(--critical)">Worst setups — read these too</th></tr>
+        <tr><th>Symbol</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th>
+            <th class="num">Result</th><th>Setup</th><th class="num">Bars</th></tr></thead>
+        <tbody>${rows(worst)}</tbody>
+      </table>` : ""}
+
+    ${(d.by_symbol || []).length ? `
+      <table>
+        <thead><tr><th colspan="6">Breakdown by symbol</th></tr>
+        <tr><th>Symbol</th><th class="num">Setups</th><th class="num">Wins</th>
+            <th class="num">Win rate</th><th class="num">Total R</th>
+            <th class="num">Avg R</th></tr></thead>
+        <tbody>${d.by_symbol.map((sy) => `
+          <tr>
+            <td>${esc(sy.symbol)}</td>
+            <td class="num">${fmtInt(sy.trades)}</td>
+            <td class="num">${fmtInt(sy.wins)}</td>
+            <td class="num">${fmt(sy.win_rate, 1)}%</td>
+            <td class="num ${signClass(sy.total_r)}"><b>${sy.total_r >= 0 ? "+" : ""}${fmt(sy.total_r, 1)}R</b></td>
+            <td class="num ${signClass(sy.avg_r)}">${sy.avg_r >= 0 ? "+" : ""}${fmt(sy.avg_r, 3)}</td>
+          </tr>`).join("")}</tbody>
+      </table>` : ""}
+
+    <div class="caveats">
+      <b>Read this before trusting the numbers above:</b>
+      <ul>${(d.caveats || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    </div>`;
+}
+
+async function loadReplay(refresh = false) {
+  const btn = $("btn-replay");
+  const days = $("replay-days").value;
+  if (refresh) { btn.disabled = true; btn.textContent = "Replaying…"; }
+  try {
+    const url = refresh
+      ? `/api/replay/run?days=${days}`
+      : `/api/replay?days=${days}`;
+    const res = await fetch(url, { method: refresh ? "POST" : "GET" });
+    if (res.ok) renderReplay(await res.json());
+  } finally {
+    btn.disabled = false; btn.textContent = `Replay last ${days} sessions`;
+  }
+}
+
 /* ====================================================================== */
 /* Positions & scorecard                                                  */
 /* ====================================================================== */
@@ -589,7 +778,7 @@ function bind() {
     await fetch("/api/cycle/run", { method: "POST",
       headers: { "Content-Type": "application/json" }, body: "{}" });
     e.target.disabled = false; e.target.textContent = "Run cycle";
-    loadPositions(); loadScorecard();
+    loadPositions(); loadScorecard(); loadOpportunities(false);
   };
   $("btn-premarket").onclick = async (e) => {
     e.target.disabled = true;
@@ -608,6 +797,11 @@ function bind() {
     root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
     try { localStorage.setItem("theme", root.dataset.theme); } catch {}
     initChart(); loadChart();
+  };
+  $("btn-scan").onclick = () => loadOpportunities(true);
+  $("btn-replay").onclick = () => loadReplay(true);
+  $("replay-days").onchange = () => {
+    $("btn-replay").textContent = `Replay last ${$("replay-days").value} sessions`;
   };
   $("chart-symbol").onchange = loadChart;
   $("tf-group").onclick = (e) => {

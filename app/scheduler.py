@@ -16,6 +16,8 @@ from typing import Any
 
 from app.agents.graph import TradingDesk
 from app.agents.risk import RiskManager
+from app.analysis.opportunities import OpportunityScanner
+from app.analysis.replay import WeeklyReplay
 from app.brokers.base import BrokerAdapter
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
@@ -50,6 +52,8 @@ class TradingEngine:
         self.macro = MacroCollector(self.cfg)
         self.feedback = FeedbackLoop(self.cfg)
         self.outcomes = OutcomeTracker(broker, self.cfg, risk_manager=self.risk)
+        self.scanner = OpportunityScanner(self, self.cfg)
+        self.replay = WeeklyReplay(self, self.cfg)
 
         self.running = False
         self.paused = False

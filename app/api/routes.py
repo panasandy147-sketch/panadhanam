@@ -223,6 +223,44 @@ async def recall(request: Request, symbol: str) -> dict[str, Any]:
     return {"recall": _engine(request).feedback.recall_for(symbol, limit=20)}
 
 
+# --------------------------------------------------------------------------- #
+# Opportunity board & historical replay
+# --------------------------------------------------------------------------- #
+@router.get("/opportunities")
+async def opportunities(request: Request, per_tier: int | None = None,
+                        refresh: bool = False) -> dict[str, Any]:
+    """Top N setups per risk tier (low / medium / high).
+
+    Cached between calls so opening the dashboard doesn't re-scan the whole
+    watchlist; pass refresh=true to force a rescan.
+    """
+    engine = _engine(request)
+    if refresh or not engine.scanner.last_scan:
+        return await engine.scanner.scan(per_tier=per_tier)
+    return engine.scanner.last_scan
+
+
+@router.post("/opportunities/scan")
+async def scan_opportunities(request: Request, per_tier: int | None = None) -> dict[str, Any]:
+    return await _engine(request).scanner.scan(per_tier=per_tier)
+
+
+@router.get("/replay")
+async def replay(request: Request, days: int = 5, timeframe: str = "5m",
+                 refresh: bool = False) -> dict[str, Any]:
+    """What the rules would have caught over the last N sessions."""
+    engine = _engine(request)
+    if refresh or not engine.replay.last_result:
+        return await engine.replay.run(days=days, timeframe=timeframe)
+    return engine.replay.last_result
+
+
+@router.post("/replay/run")
+async def run_replay(request: Request, days: int = 5,
+                     timeframe: str = "5m") -> dict[str, Any]:
+    return await _engine(request).replay.run(days=days, timeframe=timeframe)
+
+
 @router.get("/agents")
 async def agents(request: Request) -> dict[str, Any]:
     return _engine(request).desk.describe()

@@ -74,6 +74,27 @@ required.**
 
 ---
 
+## Which trades should I take?
+
+Click **Scan watchlist** on the dashboard. Every symbol is ranked into
+**low / medium / high risk** buckets with the full trade laid out — entry, stop,
+target, quantity, rupee risk — and every card says either **TRADEABLE** (cleared
+every gate) or **WATCH** plus the exact reason it didn't.
+
+Then **Replay last 5 sessions** shows what the rules would have caught recently,
+graded in R-multiples, with its own limitations printed alongside.
+
+**Read [docs/HOW-TO-READ-IT.md](docs/HOW-TO-READ-IT.md) before acting on any of
+it.** It explains what the tiers mean (risk of a messy exit, not size of the
+prize), why a WATCH is not a weak buy, and what the replay honestly cannot tell
+you.
+
+> **Check the data-source badge.** With `BROKER=paper` it reads *SIMULATED DATA*
+> — those prices come from a random-walk generator, not the market. Connect a
+> broker before treating any number as real.
+
+---
+
 ## The architecture
 
 ```
@@ -202,7 +223,7 @@ and `POST /api/config/reload` applies changes without a restart:
 
 | File | Controls |
 |---|---|
-| `config/settings.yaml` | every threshold: risk, consensus, indicators, IV limits, learning rate |
+| `config/settings.yaml` | every threshold: risk, consensus, indicators, IV limits, learning rate, risk-tier bands |
 | `config/agents.yaml` | the agent roster, their **prompts**, focus areas and hard rules |
 | `config/universe.yaml` | the watchlist, lot sizes, sector caps, blacklist |
 
@@ -317,6 +338,8 @@ python run.py --cycle                          # one analysis cycle, print, exit
 python run.py --premarket                      # fundamental + macro scan
 python run.py --size 100000 1 24500 24400 75   # position sizing calculator
 python -m scripts.backtest --symbol RELIANCE   # replay the rules over history
+                                               # (the dashboard's Replay panel
+                                               #  does this for the whole list)
 make test                                      # 60 tests
 make lint
 ```
@@ -330,6 +353,9 @@ make lint
 | `POST /api/config/reload` | apply YAML changes with no restart |
 | `GET /api/signals` | signal history with rejection reasons |
 | `POST /api/risk/calculate` | position sizing |
+| `GET /api/opportunities` | top N setups per risk tier (cached) |
+| `POST /api/opportunities/scan` | force a fresh watchlist scan |
+| `GET /api/replay?days=5` | replay the rules over recent sessions |
 | `GET /api/learning/scorecard` | per-agent hit rate, avg R, weight |
 | `GET /api/market/{symbol}/chain` | option chain + PCR / Max Pain / IV |
 | `WS /ws` | live event stream |
@@ -355,6 +381,7 @@ app/
   brokers/     base ABC + paper, zerodha, upstox, angelone + factory
   data/        market context builder, news RSS, macro feeds
   indicators/  ta.py, patterns.py, derivatives.py (Black-Scholes, PCR, Max Pain)
+  analysis/    opportunity board (risk tiering), historical replay
   learning/    outcome tracking, EWMA agent re-weighting
   core/        config, models, event bus, plugin registry
   api/         REST + WebSocket
@@ -369,6 +396,8 @@ tests/         60 tests, risk logic covered hardest
 |---|---|
 | "No news / macro unavailable" | outbound HTTPS blocked. Agents correctly abstain. |
 | Everything says NEUTRAL | working as intended — 2 confirmations + score ≥ 0.35 required. Lower `consensus.min_composite_score` to see more. |
+| Low-risk tier is empty | also normal — it means nothing currently has aligned timeframes AND a clean stop AND cheap premium. Retune `opportunities.low_risk_max_points` if your tolerance differs. |
+| Replay shows negative expectancy | on `BROKER=paper` that is expected: a random walk has no edge. On real data it means the configuration needs work — don't trade it. |
 | "Position sizes to 0 lots" | capital too small for that stop distance. The calculator explains it. |
 | Broker won't connect | check `.env`; Kite/Upstox tokens expire **daily**. |
 | Chart empty | re-add `dashboard/static/vendor-lightweight-charts.js`. |
