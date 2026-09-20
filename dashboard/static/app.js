@@ -230,8 +230,8 @@ function applyStatus(s) {
   $("broker-badge").title = state.market
     ? `Brokers available for ${state.market.name}: ${(state.market.brokers || []).join(", ")}`
     : "";
-  $("brain-badge").textContent =
-    s.desk?.reasoning === "claude" ? `claude (${s.desk.model})` : "rule-based";
+  $("brain-badge").textContent = s.desk?.reasoning_label || "rule-based";
+  $("brain-badge").className = "badge" + (s.desk?.llm_enabled ? " ok" : "");
 
   state.paused = s.paused;
   $("btn-pause").textContent = s.paused ? "Resume" : "Pause";
@@ -279,10 +279,14 @@ function renderBanners(s) {
     out.push(`<div class="banner crit"><b>Live order placement is ON.</b>
       Real orders will be sent to ${esc(s.desk?.broker)}. Real money is at risk.</div>`);
   }
-  if (s.desk?.reasoning !== "claude" && !(s.data_source?.simulated)) {
-    out.push(`<div class="banner warn">Agents are running on their deterministic rule
-      engines. Add <code>ANTHROPIC_API_KEY</code> to <code>.env</code> to enable
-      Claude reasoning and the learning-from-context features.</div>`);
+  if (!s.desk?.llm_enabled && !(s.data_source?.simulated)) {
+    out.push(`<div class="banner warn">
+      <b>Agents are running on their deterministic rule engines.</b>
+      Signals and risk still work fully — an LLM only adds judgement on top.
+      For a <b>free local model</b>: install Ollama, then put
+      <code>LLM_PROVIDER=ollama</code> and <code>OLLAMA_MODEL=qwen2.5:7b</code>
+      in <code>.env</code>. For Claude: <code>ANTHROPIC_API_KEY</code>.
+      Check either with <code>python run.py --check-llm</code>.</div>`);
   }
   $("banners").innerHTML = out.join("");
 }

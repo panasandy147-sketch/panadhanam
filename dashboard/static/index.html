@@ -76,6 +76,42 @@
     </div>
   </section>
 
+  <!-- ====================== PRACTICE DAY ========================== -->
+  <section class="card span-all">
+    <h2>Practice Day <span class="count" id="practice-meta"></span></h2>
+
+    <div class="chart-toolbar">
+      <button id="btn-practice" class="primary">▶ Start practice day</button>
+      <button id="btn-practice-pause" disabled>Pause</button>
+      <button id="btn-practice-stop" disabled>Stop</button>
+
+      <label class="sr-only" for="p-date">Trading day</label>
+      <input type="date" id="p-date" style="width:auto"
+             title="Leave blank for the most recent session">
+
+      <label class="sr-only" for="p-speed">Speed</label>
+      <select id="p-speed" style="width:auto">
+        <option value="12">12x — slow, watch it unfold</option>
+        <option value="60" selected>60x — a day in ~6 min</option>
+        <option value="180">180x — a day in ~2 min</option>
+        <option value="600">600x — as fast as possible</option>
+      </select>
+
+      <button id="btn-practice-log" disabled>Log to journal</button>
+      <span id="practice-status" style="font-size:11.5px;color:var(--text-muted)"></span>
+    </div>
+
+    <div class="meter" id="practice-meter" style="margin:0 14px"><span style="width:0%"></span></div>
+
+    <div id="practice-body">
+      <div class="empty">
+        Replays a <b>real</b> trading day bar by bar, running the full agent desk
+        at each step with no lookahead. Practise a fortnight of sessions in an
+        afternoon — including at weekends, when the market is shut.
+      </div>
+    </div>
+  </section>
+
   <!-- ========================== COLUMN 1 ========================== -->
   <section class="card">
     <h2>Agent Desk <span class="count" id="agent-symbol"></span></h2>
@@ -167,42 +203,6 @@
     <h2>Agent Scorecard <span class="count">learned from outcomes</span></h2>
     <div class="scroll flush" id="scorecard">
       <div class="empty">The desk re-weights agents once enough trades have been graded.</div>
-    </div>
-  </section>
-
-  <!-- ====================== PRACTICE DAY ========================== -->
-  <section class="card span-all">
-    <h2>Practice Day <span class="count" id="practice-meta"></span></h2>
-
-    <div class="chart-toolbar">
-      <button id="btn-practice" class="primary">▶ Start practice day</button>
-      <button id="btn-practice-pause" disabled>Pause</button>
-      <button id="btn-practice-stop" disabled>Stop</button>
-
-      <label class="sr-only" for="p-date">Trading day</label>
-      <input type="date" id="p-date" style="width:auto"
-             title="Leave blank for the most recent session">
-
-      <label class="sr-only" for="p-speed">Speed</label>
-      <select id="p-speed" style="width:auto">
-        <option value="12">12x — slow, watch it unfold</option>
-        <option value="60" selected>60x — a day in ~6 min</option>
-        <option value="180">180x — a day in ~2 min</option>
-        <option value="600">600x — as fast as possible</option>
-      </select>
-
-      <button id="btn-practice-log" disabled>Log to journal</button>
-      <span id="practice-status" style="font-size:11.5px;color:var(--text-muted)"></span>
-    </div>
-
-    <div class="meter" id="practice-meter" style="margin:0 14px"><span style="width:0%"></span></div>
-
-    <div id="practice-body">
-      <div class="empty">
-        Replays a <b>real</b> trading day bar by bar, running the full agent desk
-        at each step with no lookahead. Practise a fortnight of sessions in an
-        afternoon — including at weekends, when the market is shut.
-      </div>
     </div>
   </section>
 

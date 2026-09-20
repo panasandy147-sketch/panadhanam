@@ -240,8 +240,14 @@ class TradingDesk:
         """What the dashboard shows in the agent roster panel."""
         return {
             "orchestrator": "langgraph" if self._graph else "builtin",
-            "reasoning": "claude" if self.cfg.llm_enabled else "rule-based",
-            "model": self.cfg.llm_model if self.cfg.llm_enabled else None,
+            # Report the provider actually in use. Hardcoding "claude" here
+            # mislabelled every Ollama setup and left the dashboard telling
+            # people to buy an API key they did not need.
+            "reasoning": self.cfg.llm_provider if self.cfg.llm_enabled else "rule-based",
+            "reasoning_label": self.cfg.llm_label,
+            "llm_enabled": self.cfg.llm_enabled,
+            "model": (self.cfg.ollama_model if self.cfg.llm_provider == "ollama"
+                      else self.cfg.llm_model) if self.cfg.llm_enabled else None,
             "broker": self.broker.name,
             "agents": [
                 {"id": a.agent_id, "name": a.name,
