@@ -441,8 +441,16 @@ class RiskManager:
 
         note = ""
         if structural and self._structural_is_sane(structural, entry, bias, atr):
-            stop = structural
-            note = f"structural stop at {stop:.2f}"
+            # Sit a couple of ticks BEYOND the level, not on it. A stop resting
+            # exactly at support is in the queue with everyone else's, which is
+            # precisely where a sweep goes looking for liquidity.
+            tick = float(instrument.tick_size or 0.05)
+            ticks = int(self.cfg.get("risk.structural_stop_ticks", 2))
+            offset = tick * ticks
+            stop = (structural - offset if bias == Bias.BULLISH
+                    else structural + offset)
+            note = (f"structural stop {ticks} tick(s) beyond {structural:.2f} "
+                    f"→ {stop:.2f}")
         elif atr > 0:
             stop = entry - atr_mult * atr if bias == Bias.BULLISH else entry + atr_mult * atr
             note = f"ATR stop ({atr_mult}x ATR {atr:.2f})"

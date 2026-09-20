@@ -22,3 +22,7 @@ node_modules/
 # caches
 .pytest_cache/
 .ruff_cache/
+
+# The trade journal IS the point — it must be committed, not ignored.
+# Only scratch exports are excluded.
+journal/*.tmp

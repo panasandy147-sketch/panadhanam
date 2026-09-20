@@ -98,6 +98,25 @@ a third market (one YAML file).
 
 ---
 
+## Trade journal & post-mortem
+
+Every completed trade gets a **Mistake Card**: graded 1-10 on *discipline, not
+profit*, with the root cause and one measurable corrective rule.
+
+The verdict is the point — **a winning trade that broke your rules is a BAD WIN**,
+and it is the most dangerous outcome because it teaches you to break the rule
+again. The engine detects a widened stop, a chased entry, an oversized position
+or a blown time stop from the numbers alone, whether or not you own up to them.
+
+Two metrics drive it: **R-multiple realisation** (P&L ÷ initial risk) and the
+**Mistake Cost Index** — the money lost specifically to rule violations, with
+clean losses excluded because those are the price of having an edge.
+
+Cards are written to `journal/` as markdown and **committed to git**, so your
+learning history outlives the database. See [docs/JOURNAL.md](docs/JOURNAL.md).
+
+---
+
 ## Which trades should I take?
 
 Click **Scan watchlist** on the dashboard. Every symbol is ranked into

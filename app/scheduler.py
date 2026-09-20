@@ -330,21 +330,9 @@ class TradingEngine:
         log.info("engine stopped")
 
     def data_provenance(self) -> dict[str, Any]:
-        """Where the prices on screen actually come from."""
-        feed = getattr(self.broker, "data_source", None)
-        sources = list(getattr(feed, "sources", []) or []) if feed else []
-        simulated = self.broker.name == "paper" and not sources
-        if not simulated and self.broker.name != "paper":
-            sources = [self.broker.name]
-        return {
-            "simulated": simulated,
-            "sources": sources,
-            "label": ("SIMULATED DATA — prices are generated, not real"
-                      if simulated else
-                      f"Real market data via {', '.join(sources)}"),
-            "execution": ("simulated fills (paper)" if self.broker.name == "paper"
-                          else f"live broker: {self.broker.name}"),
-        }
+        """Where the prices on screen come from. See feeds.stack."""
+        from app.data.feeds.stack import describe_data_source
+        return describe_data_source(self.broker)
 
     def status(self) -> dict[str, Any]:
         return {

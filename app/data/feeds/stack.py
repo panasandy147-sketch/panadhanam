@@ -109,6 +109,45 @@ class FeedStack(BrokerAdapter):
         return OrderResult(False, message="data feeds cannot place orders")
 
 
+def describe_data_source(broker: Any) -> dict[str, Any]:
+    """Where the prices on screen actually come from.
+
+    Single source of truth, used by the engine status, the opportunity board
+    and the replay, so those three can never disagree about whether the user
+    is looking at real data.
+
+    A data source may be a FeedStack (several layered feeds) or a single bare
+    feed, so fall back to its `.name` rather than assuming `.sources` exists —
+    mislabelling a real feed as "paper" is exactly the error that matters here.
+    """
+    broker_name = getattr(broker, "name", "unknown")
+    feed = getattr(broker, "data_source", None)
+
+    sources: list[str] = []
+    if feed is not None:
+        sources = list(getattr(feed, "sources", None) or [])
+        if not sources:
+            name = getattr(feed, "name", None)
+            if name:
+                sources = [name]
+
+    simulated = broker_name == "paper" and not sources
+    if not simulated and broker_name != "paper" and not sources:
+        # A real broker serving its own data.
+        sources = [broker_name]
+
+    return {
+        "simulated": simulated,
+        "sources": sources,
+        "label": ("SIMULATED DATA — prices are generated, not real"
+                  if simulated else
+                  f"Real market data via {', '.join(sources)}"),
+        "execution": ("simulated fills (paper)" if broker_name == "paper"
+                      else f"live broker: {broker_name}"),
+        "broker": broker_name,
+    }
+
+
 async def build_feed_stack() -> FeedStack | None:
     """Assemble the right feeds for the active market."""
     cfg = get_config()
@@ -117,6 +156,7 @@ async def build_feed_stack() -> FeedStack | None:
         return None
 
     from app.data.feeds.nse import NSEFeed
+    from app.data.feeds.stooq import StooqFeed
     from app.data.feeds.yahoo import YahooFeed
 
     feeds: list[BrokerAdapter] = []
@@ -124,6 +164,9 @@ async def build_feed_stack() -> FeedStack | None:
         # NSE first: only the exchange serves genuine OI and IV per strike.
         feeds.append(NSEFeed())
     feeds.append(YahooFeed())
+    if bool(cfg.get("data.use_stooq", True)):
+        # Last resort for price history when Yahoo is blocked or throttled.
+        feeds.append(StooqFeed())
 
     stack = FeedStack(feeds)
     if await stack.connect():

@@ -11,6 +11,7 @@ no API key and no signup.
 |---|---|---|---|
 | **NSE India** (`nseindia.com`) | Official option chain — real OI, OI change, IV per strike; index spot | 🇮🇳 India | No |
 | **Yahoo Finance** | Quotes, OHLCV candles (1m/5m/15m/1d), US option chains, macro, fundamentals | Both | No |
+| **Stooq** | Daily OHLCV only — the fallback when Yahoo is blocked or throttled | Both | No |
 
 They're layered. For India the system asks NSE first (only the exchange serves
 genuine Open Interest), then falls back to Yahoo for candles and quotes. For the
@@ -27,6 +28,22 @@ says so and the system falls back to Yahoo — you keep real prices, you lose th
 OI-change read.
 
 ---
+
+## Am I actually getting real data? Check it in five seconds
+
+```bash
+python run.py --check-data
+```
+
+It probes every feed, fetches a real quote and candle, and prints what came
+back — or tells you plainly that nothing connected and the dashboard is showing
+a synthetic market. Exit code 0 means real data, 1 means none.
+
+```
+  [OK ] Yahoo Finance: CONNECTED
+        NIFTY 50      ₹   24,412.15  (+0.34%)   as of 2026-09-18T10:02
+        RELIANCE      ₹    2,938.60  (-0.21%)   as of 2026-09-18T10:02
+```
 
 ## Checking what you're actually looking at
 

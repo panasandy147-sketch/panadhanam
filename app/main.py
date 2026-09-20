@@ -14,11 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.journal_routes import router as journal_router
 from app.api.routes import router as api_router
 from app.api.ws import router as ws_router
 from app.brokers.factory import build_broker
 from app.core.config import get_config
 from app.core.logging import get_logger, setup_logging
+from app.journal import store as journal_store
 from app.scheduler import TradingEngine
 from app.storage import db
 
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     print(BANNER)
     db.init_db()
+    journal_store.init_journal()
 
     broker = await build_broker(cfg)
     engine = TradingEngine(broker, cfg)
@@ -89,6 +92,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(journal_router)
 app.include_router(ws_router)
 
 if DASHBOARD_DIR.exists():

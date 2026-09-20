@@ -505,6 +505,21 @@ function initChart() {
   state.series.vwap  = line(ink("--series-6"));
 }
 
+/* Chart libraries require strictly ascending, unique timestamps and throw if
+   given anything else — which would blank the chart entirely. Live feeds do
+   occasionally re-send a forming candle or overlap two ranges, so sort, drop
+   duplicate timestamps (keeping the latest) and discard malformed bars. */
+function normaliseBars(bars) {
+  const byTime = new Map();
+  for (const b of bars) {
+    const t = Number(b.time);
+    if (!Number.isFinite(t)) continue;
+    if (![b.open, b.high, b.low, b.close].every(Number.isFinite)) continue;
+    byTime.set(t, { ...b, time: t });
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 function ema(values, period) {
   const k = 2 / (period + 1);
   let prev = values[0];
@@ -516,10 +531,12 @@ async function loadChart() {
   if (!symbol) return;
   const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/candles?timeframe=${state.timeframe}&count=250`);
   if (!res.ok) return;
-  const { candles } = await res.json();
-  if (!candles.length) return;
+  const raw = (await res.json()).candles;
+  if (!raw.length) return;
   if (!state.chart) { loadChain(symbol); return; }
 
+  const candles = normaliseBars(raw);
+  if (!candles.length) return;
   state.series.candles.setData(candles);
 
   const closes = candles.map((c) => c.close);
@@ -858,6 +875,170 @@ async function loadScorecard() {
     }).join("")}</tbody></table>`;
 }
 
+
+/* ====================================================================== */
+/* Trade journal & post-mortem                                            */
+/* ====================================================================== */
+async function loadTaxonomy() {
+  const res = await fetch("/api/journal/taxonomy");
+  if (!res.ok) return;
+  const t = await res.json();
+
+  $("j-setup").innerHTML = t.setups
+    .map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join("");
+
+  $("j-mistakes").innerHTML = t.mistakes.map((m, i) => `
+    <label><input type="checkbox" value="${esc(m)}" id="jm-${i}">${esc(m)}</label>`
+  ).join("");
+}
+
+function renderJournalStats(a) {
+  if (!a || !a.total) {
+    $("journal-stats").innerHTML =
+      `<div class="empty" style="padding:12px">No trades logged yet.</div>`;
+    $("journal-meta").textContent = "";
+    return;
+  }
+  $("journal-meta").textContent =
+    `${a.total} trades · ${a.clean_pct.toFixed(0)}% clean execution`;
+
+  $("journal-stats").innerHTML = `
+    <div class="calc-out">
+      <div><div class="k">Clean execution</div>
+           <div class="v ${a.clean_pct >= 80 ? "pos" : a.clean_pct >= 50 ? "" : "neg"}">
+             ${a.clean_pct.toFixed(0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(a.total_r)}">${a.total_r >= 0 ? "+" : ""}${fmt(a.total_r, 2)}R</div></div>
+      <div><div class="k">Avg execution</div>
+           <div class="v">${fmt(a.avg_execution_score, 1)}/10</div></div>
+      <div><div class="k">Mistake Cost Index</div>
+           <div class="v neg">${money(Math.round(a.mistake_cost_index))}</div>
+           <div class="k" style="margin-top:3px">lost to rule breaks alone</div></div>
+      <div><div class="k">Avoidable losses</div>
+           <div class="v ${a.avoidable_loss_pct > 40 ? "neg" : ""}">${fmt(a.avoidable_loss_pct, 0)}%</div>
+           <div class="k" style="margin-top:3px">of all money lost</div></div>
+      <div><div class="k">Win rate</div>
+           <div class="v">${fmt(a.win_rate, 0)}%</div></div>
+    </div>`;
+}
+
+/* The card arrives as markdown. Render only the small subset it uses — this is
+   our own generated text, but keep it escape-first so a symbol or a note the
+   user typed can never inject markup. */
+function cardHtml(md) {
+  return esc(md)
+    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/^- /gm, "• ")
+    .replace(/^\*(.+)\*$/gm, '<em style="color:var(--text-muted)">$1</em>')
+    .replace(/^---$/gm, "<hr style='border:0;border-top:1px solid var(--border);margin:10px 0'>");
+}
+
+async function submitTrade(ev) {
+  ev.preventDefault();
+  const status = $("journal-status");
+  status.textContent = "Evaluating…";
+
+  const mistakes = [...document.querySelectorAll("#j-mistakes input:checked")]
+    .map((el) => el.value);
+
+  const hold = Number($("j-hold").value) || 0;
+  const now = new Date();
+  const entryTs = new Date(now.getTime() - hold * 60_000);
+
+  const context = {};
+  const astop = $("j-astop").value;
+  if (astop) context.actual_stop = Number(astop);
+  const vol = $("j-vol").value;
+  if (vol) context.volume_surge = Number(vol);
+
+  const body = {
+    symbol: $("j-symbol").value.trim().toUpperCase(),
+    setup: $("j-setup").value,
+    side: $("j-side").value,
+    planned_entry: Number($("j-pentry").value),
+    planned_stop: Number($("j-pstop").value),
+    planned_target: Number($("j-ptarget").value),
+    planned_quantity: Number($("j-qty").value) || 0,
+    actual_entry: $("j-aentry").value ? Number($("j-aentry").value) : null,
+    actual_exit: $("j-aexit").value ? Number($("j-aexit").value) : null,
+    entry_ts: hold ? entryTs.toISOString() : null,
+    exit_ts: hold ? now.toISOString() : null,
+    mistakes,
+    notes: $("j-notes").value,
+    context,
+  };
+
+  const res = await fetch("/api/journal/log", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    status.textContent = err.detail || "Could not log the trade.";
+    return;
+  }
+
+  const d = await res.json();
+  const verdict = d.card.verdict;
+  const box = $("journal-card");
+  box.className = "mistake-card " +
+    (verdict.startsWith("GOOD") ? "good" : verdict === "BAD_WIN" ? "warn" : "bad");
+  box.innerHTML = cardHtml(d.markdown);
+
+  status.textContent = `Saved to journal/cards/${d.saved_to}`;
+  $("j-symbol").value = "";
+  $("j-notes").value = "";
+  document.querySelectorAll("#j-mistakes input:checked")
+    .forEach((el) => (el.checked = false));
+
+  await Promise.all([loadJournalStats(), loadJournalLog()]);
+}
+
+async function loadJournalStats() {
+  const res = await fetch("/api/journal/analytics");
+  if (res.ok) renderJournalStats(await res.json());
+}
+
+async function loadJournalLog() {
+  const res = await fetch("/api/journal/entries?limit=40");
+  if (!res.ok) return;
+  const { entries } = await res.json();
+  if (!entries.length) { $("journal-log").innerHTML = ""; return; }
+
+  $("journal-log").innerHTML = `
+    <table><thead><tr>
+      <th>Date</th><th>Symbol</th><th>Setup</th><th>Verdict</th>
+      <th class="num">R</th><th class="num">Score</th><th>Mistakes</th>
+    </tr></thead><tbody>
+    ${entries.map((e) => {
+      let tags = [];
+      try { tags = JSON.parse(e.mistakes || "[]"); } catch {}
+      return `<tr>
+        <td>${esc((e.ts || "").slice(0, 10))}</td>
+        <td>${esc(e.symbol)}</td>
+        <td>${esc(e.setup)}</td>
+        <td><span class="verdict-pill ${esc(e.verdict)}">${esc((e.verdict || "").replace("_", " "))}</span></td>
+        <td class="num ${signClass(e.r_multiple)}">${e.r_multiple >= 0 ? "+" : ""}${fmt(e.r_multiple, 2)}</td>
+        <td class="num">${e.execution_score ?? "—"}/10</td>
+        <td style="font-size:11px;color:var(--text-muted)">${esc(tags.join(", ")) || "—"}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+async function exportJournal() {
+  const btn = $("btn-journal-export");
+  btn.disabled = true;
+  try {
+    await fetch("/api/journal/export", { method: "POST" });
+    $("journal-status").textContent =
+      "journal/README.md regenerated — commit it to keep the history.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ====================================================================== */
 /* Calculator                                                             */
 /* ====================================================================== */
@@ -975,6 +1156,8 @@ function bind() {
     const btn = e.target.closest("button[data-market]");
     if (btn) switchMarket(btn.dataset.market);
   };
+  $("journal-form").onsubmit = submitTrade;
+  $("btn-journal-export").onclick = exportJournal;
   $("btn-scan").onclick = () => loadOpportunities(true);
   $("btn-replay").onclick = () => loadReplay(true);
   $("replay-days").onchange = () => {
@@ -1001,9 +1184,11 @@ function bind() {
 
   bind();
   await loadMarkets();       // currency + theme must be set before first render
+  await loadTaxonomy();
   initChart();
   await loadWatchlist();
-  await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(), runCalc()]);
+  await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(),
+                     runCalc(), loadJournalStats(), loadJournalLog()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);

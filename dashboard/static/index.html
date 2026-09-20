@@ -170,6 +170,58 @@
     </div>
   </section>
 
+  <!-- ====================== TRADE JOURNAL ========================= -->
+  <section class="card span-all">
+    <h2>Trade Journal &amp; Post-Mortem
+      <span class="count" id="journal-meta"></span>
+    </h2>
+
+    <div class="journal-grid">
+      <form id="journal-form" class="journal-form">
+        <div class="calc-grid">
+          <label><span>Symbol</span><input id="j-symbol" placeholder="RELIANCE" required></label>
+          <label><span>Setup *</span><select id="j-setup" required></select></label>
+          <label><span>Side</span>
+            <select id="j-side"><option>BUY</option><option>SELL</option></select></label>
+          <label><span>Planned entry</span><input type="number" step="0.01" id="j-pentry" required></label>
+          <label><span>Planned stop</span><input type="number" step="0.01" id="j-pstop" required></label>
+          <label><span>Planned target</span><input type="number" step="0.01" id="j-ptarget" required></label>
+          <label><span>Quantity</span><input type="number" id="j-qty" value="0"></label>
+          <label><span>Actual entry</span><input type="number" step="0.01" id="j-aentry"></label>
+          <label><span>Actual exit</span><input type="number" step="0.01" id="j-aexit"></label>
+          <label><span>Hold (min)</span><input type="number" id="j-hold" value="0"></label>
+          <label><span>Stop actually used</span><input type="number" step="0.01" id="j-astop"
+                 title="Leave blank if you never moved it"></label>
+          <label><span>Volume vs avg</span><input type="number" step="0.1" id="j-vol"
+                 placeholder="2.5" title="Relative volume on the entry bar"></label>
+        </div>
+
+        <div style="margin:10px 0">
+          <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)">
+            Mistakes you already know you made (the engine detects the rest)
+          </span>
+          <div class="mistake-tags" id="j-mistakes"></div>
+        </div>
+
+        <label><span>Notes</span>
+          <input id="j-notes" placeholder="What were you thinking at entry?"></label>
+
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <button type="submit" class="primary">Generate Mistake Card</button>
+          <button type="button" id="btn-journal-export">Export to git</button>
+          <span id="journal-status" style="font-size:11.5px;color:var(--text-muted)"></span>
+        </div>
+      </form>
+
+      <div class="journal-side">
+        <div id="journal-stats"></div>
+        <div id="journal-card" class="mistake-card"></div>
+      </div>
+    </div>
+
+    <div class="scroll flush" id="journal-log"></div>
+  </section>
+
   <section class="card span-all">
     <h2>Historical Replay <span class="count" id="replay-meta"></span></h2>
     <div class="chart-toolbar">

@@ -5,6 +5,7 @@
     python run.py --cycle            run one analysis cycle and exit
     python run.py --premarket        run the pre-market scan and exit
     python run.py --size 100000 1 24500 24400 75    position-sizing calculator
+    python run.py --check-data       verify you are getting REAL market data
 """
 from __future__ import annotations
 
@@ -77,8 +78,16 @@ def main() -> None:
     parser.add_argument("--size", nargs="+", metavar="N",
                         help="CAPITAL RISK_PCT ENTRY STOP [LOT_SIZE]")
     parser.add_argument("--reload", action="store_true", help="auto-reload the server")
+    parser.add_argument("--check-data", action="store_true",
+                        help="probe every market-data feed and report what is real")
+    parser.add_argument("--market", metavar="CODE",
+                        help="market for --check-data / --cycle (IN or US)")
     args = parser.parse_args()
 
+    if args.check_data:
+        from app.data.feeds.check import run_check
+        ok = asyncio.run(run_check(args.market))
+        raise SystemExit(0 if ok else 1)
     if args.size:
         _sizing(args.size)
     elif args.cycle:

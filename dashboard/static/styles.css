@@ -824,3 +824,75 @@ button.primary {
   color: var(--text-secondary);
 }
 .banner.ok-note b { color: var(--good); }
+
+
+/* ==========================================================================
+   Trade journal
+   ========================================================================== */
+.journal-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+@media (max-width: 1100px) { .journal-grid { grid-template-columns: 1fr; } }
+
+.journal-form, .journal-side { background: var(--surface-1); padding: 14px; }
+.journal-side { display: flex; flex-direction: column; gap: 12px; }
+
+.mistake-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mistake-tags label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+}
+.mistake-tags label:has(input:checked) {
+  border-color: var(--critical);
+  color: var(--critical);
+  background: color-mix(in srgb, var(--critical) 14%, transparent);
+}
+.mistake-tags input { width: auto; margin: 0; }
+
+.mistake-card {
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  border-left: 3px solid var(--text-muted);
+  white-space: pre-wrap;
+  font-family: var(--sans);
+  min-height: 60px;
+}
+.mistake-card:empty::before {
+  content: "Log a completed trade and its post-mortem card appears here.";
+  color: var(--text-muted);
+}
+.mistake-card.good { border-left-color: var(--good); }
+.mistake-card.bad  { border-left-color: var(--critical); }
+.mistake-card.warn { border-left-color: var(--warning); }
+.mistake-card h3 { margin: 0 0 8px; font-size: 14px; }
+.mistake-card h4 { margin: 12px 0 4px; font-size: 11px;
+                   text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--text-muted); }
+.mistake-card strong { color: var(--text-primary); }
+
+.verdict-pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.verdict-pill.GOOD_WIN  { color: #0d0d0d; background: var(--good); }
+.verdict-pill.GOOD_LOSS { color: var(--series-1); background: color-mix(in srgb, var(--series-1) 18%, transparent); }
+.verdict-pill.BAD_WIN   { color: #0d0d0d; background: var(--warning); }
+.verdict-pill.BAD_LOSS  { color: #fff; background: var(--critical); }

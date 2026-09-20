@@ -201,3 +201,217 @@ async def test_data_feeds_refuse_to_trade():
         result = await feed.place_order(inst, Side.BUY, 1, 100.0)
         assert result.ok is False
         assert "cannot place orders" in result.message
+
+
+# --------------------------------------------------------------------------- #
+# End-to-end plumbing: a connected feed's prices must reach the dashboard
+#
+# The live endpoints cannot be reached from CI, so these inject a stand-in feed
+# that returns known values. That proves the WIRING — if the network allows the
+# real feed to connect, its numbers travel the same path to the same places.
+# --------------------------------------------------------------------------- #
+from app.brokers.base import BrokerAdapter  # noqa: E402
+from app.core.models import Candle, OptionChain, OptionLeg, Quote  # noqa: E402
+
+
+class _StubFeed(BrokerAdapter):
+    """A feed with unmistakable prices, so a synthetic fallback can't be
+    mistaken for the real thing in an assertion."""
+
+    name = "stubfeed"
+    supports_options = True
+    supports_live_orders = False
+
+    MARKER = 1234.56
+
+    async def connect(self) -> bool:
+        self._connected = True
+        return True
+
+    async def get_quote(self, symbol):
+        return Quote(symbol=symbol, last_price=self.MARKER, change_pct=1.23,
+                     volume=987_654)
+
+    async def get_candles(self, symbol, timeframe, count=200):
+        from datetime import timedelta
+        base = datetime(2026, 9, 18, 9, 15, tzinfo=UTC)
+        out = []
+        for i in range(count):
+            price = self.MARKER - (count - i) * 0.1
+            out.append(Candle(
+                ts=base + timedelta(minutes=5 * i),   # strictly increasing
+                open=price, high=price * 1.002, low=price * 0.998,
+                close=price, volume=10_000 + i))
+        out[-1] = Candle(ts=out[-1].ts, open=self.MARKER, high=self.MARKER,
+                         low=self.MARKER, close=self.MARKER, volume=50_000)
+        return out
+
+    async def get_expiries(self, underlying):
+        return ["2026-09-25"]
+
+    async def get_option_chain(self, underlying, expiry=None):
+        legs = []
+        for i in range(-3, 4):
+            strike = round(self.MARKER + i * 50)
+            for opt in ("CE", "PE"):
+                legs.append(OptionLeg(strike=strike, option_type=opt,
+                                      ltp=50 - abs(i) * 5, oi=10_000 * (4 - abs(i)),
+                                      oi_change=500 * i, volume=1_000, iv=0.15))
+        return OptionChain(underlying=underlying, spot=self.MARKER,
+                           expiry="2026-09-25", legs=legs)
+
+    async def place_order(self, *a, **kw):
+        from app.brokers.base import OrderResult
+        return OrderResult(False, message="stub feed cannot place orders")
+
+
+@pytest.mark.asyncio
+async def test_paper_broker_serves_feed_prices_not_synthetic_ones():
+    """The whole point of attaching a feed: real prices, simulated fills."""
+    from app.brokers.paper import PaperBroker
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = _StubFeed()
+
+    quote = await broker.get_quote("NIFTY 50")
+    assert quote.last_price == _StubFeed.MARKER, "the feed must win over the simulator"
+
+    candles = await broker.get_candles("NIFTY 50", "5m", 50)
+    assert candles[-1].close == _StubFeed.MARKER
+
+    chain = await broker.get_option_chain("NIFTY 50")
+    assert chain.spot == _StubFeed.MARKER
+
+    # Real expiries come from the feed too, not the synthetic weekly generator.
+    assert await broker.get_expiries("NIFTY 50") == ["2026-09-25"]
+
+
+@pytest.mark.asyncio
+async def test_feed_prices_flow_through_to_the_opportunity_board(cfg):
+    """Feed → broker → context → agents → risk → board, with real numbers."""
+    from app.brokers.paper import PaperBroker
+    from app.scheduler import TradingEngine
+
+    cfg.switch_market("IN")
+    cfg.settings["system"]["no_new_entry_after"] = "23:59"
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = _StubFeed()
+
+    engine = TradingEngine(broker, cfg)
+    engine.risk.set_capital(10_000_000)     # big enough not to be the blocker
+
+    async def _no_news():
+        return []
+
+    async def _no_macro():
+        from app.core.models import MacroSnapshot
+        return MacroSnapshot()
+
+    engine.news.fetch = _no_news
+    engine.macro.fetch = _no_macro
+
+    out = await engine.scanner.scan(symbols=["RELIANCE"])
+
+    # Provenance must report the attached feed, not claim simulation.
+    assert out["data_source"]["simulated"] is False
+    assert "stubfeed" in out["data_source"]["sources"]
+    assert "SIMULATED" not in out["data_source"]["label"].upper()
+
+    entries = [o for tier in out["tiers"].values() for o in tier]
+    assert entries, "the feed's prices should produce a directional read"
+    trade = next(o["trade"] for o in entries if o["trade"])
+    # Entry is anchored to the feed's price, not to a generated one.
+    assert abs(trade["entry"] - _StubFeed.MARKER) < _StubFeed.MARKER * 0.05
+
+
+@pytest.mark.asyncio
+async def test_status_reports_simulation_honestly_without_a_feed(cfg):
+    """No feed attached must never be described as real data."""
+    from app.brokers.paper import PaperBroker
+    from app.scheduler import TradingEngine
+
+    cfg.switch_market("IN")
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = None
+
+    engine = TradingEngine(broker, cfg)
+    provenance = engine.data_provenance()
+
+    assert provenance["simulated"] is True
+    assert "SIMULATED" in provenance["label"].upper()
+    assert provenance["sources"] == []
+
+
+@pytest.mark.asyncio
+async def test_status_names_the_live_sources_when_a_feed_is_attached(cfg):
+    from app.brokers.paper import PaperBroker
+    from app.data.feeds.stack import FeedStack
+    from app.scheduler import TradingEngine
+
+    cfg.switch_market("IN")
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+
+    stack = FeedStack([_StubFeed()])
+    await stack.connect()
+    broker.data_source = stack
+
+    engine = TradingEngine(broker, cfg)
+    provenance = engine.data_provenance()
+
+    assert provenance["simulated"] is False
+    assert provenance["sources"] == ["stubfeed"]
+    assert "Real market data" in provenance["label"]
+    # Execution is still simulated — that distinction must stay visible.
+    assert "paper" in provenance["execution"]
+
+
+@pytest.mark.asyncio
+async def test_feed_stack_falls_through_to_the_next_source():
+    """A feed that returns nothing must not stop a later one from answering."""
+    from app.data.feeds.stack import FeedStack
+
+    class _Dead(_StubFeed):
+        name = "dead"
+
+        async def get_quote(self, symbol):
+            return None
+
+        async def get_candles(self, symbol, timeframe, count=200):
+            return []
+
+    stack = FeedStack([_Dead(), _StubFeed()])
+    await stack.connect()
+
+    quote = await stack.get_quote("NIFTY")
+    assert quote.last_price == _StubFeed.MARKER
+    assert len(await stack.get_candles("NIFTY", "5m", 10)) > 0
+
+
+@pytest.mark.asyncio
+async def test_feed_stack_returns_nothing_when_every_source_fails():
+    """Silence, not invention. The agents then abstain."""
+    from app.data.feeds.stack import FeedStack
+
+    class _Dead(_StubFeed):
+        name = "dead"
+
+        async def get_quote(self, symbol):
+            return None
+
+        async def get_candles(self, symbol, timeframe, count=200):
+            return []
+
+        async def get_option_chain(self, underlying, expiry=None):
+            return None
+
+    stack = FeedStack([_Dead(), _Dead()])
+    await stack.connect()
+
+    assert await stack.get_quote("NIFTY") is None
+    assert await stack.get_candles("NIFTY", "5m", 10) == []
+    assert await stack.get_option_chain("NIFTY") is None

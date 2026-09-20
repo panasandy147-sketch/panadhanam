@@ -32,7 +32,7 @@ risk:
   # fault. Small capital does not make live trading safer — staying in paper
   # mode does.
   total_capital: 100
-  risk_per_trade_pct: 1.0        # 1% of capital risked per trade
+  risk_per_trade_pct: 1.0        # 1% of capital risked per trade (0.5 is safer)
   max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
   max_daily_loss_pct: 3.0        # kill-switch: halt all new trades for the day
   max_open_positions: 3
@@ -49,6 +49,20 @@ risk:
   min_stop_distance_pct: 0.15    # SL closer than this = "ill-defined", rejected
   max_stop_distance_pct: 3.0     # SL further than this = position too small/risky
   atr_stop_multiplier: 1.5       # fallback SL = entry -/+ 1.5 * ATR(14)
+
+  # --- Structural stop placement -----------------------------------------
+  # Put the stop 1-2 TICKS beyond the actual support level or panic wick where
+  # buyers stepped in, not at a round percentage. A round number is where
+  # everyone else's stop sits, which is exactly where price goes hunting.
+  structural_stop_ticks: 2       # ticks BEYOND the level, not at it
+  prefer_structural_stop: true   # fall back to ATR only when no level is named
+
+  # --- Time stop -----------------------------------------------------------
+  # A mean-reversion entry is a bet that buyers are absorbing supply. If it has
+  # not bounced within this many minutes, the bet is simply wrong — supply is
+  # still in control. Exit at market rather than waiting for the price stop.
+  time_stop_minutes: 30
+  time_stop_setups: ["Mean Reversion"]   # which setups the timer applies to
   # Trailing
   trail_after_r: 1.0             # start trailing once trade is +1R
   trail_step_r: 0.5
@@ -199,6 +213,9 @@ data:
   # makes PCR, Max Pain and buildup readings meaningful. It blocks some
   # networks and most non-Indian IPs; the stack falls back to Yahoo.
   use_nse: true
+  # Stooq is a third keyless source: reliable DAILY history, no option chains.
+  # It is the safety net when Yahoo is blocked by a corporate network.
+  use_stooq: true
   # Seconds to cache a quote before re-fetching. Be considerate to free feeds.
   quote_cache_seconds: 20
 
