@@ -28,9 +28,13 @@ log = get_logger("agent.dispatcher")
 class Dispatcher:
     agent_id = "dispatcher"
 
-    def __init__(self, broker: BrokerAdapter, cfg: Config | None = None) -> None:
+    def __init__(self, broker: BrokerAdapter, cfg: Config | None = None,
+                 trading_day: Any = None) -> None:
         self.cfg = cfg or get_config()
         self.broker = broker
+        # Set by the engine. When present, the session must be explicitly armed
+        # for today before any order is sent.
+        self.trading_day = trading_day
 
     async def dispatch(self, signal: TradeSignal) -> dict[str, Any]:
         if signal.status == SignalStatus.REJECTED:
@@ -75,6 +79,13 @@ class Dispatcher:
         """
         auto = bool(self.cfg.get("execution.auto_place_orders", False))
         if not auto:
+            return False
+
+        # A config flag left on from last week must not trade today's market.
+        # Arming is a decision taken each morning and expires with the session.
+        if self.trading_day is not None and not self.trading_day.armed:
+            log.info("signal alert-only — the trading day is not armed. "
+                     "Press Start trading day to place orders.")
             return False
 
         if getattr(self.broker, "is_paper_account", True):

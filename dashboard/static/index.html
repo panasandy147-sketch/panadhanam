@@ -76,6 +76,27 @@
     </div>
   </section>
 
+  <!-- ====================== TRADING DAY =========================== -->
+  <section class="card span-all">
+    <h2>Trading Day <span class="count" id="td-meta"></span></h2>
+    <div class="chart-toolbar">
+      <button id="btn-td-start" class="primary">▶ Start trading day</button>
+      <button id="btn-td-stop" disabled>Stop</button>
+      <button id="btn-td-report">Day report</button>
+      <span class="badge" id="td-badge">not armed</span>
+      <span style="font-size:11.5px;color:var(--text-muted)">
+        Arms order placement for <b>today only</b>. The desk keeps analysing
+        either way — disarmed means alerts, not orders.
+      </span>
+    </div>
+    <div id="td-body">
+      <div class="empty">
+        Press <b>Start trading day</b> at the open. The desk cycles on its own
+        from then on; you do not need to do anything else.
+      </div>
+    </div>
+  </section>
+
   <!-- ====================== PRACTICE DAY ========================== -->
   <section class="card span-all">
     <h2>Practice Day <span class="count" id="practice-meta"></span></h2>

@@ -128,6 +128,14 @@ def save_card(card: MistakeCard) -> Path:
 
 def entries(limit: int = 200, setup: str | None = None,
             verdict: str | None = None) -> list[dict[str, Any]]:
+    """Journal rows, or an empty list if the journal has never been written.
+
+    The tables are created on first use, so any read-only caller — the day
+    report, the analytics panel — must tolerate their absence rather than
+    crash on a fresh install.
+    """
+    import sqlite3
+
     q = "SELECT * FROM journal_entries"
     clauses, params = [], []
     if setup:
@@ -140,18 +148,29 @@ def entries(limit: int = 200, setup: str | None = None,
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY ts DESC LIMIT ?"
     params.append(limit)
-    return [dict(r) for r in get_conn().execute(q, params).fetchall()]
+    try:
+        return [dict(r) for r in get_conn().execute(q, params).fetchall()]
+    except sqlite3.OperationalError:
+        return []
 
 
 def cards(limit: int = 50) -> list[dict[str, Any]]:
-    rows = get_conn().execute(
-        "SELECT * FROM mistake_cards ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    import sqlite3
+    try:
+        rows = get_conn().execute(
+            "SELECT * FROM mistake_cards ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    except sqlite3.OperationalError:
+        return []
     return [dict(r) for r in rows]
 
 
 def get_entry(trade_id: str) -> dict[str, Any] | None:
-    row = get_conn().execute(
-        "SELECT * FROM journal_entries WHERE id = ?", (trade_id,)).fetchone()
+    import sqlite3
+    try:
+        row = get_conn().execute(
+            "SELECT * FROM journal_entries WHERE id = ?", (trade_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
     return dict(row) if row else None
 
 

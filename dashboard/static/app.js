@@ -54,6 +54,7 @@ const state = {
   status: null,
   market: null,
   practice: null,
+  tradingDay: null,
   switching: false,
   chart: null,
   series: {},
@@ -103,11 +104,12 @@ function handle(event) {
     case "signal.approved":
     case "signal.proposed":
     case "signal.rejected":     upsertSignal(data); break;
-    case "risk.state":          renderRisk(data); break;
+    case "risk.state":          renderRisk(data); loadTradingDay(); break;
     case "news.item":           addNews(data); break;
     case "macro.update":        renderMacro(data); break;
     case "learning.update":     loadScorecard(); break;
     case "market.switched":     applyMarket(data.market); break;
+    case "trading_day.state":  renderTradingDay(data); break;
     case "practice.state":     renderPractice(data); break;
     case "practice.progress":  if (state.practice) {
                                  state.practice.result = data;
@@ -900,6 +902,123 @@ async function loadScorecard() {
 
 
 
+
+/* ====================================================================== */
+/* Trading day                                                            */
+/* ====================================================================== */
+function renderTradingDay(td) {
+  if (!td) return;
+  state.tradingDay = td;
+
+  $("btn-td-start").disabled = td.armed;
+  $("btn-td-stop").disabled = !td.armed;
+
+  const badge = $("td-badge");
+  if (td.armed) {
+    badge.textContent = td.orders_will_be_placed
+      ? `ARMED · orders will be placed (${td.broker})`
+      : `ARMED · alerts only (auto_place_orders is off)`;
+    badge.className = "badge " + (td.is_paper_account ? "ok" : "live");
+  } else {
+    badge.textContent = td.disarm_reason ? `not armed — ${td.disarm_reason}` : "not armed";
+    badge.className = "badge";
+  }
+
+  $("td-meta").textContent =
+    `${td.today} · market ${td.market_time} · ${td.phase}`;
+
+  const halted = td.halted
+    ? `<div class="banner crit" style="margin:12px 14px">Desk halted — no new
+       positions today.</div>` : "";
+
+  $("td-body").innerHTML = `${halted}
+    <div class="calc-out">
+      <div><div class="k">Session</div><div class="v" style="font-size:14px">${esc(td.phase)}</div>
+           <div class="k" style="margin-top:3px">market ${esc(td.market_time)}</div></div>
+      <div><div class="k">Account</div>
+           <div class="v ${td.is_paper_account ? "" : "neg"}" style="font-size:13px">
+             ${td.is_paper_account ? "SIMULATOR" : "REAL MONEY"}</div>
+           <div class="k" style="margin-top:3px">${esc(td.broker)}</div></div>
+      <div><div class="k">Day P&amp;L</div>
+           <div class="v ${signClass(td.day_pnl)}">${td.day_pnl >= 0 ? "+" : ""}${money(Math.round(td.day_pnl))}</div></div>
+      <div><div class="k">Trades today</div><div class="v">${fmtInt(td.trades_today)}</div>
+           <div class="k" style="margin-top:3px">${td.wins}W / ${td.losses}L</div></div>
+      <div><div class="k">Open now</div><div class="v">${fmtInt(td.open_positions)}</div></div>
+      <div><div class="k">Room before halt</div>
+           <div class="v">${money(Math.round(td.room_before_halt))}</div></div>
+    </div>`;
+}
+
+async function loadTradingDay() {
+  const res = await fetch("/api/trading-day/status");
+  if (res.ok) renderTradingDay(await res.json());
+}
+
+async function startTradingDay() {
+  const res = await fetch("/api/trading-day/start", { method: "POST" });
+  const d = await res.json();
+  if (!res.ok) {
+    $("td-body").innerHTML =
+      `<div class="banner crit" style="margin:12px 14px">${esc(d.detail)}</div>`;
+    return;
+  }
+  renderTradingDay(d.status);
+}
+
+async function showDayReport() {
+  const res = await fetch("/api/trading-day/report");
+  if (!res.ok) return;
+  const r = await res.json();
+
+  const rows = (r.trades || []).map((t) => `
+    <tr>
+      <td>${esc(t.time)}</td>
+      <td>${esc(t.symbol)}</td>
+      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
+      <td class="num">${fmt(t.entry)}</td>
+      <td class="num neg">${fmt(t.stop)}</td>
+      <td class="num pos">${fmt(t.target)}</td>
+      <td class="num">${t.exit ? fmt(t.exit) : "—"}</td>
+      <td>${esc(t.status)}</td>
+      <td class="num ${signClass(t.r_multiple)}">${t.r_multiple != null
+        ? (t.r_multiple >= 0 ? "+" : "") + fmt(t.r_multiple, 2) + "R" : "open"}</td>
+      <td class="num ${signClass(t.pnl)}">${t.pnl != null ? money(Math.round(t.pnl)) : "—"}</td>
+    </tr>`).join("");
+
+  const why = (r.top_rejections || []).map((x) =>
+    `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
+
+  $("td-body").innerHTML = `
+    <div class="calc-out">
+      <div><div class="k">Signals generated</div><div class="v">${fmtInt(r.signals_generated)}</div></div>
+      <div><div class="k">Trades taken</div><div class="v">${fmtInt(r.trades_taken)}</div></div>
+      <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div>
+           <div class="k" style="margin-top:3px">${r.still_open} still open</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(r.win_rate, 0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(r.total_r)}">${r.total_r >= 0 ? "+" : ""}${fmt(r.total_r, 2)}R</div></div>
+      <div><div class="k">P&amp;L</div>
+           <div class="v ${signClass(r.pnl)}">${money(Math.round(r.pnl))}</div></div>
+    </div>
+
+    <div style="padding:10px 14px;font-size:11.5px;color:var(--text-muted)">
+      ${esc(r.date)} · ${esc(r.market)} · ${esc(r.broker)}
+      (${r.is_paper_account ? "simulator" : "REAL MONEY"}) ·
+      ${esc(r.data_source?.label || "")}
+    </div>
+
+    ${rows ? `<table><thead><tr>
+      <th>Time</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
+      <th class="num">Stop</th><th class="num">Target</th><th class="num">Exit</th>
+      <th>Status</th><th class="num">R</th><th class="num">P&amp;L</th>
+      </tr></thead><tbody>${rows}</tbody></table>`
+      : `<div class="empty">No trades taken today.</div>`}
+
+    ${why ? `<div class="practice-why">
+      <div class="k">Why the desk stayed out (${fmtInt(r.rejected)} rejections)</div>
+      <ul>${why}</ul></div>` : ""}`;
+}
+
 /* ====================================================================== */
 /* Practice day                                                           */
 /* ====================================================================== */
@@ -1302,6 +1421,11 @@ function bind() {
     const btn = e.target.closest("button[data-market]");
     if (btn) switchMarket(btn.dataset.market);
   };
+  $("btn-td-start").onclick = startTradingDay;
+  $("btn-td-stop").onclick = async () => {
+    renderTradingDay(await (await fetch("/api/trading-day/stop", { method: "POST" })).json());
+  };
+  $("btn-td-report").onclick = showDayReport;
   $("btn-practice").onclick = startPractice;
   $("btn-practice-pause").onclick = async () => {
     renderPractice(await (await fetch("/api/practice/pause", { method: "POST" })).json());
@@ -1348,8 +1472,9 @@ function bind() {
   await loadWatchlist();
   await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(),
                      runCalc(), loadJournalStats(), loadJournalLog(),
-                     loadPracticeStatus()]);
+                     loadPracticeStatus(), loadTradingDay()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);
+  setInterval(loadTradingDay, 30_000);
 })();
