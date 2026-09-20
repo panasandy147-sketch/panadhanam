@@ -93,6 +93,8 @@ class Opportunity:
                 "target": s.target,
                 "quantity": s.quantity,
                 "lots": s.lots,
+                "unit_size": s.unit_size,
+                "unit_label": s.unit_label,
                 "risk_reward": s.risk_reward,
                 "total_risk": s.total_risk,
                 "capital_at_risk_pct": s.capital_at_risk_pct,

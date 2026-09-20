@@ -40,8 +40,12 @@ class MacroCollector:
         self._last: MacroSnapshot | None = None
 
     async def fetch(self) -> MacroSnapshot:
-        keys = [d["key"] for d in (self.cfg.get("macro.global_indices") or [])]
-        keys = keys or list(YF_MAP)
+        # The profile names each market's own macro dashboard: India watches
+        # GIFT Nifty, crude and USD/INR; the US watches ES, the 10Y and the VIX.
+        entries = self.cfg.get("macro.global_indices") or []
+        self._tickers = {e["key"]: e.get("yahoo") for e in entries if e.get("key")}
+        self._labels = {e["key"]: e.get("label", e["key"]) for e in entries if e.get("key")}
+        keys = list(self._tickers) or list(YF_MAP)
 
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True,
                                      headers={"User-Agent": "Mozilla/5.0"}) as client:
@@ -56,13 +60,15 @@ class MacroCollector:
             snap.values[key] = level
             snap.changes_pct[key] = change
 
-        snap.india_vix = snap.values.get("india_vix")
+        # Whichever volatility gauge this market uses.
+        snap.india_vix = snap.values.get("india_vix") or snap.values.get("vix")
+        snap.labels = getattr(self, "_labels", {})
         snap.notes = self._interpret(snap)
         self._last = snap
         return snap
 
     async def _one(self, client: httpx.AsyncClient, key: str) -> tuple[float, float] | None:
-        ticker = YF_MAP.get(key)
+        ticker = getattr(self, "_tickers", {}).get(key) or YF_MAP.get(key)
         if not ticker:
             return None
         try:
@@ -85,6 +91,20 @@ class MacroCollector:
         ch = snap.changes_pct
 
         gift = ch.get("gift_nifty")
+        if gift is None and self.cfg.active_market == "US":
+            # The US "pre-open read" is the S&P future, not GIFT Nifty.
+            sp = ch.get("us_sp500")
+            if sp is not None:
+                if sp > 0.3:
+                    notes.append(f"S&P futures +{sp:.2f}% — gap-up bias into the open")
+                elif sp < -0.3:
+                    notes.append(f"S&P futures {sp:.2f}% — gap-down bias into the open")
+                else:
+                    notes.append(f"S&P futures {sp:+.2f}% — flat open expected")
+            ten_year = ch.get("us10y")
+            if ten_year is not None and abs(ten_year) > 1.5:
+                notes.append(f"10Y yield {ten_year:+.2f}% — "
+                             f"{'a headwind for growth names' if ten_year > 0 else 'supportive for duration'}")
         if gift is not None:
             if gift > 0.4:
                 notes.append(f"GIFT Nifty proxy +{gift:.2f}% — gap-up bias into the open")
@@ -113,6 +133,12 @@ class MacroCollector:
         if dxy_ch is not None and dxy_ch > 0.4:
             notes.append(f"Dollar index +{dxy_ch:.2f}% — pressure on EM flows")
 
+        if self.cfg.active_market == "US":
+            gold = ch.get("gold")
+            if gold is not None and abs(gold) > 1.5:
+                notes.append(f"Gold {gold:+.2f}% — "
+                             f"{'risk-off rotation' if gold > 0 else 'risk appetite returning'}")
+
         usdinr = snap.values.get("usdinr")
         usdinr_ch = ch.get("usdinr")
         if usdinr and usdinr_ch is not None and usdinr_ch > 0.3:
@@ -120,14 +146,15 @@ class MacroCollector:
 
         vix = snap.india_vix
         if vix:
+            label = "India VIX" if self.cfg.active_market == "IN" else "VIX"
             panic = float(self.cfg.get("macro.vix_panic_level", 20.0))
             calm = float(self.cfg.get("macro.vix_calm_level", 12.0))
             if vix >= panic:
-                notes.append(f"India VIX {vix:.1f} above {panic} — elevated fear, cut position size")
+                notes.append(f"{label} {vix:.1f} above {panic} — elevated fear, cut position size")
             elif vix <= calm:
-                notes.append(f"India VIX {vix:.1f} below {calm} — complacency, watch for volatility expansion")
+                notes.append(f"{label} {vix:.1f} below {calm} — complacency, watch for volatility expansion")
             else:
-                notes.append(f"India VIX {vix:.1f} — normal volatility regime")
+                notes.append(f"{label} {vix:.1f} — normal volatility regime")
 
         return notes or ["Macro data unavailable this cycle"]
 

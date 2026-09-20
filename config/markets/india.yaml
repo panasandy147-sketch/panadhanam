@@ -1,0 +1,104 @@
+# ==========================================================================
+# MARKET PROFILE — India (NSE / BSE)
+#
+# Everything that differs between markets lives in a file like this one.
+# Adding a third market (say Japan) means copying this file and editing it;
+# no Python changes.
+# ==========================================================================
+
+market:
+  code: "IN"
+  name: "India"
+  exchange: "NSE"
+  flag: "🇮🇳"
+  timezone: "Asia/Kolkata"
+  # Drives the dashboard accent so you always know which desk you're on.
+  accent: "#ff9933"
+  accent_dark: "#e8873a"
+
+currency:
+  symbol: "₹"
+  code: "INR"
+  locale: "en-IN"
+  # Indian numbering (lakh/crore) — 1,00,000 not 100,000
+  grouping: "indian"
+
+session:
+  market_open: "09:15"
+  market_close: "15:30"
+  premarket_scan_time: "08:45"
+  no_new_entry_after: "15:00"
+  square_off_time: "15:15"
+  # Mon-Fri. 0 = Monday.
+  trading_days: [0, 1, 2, 3, 4]
+
+derivatives:
+  # Indian F&O trades in exchange-defined lots; one "lot" is many shares.
+  lot_based: true
+  contract_multiplier: 1
+  # NSE weeklies expire Thursday (3 = Thursday).
+  weekly_expiry_weekday: 3
+  monthly_expiry_rule: "last_thursday"
+  strike_steps:
+    NIFTY: 50
+    BANKNIFTY: 100
+    FINNIFTY: 50
+    default_pct: 1.0        # fallback: ~1% of spot, rounded
+
+fundamentals:
+  # Yahoo Finance ticker suffix for this market's equities.
+  yahoo_suffix: ".NS"
+
+brokers:
+  supported: ["paper", "zerodha", "upstox", "angelone"]
+  default: "paper"
+
+macro:
+  vix_panic_level: 20.0
+  vix_calm_level: 12.0
+  global_indices:
+    - { key: "gift_nifty",  label: "GIFT Nifty",       yahoo: "^NSEI" }
+    - { key: "sensex",      label: "Sensex",           yahoo: "^BSESN" }
+    - { key: "us_sp500",    label: "S&P 500 Futures",  yahoo: "ES=F" }
+    - { key: "us_nasdaq",   label: "Nasdaq Futures",   yahoo: "NQ=F" }
+    - { key: "crude",       label: "Brent Crude",      yahoo: "BZ=F" }
+    - { key: "dxy",         label: "Dollar Index",     yahoo: "DX-Y.NYB" }
+    - { key: "usdinr",      label: "USD/INR",          yahoo: "INR=X" }
+    - { key: "india_vix",   label: "India VIX",        yahoo: "^INDIAVIX" }
+
+news:
+  sources:
+    - { name: "Moneycontrol Markets", type: rss,
+        url: "https://www.moneycontrol.com/rss/marketreports.xml" }
+    - { name: "Moneycontrol Business", type: rss,
+        url: "https://www.moneycontrol.com/rss/business.xml" }
+    - { name: "Economic Times Markets", type: rss,
+        url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms" }
+    - { name: "Livemint Markets", type: rss,
+        url: "https://www.livemint.com/rss/markets" }
+    - { name: "Business Standard Markets", type: rss,
+        url: "https://www.business-standard.com/rss/markets-106.rss" }
+    - { name: "Google News — NSE", type: rss,
+        url: "https://news.google.com/rss/search?q=NSE+OR+Nifty+OR+Sensex+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
+
+universe:
+  indices:
+    - { symbol: "NIFTY 50",   trading_symbol: "NIFTY",     exchange: "NSE", lot_size: 75, fno: true, tick_size: 0.05, seed_price: 24200 }
+    - { symbol: "NIFTY BANK", trading_symbol: "BANKNIFTY", exchange: "NSE", lot_size: 30, fno: true, tick_size: 0.05, seed_price: 51500 }
+    - { symbol: "FINNIFTY",   trading_symbol: "FINNIFTY",  exchange: "NSE", lot_size: 65, fno: true, tick_size: 0.05, seed_price: 23100 }
+  stocks:
+    - { symbol: "RELIANCE",   exchange: "NSE", lot_size: 500, fno: true, sector: "Energy",  seed_price: 2950 }
+    - { symbol: "HDFCBANK",   exchange: "NSE", lot_size: 550, fno: true, sector: "Banking", seed_price: 1680 }
+    - { symbol: "ICICIBANK",  exchange: "NSE", lot_size: 700, fno: true, sector: "Banking", seed_price: 1240 }
+    - { symbol: "INFY",       exchange: "NSE", lot_size: 400, fno: true, sector: "IT",      seed_price: 1870 }
+    - { symbol: "TCS",        exchange: "NSE", lot_size: 175, fno: true, sector: "IT",      seed_price: 4100 }
+    - { symbol: "SBIN",       exchange: "NSE", lot_size: 750, fno: true, sector: "Banking", seed_price: 815 }
+    - { symbol: "TATAMOTORS", exchange: "NSE", lot_size: 550, fno: true, sector: "Auto",    seed_price: 975 }
+    - { symbol: "AXISBANK",   exchange: "NSE", lot_size: 625, fno: true, sector: "Banking", seed_price: 1150 }
+    - { symbol: "LT",         exchange: "NSE", lot_size: 150, fno: true, sector: "Infra",   seed_price: 3600 }
+    - { symbol: "BHARTIARTL", exchange: "NSE", lot_size: 475, fno: true, sector: "Telecom", seed_price: 1580 }
+  blacklist: []
+  sector_max_positions:
+    Banking: 2
+    IT: 2
+    default: 2

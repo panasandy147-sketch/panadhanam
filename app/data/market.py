@@ -143,7 +143,11 @@ async def fetch_fundamentals(symbol: str) -> Fundamentals | None:
     """
     import httpx
 
-    url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}.NS"
+    # Indian equities need a ".NS" suffix on Yahoo; US tickers take none.
+    from app.core.config import get_config
+    suffix = get_config().market.yahoo_suffix
+    url = ("https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
+           f"{symbol}{suffix}")
     modules = "defaultKeyStatistics,financialData,summaryDetail"
     try:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True,

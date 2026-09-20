@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.brokers.base import BrokerAdapter, OrderResult
+from app.core.config import get_config
 from app.core.logging import get_logger
 from app.core.models import Candle, Instrument, OptionChain, OptionLeg, Quote, Side
 from app.core.registry import register_broker
@@ -174,9 +175,26 @@ class PaperBroker(BrokerAdapter):
     def _market(self, symbol: str) -> _SyntheticMarket:
         key = canonical(symbol)
         if key not in self._markets:
-            seed = _SEED_PRICES.get(key, random.Random(key).uniform(200, 3000))
-            self._markets[key] = _SyntheticMarket(key, seed)
+            self._markets[key] = _SyntheticMarket(key, self._seed_price(symbol, key))
         return self._markets[key]
+
+    @staticmethod
+    def _seed_price(symbol: str, key: str) -> float:
+        """Start each symbol near a plausible level for its own market.
+
+        The profile carries `seed_price` per symbol, so switching to the US
+        gives SPY around 585 rather than an Indian index level.
+        """
+        cfg = get_config()
+        for item in cfg.watchlist():
+            if item.get("symbol") in {symbol, key} or \
+               item.get("trading_symbol") in {symbol, key}:
+                seed = item.get("seed_price")
+                if seed:
+                    return float(seed)
+        if key in _SEED_PRICES:
+            return _SEED_PRICES[key]
+        return random.Random(key).uniform(50, 500)
 
     # ----------------------- market data -----------------------
     async def get_quote(self, symbol: str) -> Quote | None:
@@ -194,12 +212,16 @@ class PaperBroker(BrokerAdapter):
         return self._market(symbol).candles(timeframe, count)
 
     async def get_expiries(self, underlying: str) -> list[str]:
-        today = datetime.now().date()
-        # Next 4 Thursdays — NSE weekly expiry convention.
-        out, d = [], today
+        """Weekly expiries on this market's expiry weekday.
+
+        NSE weeklies land on Thursday; US weeklies on Friday.
+        """
+        weekday = get_config().market.weekly_expiry_weekday
+        out: list[str] = []
+        d = datetime.now().date()
         while len(out) < 4:
             d += timedelta(days=1)
-            if d.weekday() == 3:
+            if d.weekday() == weekday:
                 out.append(d.isoformat())
         return out
 
@@ -217,7 +239,8 @@ class PaperBroker(BrokerAdapter):
         exp = expiry or expiries[0]
         dte = max((datetime.fromisoformat(exp).date() - datetime.now().date()).days, 1)
 
-        step = _STRIKE_STEP.get(canonical(underlying), max(round(spot * 0.01 / 5) * 5, 5.0))
+        # Strike ladders are a market convention: NIFTY moves in 50s, SPY in 1s.
+        step = get_config().market.strike_step(canonical(underlying), spot)
         atm = round(spot / step) * step
         rng = random.Random(f"{canonical(underlying)}{exp}")
         base_iv = rng.uniform(0.12, 0.28)

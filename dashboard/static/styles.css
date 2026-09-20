@@ -689,3 +689,108 @@ input:focus, select:focus {
   border-color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
+
+
+/* ==========================================================================
+   Market theming
+   Each market gets its own accent and a subtly different page tint, so a
+   glance at the screen tells you which desk you are on. The categorical
+   series colours are deliberately NOT re-themed — an agent must keep the
+   same colour in both markets or the scorecard becomes unreadable.
+   ========================================================================== */
+:root[data-market="IN"] {
+  --market-accent: #ff9933;          /* saffron */
+  --market-accent-soft: rgba(255, 153, 51, 0.13);
+  --page: #12100d;                   /* warm-tinted near-black */
+  --surface-1: #1c1916;
+  --surface-2: #241f1b;
+  --surface-3: #2e2822;
+}
+:root[data-market="US"] {
+  --market-accent: #3987e5;          /* blue */
+  --market-accent-soft: rgba(57, 135, 229, 0.13);
+  --page: #0b0e12;                   /* cool-tinted near-black */
+  --surface-1: #161a1f;
+  --surface-2: #1d2228;
+  --surface-3: #262c34;
+}
+:root[data-theme="light"][data-market="IN"] {
+  --market-accent: #c2610a;
+  --market-accent-soft: rgba(194, 97, 10, 0.10);
+  --page: #fbf8f3;
+  --surface-1: #fffdf9;
+  --surface-2: #f4efe6;
+  --surface-3: #e9e2d5;
+}
+:root[data-theme="light"][data-market="US"] {
+  --market-accent: #2a78d6;
+  --market-accent-soft: rgba(42, 120, 214, 0.10);
+  --page: #f6f8fb;
+  --surface-1: #fcfdff;
+  --surface-2: #eef2f7;
+  --surface-3: #e2e8f0;
+}
+
+/* A coloured rule under the header — the fastest "which market?" tell. */
+header {
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 -3px 0 0 var(--market-accent, var(--series-1));
+}
+.brand h1 { color: var(--market-accent, var(--text-primary)); }
+button.primary {
+  background: var(--market-accent, var(--series-1));
+  border-color: var(--market-accent, var(--series-1));
+  color: #0d0d0d;
+  font-weight: 650;
+}
+.tf-group button[aria-pressed="true"] {
+  background: var(--market-accent, var(--series-1));
+  border-color: var(--market-accent, var(--series-1));
+  color: #0d0d0d;
+}
+
+/* ---- the market switch itself ---- */
+.market-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.market-switch button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.market-switch button:hover:not([aria-pressed="true"]) {
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+.market-switch button[aria-pressed="true"] {
+  background: var(--market-accent-soft);
+  color: var(--market-accent);
+  box-shadow: inset 0 0 0 1px var(--market-accent);
+}
+.market-switch button:disabled { opacity: 0.5; cursor: wait; }
+.market-switch .flag { font-size: 14px; line-height: 1; }
+
+.badge.market {
+  color: var(--market-accent);
+  border-color: var(--market-accent);
+  background: var(--market-accent-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .market-switch button span.label { display: none; }
+}

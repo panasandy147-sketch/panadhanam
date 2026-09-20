@@ -14,12 +14,17 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+from app.core.logging import get_logger
+from app.core.markets import MarketProfile, load_profiles
+
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data" / "runtime"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 load_dotenv(ROOT / ".env", override=False)
+
+log = get_logger("config")
 
 _lock = threading.RLock()
 
@@ -53,15 +58,68 @@ class Config:
         self.settings: dict[str, Any] = {}
         self.agents: dict[str, Any] = {}
         self.universe: dict[str, Any] = {}
+        self.profiles: dict[str, MarketProfile] = {}
+        self.active_market: str = "IN"
         self.reload()
 
     # ---------------- loading ----------------
     def reload(self) -> None:
         with _lock:
-            self.settings = self._load("settings.yaml")
+            self._base_settings = self._load("settings.yaml")
             self.agents = self._load("agents.yaml")
-            self.universe = self._load("universe.yaml")
-            self._apply_env_overrides()
+            self._base_universe = self._load("universe.yaml")
+            self.profiles = load_profiles()
+
+            requested = (_env("ACTIVE_MARKET")
+                         or self._base_settings.get("system", {}).get("default_market")
+                         or "IN")
+            self._activate(str(requested).upper())
+
+    # ---------------- market switching ----------------
+    def _activate(self, code: str) -> None:
+        """Overlay a market profile onto the base settings."""
+        code = code.upper()
+        if code not in self.profiles:
+            if self.profiles:
+                fallback = next(iter(self.profiles))
+                log.warning("unknown market '%s' (have: %s) — using %s",
+                            code, ", ".join(self.profiles), fallback)
+                code = fallback
+            else:
+                # No profiles on disk: fall back to the standalone files so the
+                # system still runs rather than failing to start.
+                self.settings = dict(self._base_settings)
+                self.universe = dict(self._base_universe)
+                self.active_market = "IN"
+                self._apply_env_overrides()
+                return
+
+        profile = self.profiles[code]
+        self.active_market = code
+        self.settings = profile.apply_to(self._base_settings)
+        # A profile's universe wins; the standalone universe.yaml is the
+        # fallback for setups that predate market profiles.
+        self.universe = profile.universe() or dict(self._base_universe)
+        self._apply_env_overrides()
+
+    def switch_market(self, code: str) -> str:
+        """Change the active market at runtime. Returns the code now active."""
+        with _lock:
+            previous = self.active_market
+            self._activate(code)
+            if self.active_market != previous:
+                log.info("switched market: %s → %s", previous, self.active_market)
+            return self.active_market
+
+    @property
+    def market(self) -> MarketProfile:
+        profile = self.profiles.get(self.active_market)
+        if profile is None:
+            return MarketProfile({})
+        return profile
+
+    def available_markets(self) -> list[dict[str, Any]]:
+        return [p.describe() for p in self.profiles.values()]
 
     @staticmethod
     def _load(name: str) -> dict[str, Any]:
@@ -132,7 +190,8 @@ class Config:
             if item["symbol"] == symbol or item.get("trading_symbol") == symbol:
                 return item
         return {"symbol": symbol, "trading_symbol": symbol, "lot_size": 1,
-                "exchange": "NSE", "tick_size": 0.05, "is_index": False}
+                "exchange": self.market.exchange or "NSE",
+                "tick_size": 0.05, "is_index": False}
 
     # ---------------- secrets / env ----------------
     @property
@@ -153,7 +212,15 @@ class Config:
 
     @property
     def broker_name(self) -> str:
-        return str(self.get("execution.broker", "paper"))
+        name = str(self.get("execution.broker", "paper"))
+        supported = self.market.supported_brokers
+        if supported and name not in supported:
+            log.warning("broker '%s' is not available for the %s market "
+                        "(supported: %s) — using %s",
+                        name, self.active_market, ", ".join(supported),
+                        self.market.default_broker)
+            return self.market.default_broker
+        return name
 
     @property
     def trading_mode(self) -> str:

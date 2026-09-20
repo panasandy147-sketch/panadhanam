@@ -127,6 +127,7 @@ class MacroSnapshot(BaseModel):
     fetched_at: datetime = Field(default_factory=utcnow)
     values: dict[str, float] = Field(default_factory=dict)      # key -> level
     changes_pct: dict[str, float] = Field(default_factory=dict)  # key -> % change
+    labels: dict[str, str] = Field(default_factory=dict)         # key -> display name
     fii_cash: float | None = None
     dii_cash: float | None = None
     india_vix: float | None = None
@@ -207,6 +208,11 @@ class TradeSignal(BaseModel):
     target: float
     quantity: int = 0
     lots: int = 0
+    # How many underlying units one lot/contract represents. 1 means the
+    # instrument trades in single shares and has no lot concept at all, so the
+    # UI must not print "99 lots" for 99 shares of QQQ.
+    unit_size: int = 1
+    unit_label: str = "unit"
     # Spot of the UNDERLYING at entry. For an option this is what lets the
     # outcome tracker mark the premium to market via delta.
     entry_spot: float | None = None

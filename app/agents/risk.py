@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.core import clock
 from app.core.config import Config, get_config
 from app.core.logging import get_logger
 from app.core.models import (
@@ -63,7 +64,8 @@ class RiskManager:
     # Day boundary
     # ------------------------------------------------------------------ #
     def roll_day_if_needed(self) -> None:
-        today = datetime.now().date()
+        today = clock.market_now(
+            str(self.cfg.get("system.timezone", "Asia/Kolkata"))).date()
         if today != self._day:
             log.info("new trading day — resetting daily risk counters")
             self._day = today
@@ -118,13 +120,8 @@ class RiskManager:
         return self.state.capital * leverage * pct
 
     def _past_entry_cutoff(self) -> bool:
-        cutoff = str(self.cfg.get("system.no_new_entry_after", "15:00"))
-        try:
-            h, m = (int(x) for x in cutoff.split(":"))
-        except ValueError:
-            return False
-        now = datetime.now()
-        return (now.hour, now.minute) >= (h, m)
+        return clock.past(str(self.cfg.get("system.timezone", "Asia/Kolkata")),
+                          str(self.cfg.get("system.no_new_entry_after", "15:00")))
 
     # ------------------------------------------------------------------ #
     # Core: build a sized, validated signal
@@ -209,18 +206,29 @@ class RiskManager:
                        float(self.cfg.get("risk.max_risk_per_trade_pct", 2.0)))
         risk_amount = self.state.capital * risk_pct / 100.0
 
+        # How many underlying units one tradeable unit represents.
+        #   India equity : 1        India option : exchange lot (e.g. 75)
+        #   US equity    : 1        US option    : 100 (contract multiplier)
+        is_option_leg = instrument.instrument_type in {InstrumentType.CALL,
+                                                       InstrumentType.PUT}
+        unit_size = max(instrument.lot_size, 1)
+        if is_option_leg and not self.cfg.market.lot_based:
+            unit_size = max(self.cfg.market.contract_multiplier, 1)
+
         quantity, lots = 0, 0
         if stop_points > 0:
             raw_qty = risk_amount / stop_points
-            if max(instrument.lot_size, 1) > 1:
-                lot_size = max(instrument.lot_size, 1)
+            if unit_size > 1:
+                lot_size = unit_size
                 lots = int(math.floor(raw_qty / lot_size))
                 quantity = lots * lot_size
                 if lots < 1:
+                    unit_word = "lot" if self.cfg.market.lot_based else "contract"
                     reasons.append(
-                        f"Position sizes to 0 lots: risk budget {risk_amount:,.0f} / "
-                        f"{stop_points:.2f} pts = {raw_qty:.1f} units, but one lot is "
-                        f"{lot_size}. Capital is too small for this stop distance.")
+                        f"Position sizes to 0 {unit_word}s: risk budget "
+                        f"{risk_amount:,.0f} / {stop_points:.2f} pts = "
+                        f"{raw_qty:.1f} units, but one {unit_word} is {lot_size}. "
+                        f"Capital is too small for this stop distance.")
             else:
                 quantity = int(math.floor(raw_qty))
                 lots = quantity
@@ -232,8 +240,8 @@ class RiskManager:
         # A tight stop naturally implies a large notional. A real desk cuts the
         # size to fit its exposure limit rather than passing on the trade; it
         # only passes when even the minimum tradeable size won't fit.
-        lot_size = max(instrument.lot_size, 1)
-        is_option = instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}
+        is_option = is_option_leg
+        lot_size = unit_size
 
         caps: list[tuple[str, float]] = []
         max_exposure = self._max_exposure()
@@ -251,10 +259,13 @@ class RiskManager:
                        if lot_size > 1 else int(math.floor(affordable)))
             if max_qty < quantity:
                 if max_qty <= 0:
+                    unit_word = ("lot" if (lot_size > 1 and self.cfg.market.lot_based)
+                                 else "contract" if lot_size > 1 else "unit")
+                    cur = self.cfg.market.currency_symbol
                     reasons.append(
-                        f"Cannot fit even one {'lot' if lot_size > 1 else 'unit'} "
-                        f"within the {label} (₹{budget:,.0f} available, "
-                        f"₹{entry * lot_size:,.0f} needed)")
+                        f"Cannot fit even one {unit_word} within the {label} "
+                        f"({cur}{budget:,.0f} available, "
+                        f"{cur}{entry * lot_size:,.0f} needed)")
                     quantity = 0
                     break
                 cap_note = (f"size trimmed from {quantity} to {max_qty} by the {label}")
@@ -279,6 +290,11 @@ class RiskManager:
 
         signal.quantity = quantity
         signal.lots = lots
+        signal.unit_size = unit_size
+        signal.unit_label = (
+            "lot" if (unit_size > 1 and self.cfg.market.lot_based)
+            else "contract" if unit_size > 1
+            else "share")
         signal.risk_per_unit = round(stop_points, 2)
         signal.reward_per_unit = round(reward_points, 2)
         signal.total_risk = round(stop_points * quantity, 2)
@@ -318,7 +334,9 @@ class RiskManager:
             strike = leg["strike"]
             opt_type = leg["option_type"]
             expiry = leg.get("expiry", ctx.option_chain.expiry)
-            tsym = self._option_tradingsymbol(meta.get("trading_symbol", ctx.symbol), expiry, strike, opt_type)
+            tsym = self._option_tradingsymbol(
+                meta.get("trading_symbol", ctx.symbol), expiry, strike, opt_type,
+                market=self.cfg.active_market)
             instrument = Instrument(
                 symbol=ctx.symbol, tradingsymbol=tsym,
                 instrument_type=InstrumentType.CALL if opt_type == "CE" else InstrumentType.PUT,
@@ -336,13 +354,23 @@ class RiskManager:
         return instrument, spot, None
 
     @staticmethod
-    def _option_tradingsymbol(underlying: str, expiry: str, strike: float, opt: str) -> str:
-        """NSE weekly convention, e.g. NIFTY25JAN24500CE."""
+    def _option_tradingsymbol(underlying: str, expiry: str, strike: float,
+                              opt: str, market: str = "IN") -> str:
+        """Each market names its option contracts differently.
+
+        NSE  : NIFTY25JAN24500CE
+        OCC  : SPY  260320C00585000   (root, YYMMDD, C/P, strike x1000 in 8 chars)
+        """
         try:
             d = datetime.fromisoformat(expiry)
-            return f"{underlying}{d:%y%b}".upper() + f"{int(strike)}{opt}"
-        except Exception:
+        except (TypeError, ValueError):
             return f"{underlying}{int(strike)}{opt}"
+
+        if market.upper() == "US":
+            cp = "C" if opt.upper() in {"CE", "C", "CALL"} else "P"
+            strike_part = f"{int(round(strike * 1000)):08d}"
+            return f"{underlying.upper():<6}{d:%y%m%d}{cp}{strike_part}".replace(" ", "")
+        return f"{underlying}{d:%y%b}".upper() + f"{int(strike)}{opt}"
 
     def _levels(self, ctx: MarketContext, bias: Bias, entry: float,
                 instrument: Instrument, source: AgentReport | None
@@ -449,6 +477,9 @@ class RiskManager:
                 max(0.0, self.state.daily_loss_limit + self.state.daily_pnl), 2),
             "max_exposure": round(self._max_exposure(), 2),
             "intraday_leverage": float(self.cfg.get("risk.intraday_leverage", 1.0)),
+            "currency": self.cfg.market.currency_symbol,
+            "currency_code": self.cfg.market.currency_code,
+            "market": self.cfg.active_market,
         }
 
     # ------------------------------------------------------------------ #

@@ -74,6 +74,28 @@ required.**
 
 ---
 
+## Two markets: India and the US
+
+Toggle between 🇮🇳 **India (NSE)** and 🇺🇸 **US (NYSE/NASDAQ)** from the top-left
+of the dashboard. The theme changes with it — saffron for India, blue for the US
+— so you always know which desk you're on.
+
+Switching swaps the session hours and **timezone**, the currency and its number
+grouping (`₹1,00,000` vs `$100,000`), the watchlist, the news feeds, the macro
+dashboard, the strike ladders, the expiry weekday (Thursday vs Friday) and the
+available brokers.
+
+The structural difference that matters: **Indian options trade in exchange lots
+(NIFTY = 75), US options use a 100× contract multiplier while equities trade in
+single shares.** The risk manager handles both, so a ₹1,00,000 account correctly
+refuses a NIFTY lot it cannot afford while a $100,000 account happily buys 99
+shares of QQQ.
+
+See **[docs/MARKETS.md](docs/MARKETS.md)** for the full comparison and how to add
+a third market (one YAML file).
+
+---
+
 ## Which trades should I take?
 
 Click **Scan watchlist** on the dashboard. Every symbol is ranked into
@@ -188,6 +210,7 @@ Set `BROKER=` in `.env` and add that broker's credentials.
 | **Zerodha Kite** | `zerodha` | daily login | `pip install kiteconnect`, then `python -m scripts.kite_login` |
 | **Upstox** | `upstox` | daily login | `python -m scripts.upstox_login` |
 | **Angel One** | `angelone` | fully automatic (TOTP) | `pip install smartapi-python pyotp` — no daily ritual |
+| **Alpaca** (US) | `alpaca` | API key | Free paper account with real data. No SDK needed. |
 
 **If a broker fails to authenticate the system falls back to paper mode and says
 so loudly.** A failed login never becomes a live trade.
@@ -225,7 +248,8 @@ and `POST /api/config/reload` applies changes without a restart:
 |---|---|
 | `config/settings.yaml` | every threshold: risk, consensus, indicators, IV limits, learning rate, risk-tier bands |
 | `config/agents.yaml` | the agent roster, their **prompts**, focus areas and hard rules |
-| `config/universe.yaml` | the watchlist, lot sizes, sector caps, blacklist |
+| `config/markets/*.yaml` | per-market: session, timezone, currency, universe, news, macro, expiry and strike conventions |
+| `config/universe.yaml` | legacy single-market watchlist (market profiles take precedence) |
 
 Some worked examples:
 
@@ -353,6 +377,8 @@ make lint
 | `POST /api/config/reload` | apply YAML changes with no restart |
 | `GET /api/signals` | signal history with rejection reasons |
 | `POST /api/risk/calculate` | position sizing |
+| `GET /api/markets` | active market, all profiles, market clock |
+| `POST /api/markets/{code}` | switch the desk to IN or US |
 | `GET /api/opportunities` | top N setups per risk tier (cached) |
 | `POST /api/opportunities/scan` | force a fresh watchlist scan |
 | `GET /api/replay?days=5` | replay the rules over recent sessions |
@@ -378,12 +404,13 @@ docker compose up --build      # → http://localhost:8000
 app/
   agents/      candlestick, derivatives, news, macro, fundamental,
                cmio (synthesis), risk (deterministic), dispatcher, graph (LangGraph)
-  brokers/     base ABC + paper, zerodha, upstox, angelone + factory
+  brokers/     base ABC + paper, zerodha, upstox, angelone, alpaca + factory
+config/markets/  per-market profiles (india.yaml, us.yaml)
   data/        market context builder, news RSS, macro feeds
   indicators/  ta.py, patterns.py, derivatives.py (Black-Scholes, PCR, Max Pain)
   analysis/    opportunity board (risk tiering), historical replay
   learning/    outcome tracking, EWMA agent re-weighting
-  core/        config, models, event bus, plugin registry
+  core/        config, market profiles, market clock, models, bus, registry
   api/         REST + WebSocket
 config/        settings.yaml, agents.yaml, universe.yaml  ← your editing surface
 dashboard/     single-page dashboard (no build step)
@@ -400,6 +427,8 @@ tests/         60 tests, risk logic covered hardest
 | Replay shows negative expectancy | on `BROKER=paper` that is expected: a random walk has no edge. On real data it means the configuration needs work — don't trade it. |
 | "Position sizes to 0 lots" | capital too small for that stop distance. The calculator explains it. |
 | Broker won't connect | check `.env`; Kite/Upstox tokens expire **daily**. |
+| Market switch refused | you have open positions. The new broker can't manage them — close first. |
+| US prices look thin | Alpaca's free IEX feed is a partial tape. Volume is understated; set `ALPACA_FEED=sip` if you pay for it. |
 | Chart empty | re-add `dashboard/static/vendor-lightweight-charts.js`. |
 
 ## License & disclaimer

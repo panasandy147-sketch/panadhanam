@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from app.core import clock
 from app.core.bus import bus
 from app.core.config import get_config, reload_config
 from app.storage import db
@@ -53,6 +54,33 @@ async def reload_cfg(request: Request) -> dict[str, Any]:
     if engine:
         engine.desk.reload()
     return {"reloaded": True, "analysts": cfg.enabled_analysts()}
+
+
+# --------------------------------------------------------------------------- #
+# Markets
+# --------------------------------------------------------------------------- #
+@router.get("/markets")
+async def markets(request: Request) -> dict[str, Any]:
+    cfg = get_config()
+    engine = getattr(request.app.state, "engine", None)
+    return {
+        "active": cfg.active_market,
+        "available": cfg.available_markets(),
+        "profile": cfg.market.describe(),
+        "clock": clock.describe(str(cfg.get("system.timezone", "Asia/Kolkata"))),
+        "phase": engine.session_phase() if engine else None,
+    }
+
+
+@router.post("/markets/{code}")
+async def switch_market(request: Request, code: str) -> dict[str, Any]:
+    """Switch the whole desk between markets (IN / US)."""
+    result = await _engine(request).switch_market(code)
+    if not result["switched"] and "reason" in result:
+        reason = result["reason"]
+        if "open" in reason or "unknown" in reason:
+            raise HTTPException(409, reason)
+    return result
 
 
 # --------------------------------------------------------------------------- #

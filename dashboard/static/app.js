@@ -22,12 +22,25 @@ const AGENT_LABELS = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+/* Number formatting follows the active market: India groups in lakh/crore
+   (1,00,000) and prints ₹; the US groups in thousands (100,000) and prints $.
+   Everything money-shaped goes through money(), so switching markets never
+   leaves a stale currency symbol on screen. */
+const locale = () => state.market?.currency?.locale || "en-IN";
+const cur = () => state.market?.currency?.symbol || "₹";
+
 const fmt = (n, d = 2) =>
   n === null || n === undefined || Number.isNaN(n)
     ? "—"
-    : Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+    : Number(n).toLocaleString(locale(), { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtInt = (n) =>
-  n === null || n === undefined ? "—" : Number(n).toLocaleString("en-IN");
+  n === null || n === undefined ? "—" : Number(n).toLocaleString(locale());
+const money = (n, d = 0) =>
+  n === null || n === undefined || Number.isNaN(n)
+    ? "—"
+    : cur() + Number(n).toLocaleString(locale(),
+        { minimumFractionDigits: d, maximumFractionDigits: d });
 const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neutral-ink");
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -39,6 +52,8 @@ const state = {
   signals: [],
   news: [],
   status: null,
+  market: null,
+  switching: false,
   chart: null,
   series: {},
   timeframe: "5m",
@@ -91,8 +106,103 @@ function handle(event) {
     case "news.item":           addNews(data); break;
     case "macro.update":        renderMacro(data); break;
     case "learning.update":     loadScorecard(); break;
+    case "market.switched":     applyMarket(data.market); break;
     case "position.update":     loadPositions(); break;
   }
+}
+
+
+/* ====================================================================== */
+/* Market switching                                                       */
+/* ====================================================================== */
+function applyMarket(profile) {
+  if (!profile) return;
+  state.market = profile;
+
+  // Drives the theme: accent colour and page tint per market.
+  document.documentElement.dataset.market = profile.code || "IN";
+
+  document.querySelectorAll("#market-switch button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.market === profile.code));
+  });
+
+  const capCur = $("cap-cur");
+  if (capCur) capCur.textContent = profile.currency?.symbol || "₹";
+
+  const s = profile.session || {};
+  document.title = `panadhanam — ${profile.name || profile.code}`;
+  $("market-clock").title =
+    `${profile.name}: ${s.market_open}–${s.market_close} ${profile.timezone}`;
+  renderMarketClock();
+}
+
+function renderMarketClock() {
+  const p = state.market;
+  if (!p || !p.timezone) return;
+  try {
+    const t = new Date().toLocaleTimeString("en-GB", {
+      timeZone: p.timezone, hour: "2-digit", minute: "2-digit",
+    });
+    const phase = state.status?.phase ? ` · ${state.status.phase}` : "";
+    $("market-clock").textContent = `${p.flag || ""} ${t}${phase}`;
+  } catch {
+    $("market-clock").textContent = p.code || "";
+  }
+}
+
+async function loadMarkets() {
+  const res = await fetch("/api/markets");
+  if (!res.ok) return;
+  const d = await res.json();
+  applyMarket(d.profile);
+}
+
+async function switchMarket(code) {
+  if (state.switching || code === state.market?.code) return;
+  state.switching = true;
+  const buttons = [...document.querySelectorAll("#market-switch button")];
+  buttons.forEach((b) => (b.disabled = true));
+
+  try {
+    const res = await fetch(`/api/markets/${code}`, { method: "POST" });
+    const d = await res.json();
+
+    if (!res.ok || d.switched === false) {
+      // The commonest refusal is open positions — switching would orphan them.
+      const why = d.detail || d.reason || "could not switch market";
+      $("banners").innerHTML =
+        `<div class="banner crit"><b>Market not switched.</b> ${esc(why)}</div>`;
+      return;
+    }
+
+    applyMarket(d.profile);
+
+    // Everything on screen belonged to the old market — clear it, don't let
+    // stale Indian signals sit under a US header.
+    state.agents = {};
+    state.signals = [];
+    state.news = [];
+    $("agents").innerHTML = `<div class="empty">Waiting for the first ${esc(d.profile.name)} cycle…</div>`;
+    $("signals").innerHTML = `<div class="empty">No signals yet for ${esc(d.profile.name)}.</div>`;
+    $("news").innerHTML = `<div class="empty">No headlines yet.</div>`;
+    $("opp-tiers").innerHTML =
+      `<div class="empty" style="grid-column:1/-1">Hit <b>Scan watchlist</b> to rank ${esc(d.profile.name)} symbols.</div>`;
+    $("replay-body").innerHTML = `<div class="empty">Run a replay for ${esc(d.profile.name)}.</div>`;
+    $("macro").innerHTML = `<div class="empty">Macro feed not yet loaded.</div>`;
+
+    await loadWatchlist();
+    initChart();
+    await Promise.all([loadChart(), loadPositions(), loadScorecard(),
+                       loadStatus(), runCalc()]);
+  } finally {
+    state.switching = false;
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+async function loadStatus() {
+  const res = await fetch("/api/status");
+  if (res.ok) applyStatus(await res.json());
 }
 
 /* ====================================================================== */
@@ -100,6 +210,8 @@ function handle(event) {
 /* ====================================================================== */
 function applyStatus(s) {
   state.status = s;
+  if (s.market && s.market.code !== state.market?.code) applyMarket(s.market);
+  renderMarketClock();
   const live = s.live_orders && s.auto_place_orders;
   const modeBadge = $("mode-badge");
   modeBadge.textContent = live ? "LIVE ORDERS" : "PAPER / ALERT-ONLY";
@@ -108,6 +220,9 @@ function applyStatus(s) {
   $("phase-badge").textContent = s.phase;
   $("phase-badge").className = "badge " + (s.phase === "open" ? "ok" : "");
   $("broker-badge").textContent = "broker: " + (s.desk?.broker ?? "—");
+  $("broker-badge").title = state.market
+    ? `Brokers available for ${state.market.name}: ${(state.market.brokers || []).join(", ")}`
+    : "";
   $("brain-badge").textContent =
     s.desk?.reasoning === "claude" ? `claude (${s.desk.model})` : "rule-based";
 
@@ -147,18 +262,18 @@ function renderRisk(r) {
   $("risk-stats").innerHTML = `
     <div class="stat">
       <div class="label">Capital</div>
-      <div class="value">₹${fmtInt(Math.round(r.capital))}</div>
+      <div class="value">${money(Math.round(r.capital))}</div>
       <div class="sub">${fmt(r.risk_per_trade_pct, 1)}% risked per trade</div>
     </div>
     <div class="stat">
       <div class="label">Day P&amp;L</div>
-      <div class="value ${signClass(r.daily_pnl)}">${r.daily_pnl >= 0 ? "+" : ""}₹${fmtInt(Math.round(r.daily_pnl))}</div>
-      <div class="sub">realised ₹${fmtInt(Math.round(r.realised_pnl))} · open ₹${fmtInt(Math.round(r.unrealised_pnl))}</div>
+      <div class="value ${signClass(r.daily_pnl)}">${r.daily_pnl >= 0 ? "+" : ""}${money(Math.round(r.daily_pnl))}</div>
+      <div class="sub">realised ${money(Math.round(r.realised_pnl))} · open ${money(Math.round(r.unrealised_pnl))}</div>
     </div>
     <div class="stat">
       <div class="label">Room before halt</div>
-      <div class="value">₹${fmtInt(Math.round(r.remaining_loss_budget))}</div>
-      <div class="sub">halts at −₹${fmtInt(Math.round(r.daily_loss_limit))} on the day</div>
+      <div class="value">${money(Math.round(r.remaining_loss_budget))}</div>
+      <div class="sub">halts at −${money(Math.round(r.daily_loss_limit))} on the day</div>
       <div class="meter" role="img"
            aria-label="${(used * 100).toFixed(0)}% of the daily loss limit used">
         <span class="${meterClass}" style="width:${(used * 100).toFixed(1)}%"></span>
@@ -166,7 +281,7 @@ function renderRisk(r) {
     </div>
     <div class="stat">
       <div class="label">Risk per trade</div>
-      <div class="value">₹${fmtInt(Math.round(r.risk_per_trade))}</div>
+      <div class="value">${money(Math.round(r.risk_per_trade))}</div>
       <div class="sub">min R:R ${fmt(r.min_risk_reward, 1)}:1</div>
     </div>
     <div class="stat">
@@ -177,7 +292,7 @@ function renderRisk(r) {
     <div class="stat">
       <div class="label">Desk status</div>
       <div class="value ${r.halted ? "neg" : "pos"}">${r.halted ? "HALTED" : "ACTIVE"}</div>
-      <div class="sub">exposure ₹${fmtInt(Math.round(r.exposure))}</div>
+      <div class="sub">exposure ${money(Math.round(r.exposure))}</div>
     </div>`;
   $("risk-updated").textContent = new Date().toLocaleTimeString("en-IN");
 }
@@ -239,9 +354,9 @@ function renderSignals() {
       <div class="signal ${cls}">
         <div class="line">${rejected ? "✕ " : "▸ "}${esc(line)}</div>
         <div class="meta">
-          <span>qty <b>${fmtInt(s.quantity)}</b>${s.lots > 1 ? ` (${s.lots} lots)` : ""}</span>
+          <span>qty <b>${qtyLabel(s)}</b></span>
           <span>R:R <b>${fmt(s.risk_reward, 2)}</b></span>
-          <span>risk <b>₹${fmtInt(Math.round(s.total_risk))}</b> (${fmt(s.capital_at_risk_pct, 2)}%)</span>
+          <span>risk <b>${money(Math.round(s.total_risk))}</b> (${fmt(s.capital_at_risk_pct, 2)}%)</span>
           <span>score <b>${s.composite_score >= 0 ? "+" : ""}${fmt(s.composite_score, 2)}</b></span>
           <span>${esc(s.regime || "")}</span>
         </div>
@@ -483,6 +598,15 @@ function renderOpportunities(d) {
   }).join("");
 }
 
+/* US equities trade in single shares — printing "99 lots" for 99 shares of QQQ
+   is not just noise, it implies a 100x bigger position than you hold. */
+function qtyLabel(t) {
+  const q = fmtInt(t.quantity);
+  if (!t.unit_size || t.unit_size <= 1) return `${q} shares`;
+  const word = t.unit_label || "lot";
+  return `${q} (${fmtInt(t.lots)} ${word}${t.lots === 1 ? "" : "s"})`;
+}
+
 function oppCard(o) {
   const t = o.trade;
   const bull = o.lean === "BULLISH";
@@ -510,8 +634,8 @@ function oppCard(o) {
           <div class="row"><span>Entry</span><b>${fmt(t.entry)}</b></div>
           <div class="row"><span>Stop loss</span><b class="neg">${fmt(t.stop_loss)}</b></div>
           <div class="row"><span>Target (${fmt(t.risk_reward, 1)}R)</span><b class="pos">${fmt(t.target)}</b></div>
-          <div class="row"><span>Quantity</span><b>${fmtInt(t.quantity)}${t.lots > 1 ? ` (${t.lots} lots)` : ""}</b></div>
-          <div class="row"><span>Risk</span><b>₹${fmtInt(Math.round(t.total_risk))} (${fmt(t.capital_at_risk_pct, 2)}%)</b></div>
+          <div class="row"><span>Quantity</span><b>${qtyLabel(t)}</b></div>
+          <div class="row"><span>Risk</span><b>${money(Math.round(t.total_risk))} (${fmt(t.capital_at_risk_pct, 2)}%)</b></div>
         </div>` : ""}
 
       ${!o.actionable && o.blocked_reason
@@ -656,7 +780,7 @@ async function loadPositions() {
       <td class="num neg">${fmt(p.stop_loss)}</td>
       <td class="num pos">${fmt(p.target)}</td>
       <td class="num">${fmtInt(p.quantity)}</td>
-      <td class="num">₹${fmtInt(Math.round(p.total_risk))}</td>
+      <td class="num">${money(Math.round(p.total_risk))}</td>
     </tr>`).join("")}</tbody></table>`;
 }
 
@@ -712,11 +836,11 @@ async function runCalc() {
     <div><div class="k">Quantity</div><div class="v">${fmtInt(r.quantity)}</div></div>
     <div><div class="k">Lots</div><div class="v">${fmtInt(r.lots)}</div></div>
     <div><div class="k">Stop points</div><div class="v">${fmt(r.stop_points)}</div></div>
-    <div><div class="k">Capital at risk</div><div class="v ${overRisk ? "neg" : ""}">₹${fmtInt(Math.round(r.actual_risk))}</div></div>
+    <div><div class="k">Capital at risk</div><div class="v ${overRisk ? "neg" : ""}">${money(Math.round(r.actual_risk))}</div></div>
     <div><div class="k">% of capital</div><div class="v ${overRisk ? "neg" : "pos"}">${fmt(r.actual_risk_pct, 2)}%</div></div>
     <div><div class="k">Target</div><div class="v pos">${fmt(r.target)}</div></div>
-    <div><div class="k">Reward at ${fmt(r.risk_reward, 1)}R</div><div class="v pos">₹${fmtInt(Math.round(r.reward))}</div></div>
-    <div><div class="k">Notional</div><div class="v">₹${fmtInt(Math.round(r.notional))}</div>
+    <div><div class="k">Reward at ${fmt(r.risk_reward, 1)}R</div><div class="v pos">${money(Math.round(r.reward))}</div></div>
+    <div><div class="k">Notional</div><div class="v">${money(Math.round(r.notional))}</div>
          <div class="k" style="margin-top:3px">${fmt(r.notional_pct_of_capital, 1)}% of capital</div></div>
     <div><div class="k">Losses to ruin</div>
          <div class="v">${r.max_consecutive_losses_to_ruin === null ? "—" : fmtInt(r.max_consecutive_losses_to_ruin)}</div>
@@ -798,6 +922,10 @@ function bind() {
     try { localStorage.setItem("theme", root.dataset.theme); } catch {}
     initChart(); loadChart();
   };
+  $("market-switch").onclick = (e) => {
+    const btn = e.target.closest("button[data-market]");
+    if (btn) switchMarket(btn.dataset.market);
+  };
   $("btn-scan").onclick = () => loadOpportunities(true);
   $("btn-replay").onclick = () => loadReplay(true);
   $("replay-days").onchange = () => {
@@ -823,9 +951,11 @@ function bind() {
   } catch {}
 
   bind();
+  await loadMarkets();       // currency + theme must be set before first render
   initChart();
   await loadWatchlist();
   await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(), runCalc()]);
   connect();
   setInterval(loadPositions, 30_000);
+  setInterval(renderMarketClock, 15_000);
 })();

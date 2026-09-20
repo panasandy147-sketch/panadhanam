@@ -1,0 +1,111 @@
+# ==========================================================================
+# MARKET PROFILE — United States (NYSE / NASDAQ / CBOE)
+#
+# Structural differences from the India profile worth knowing:
+#   * Equities trade in single shares, not exchange lots (lot_size: 1).
+#   * Options are per-CONTRACT and each contract controls 100 shares, so the
+#     premium you pay is quoted_price x 100. That is `contract_multiplier`,
+#     which is a different thing from India's lot size and is handled
+#     separately by the risk manager.
+#   * Weeklies expire Friday, not Thursday.
+#   * Session is 09:30-16:00 Eastern.
+# ==========================================================================
+
+market:
+  code: "US"
+  name: "United States"
+  exchange: "NASDAQ"
+  flag: "🇺🇸"
+  timezone: "America/New_York"
+  accent: "#3987e5"
+  accent_dark: "#2a78d6"
+
+currency:
+  symbol: "$"
+  code: "USD"
+  locale: "en-US"
+  grouping: "western"          # 100,000 not 1,00,000
+
+session:
+  market_open: "09:30"
+  market_close: "16:00"
+  premarket_scan_time: "08:45"
+  no_new_entry_after: "15:30"
+  square_off_time: "15:45"
+  trading_days: [0, 1, 2, 3, 4]
+
+derivatives:
+  # US equity options are not lot-based; the contract multiplier does the work.
+  lot_based: false
+  contract_multiplier: 100
+  weekly_expiry_weekday: 4     # Friday
+  monthly_expiry_rule: "third_friday"
+  strike_steps:
+    SPY: 1
+    QQQ: 1
+    IWM: 1
+    AAPL: 2.5
+    MSFT: 5
+    NVDA: 5
+    TSLA: 5
+    default_pct: 1.0
+
+fundamentals:
+  # US tickers need no Yahoo suffix.
+  yahoo_suffix: ""
+
+brokers:
+  supported: ["paper", "alpaca"]
+  default: "paper"
+
+macro:
+  vix_panic_level: 25.0        # VIX runs structurally higher than India VIX
+  vix_calm_level: 14.0
+  global_indices:
+    - { key: "us_sp500",   label: "S&P 500 Futures", yahoo: "ES=F" }
+    - { key: "us_nasdaq",  label: "Nasdaq Futures",  yahoo: "NQ=F" }
+    - { key: "dow",        label: "Dow Futures",     yahoo: "YM=F" }
+    - { key: "russell",    label: "Russell 2000",    yahoo: "RTY=F" }
+    - { key: "vix",        label: "CBOE VIX",        yahoo: "^VIX" }
+    - { key: "us10y",      label: "US 10Y Yield",    yahoo: "^TNX" }
+    - { key: "dxy",        label: "Dollar Index",    yahoo: "DX-Y.NYB" }
+    - { key: "crude",      label: "WTI Crude",       yahoo: "CL=F" }
+    - { key: "gold",       label: "Gold",            yahoo: "GC=F" }
+
+news:
+  sources:
+    - { name: "CNBC Markets", type: rss,
+        url: "https://www.cnbc.com/id/20910258/device/rss/rss.html" }
+    - { name: "CNBC Top News", type: rss,
+        url: "https://www.cnbc.com/id/100003114/device/rss/rss.html" }
+    - { name: "MarketWatch Top Stories", type: rss,
+        url: "https://feeds.content.dowjones.io/public/rss/mw_topstories" }
+    - { name: "Yahoo Finance", type: rss,
+        url: "https://finance.yahoo.com/news/rssindex" }
+    - { name: "Investing.com US", type: rss,
+        url: "https://www.investing.com/rss/news_25.rss" }
+    - { name: "Google News — US markets", type: rss,
+        url: "https://news.google.com/rss/search?q=stock+market+OR+S%26P+500+OR+Nasdaq+when:1d&hl=en-US&gl=US&ceid=US:en" }
+
+universe:
+  indices:
+    # Tracked via the liquid ETFs — that is what you can actually trade options on.
+    - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  note: "S&P 500 ETF" }
+    - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  note: "Nasdaq 100 ETF" }
+    - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  note: "Russell 2000 ETF" }
+  stocks:
+    - { symbol: "AAPL",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 232 }
+    - { symbol: "MSFT",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 428 }
+    - { symbol: "NVDA",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis",      seed_price: 138 }
+    - { symbol: "AMZN",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer",   seed_price: 201 }
+    - { symbol: "META",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 578 }
+    - { symbol: "GOOGL", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 176 }
+    - { symbol: "TSLA",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Auto",       seed_price: 345 }
+    - { symbol: "AMD",   exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis",      seed_price: 142 }
+    - { symbol: "JPM",   exchange: "NYSE",   lot_size: 1, fno: true, sector: "Banking",    seed_price: 236 }
+    - { symbol: "XOM",   exchange: "NYSE",   lot_size: 1, fno: true, sector: "Energy",     seed_price: 118 }
+  blacklist: []
+  sector_max_positions:
+    Tech: 2
+    Semis: 1
+    default: 2

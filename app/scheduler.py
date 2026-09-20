@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime
-from datetime import time as dtime
 from typing import Any
 
 from app.agents.graph import TradingDesk
@@ -19,6 +18,7 @@ from app.agents.risk import RiskManager
 from app.analysis.opportunities import OpportunityScanner
 from app.analysis.replay import WeeklyReplay
 from app.brokers.base import BrokerAdapter
+from app.core import clock
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
 from app.core.logging import get_logger
@@ -31,14 +31,6 @@ from app.learning.outcomes import OutcomeTracker
 from app.storage import db
 
 log = get_logger("scheduler")
-
-
-def _parse_time(value: str, default: dtime) -> dtime:
-    try:
-        h, m = (int(x) for x in str(value).split(":"))
-        return dtime(h, m)
-    except Exception:
-        return default
 
 
 class TradingEngine:
@@ -66,29 +58,86 @@ class TradingEngine:
     # ------------------------------------------------------------------ #
     # Market hours
     # ------------------------------------------------------------------ #
+    @property
+    def timezone(self) -> str:
+        """Always the MARKET's timezone, never the server's."""
+        return str(self.cfg.get("system.timezone", "Asia/Kolkata"))
+
     def market_open_now(self) -> bool:
-        now = datetime.now()
-        if now.weekday() >= 5:
-            return False
-        open_t = _parse_time(self.cfg.get("system.market_open", "09:15"), dtime(9, 15))
-        close_t = _parse_time(self.cfg.get("system.market_close", "15:30"), dtime(15, 30))
-        return open_t <= now.time() <= close_t
+        return clock.is_open(
+            self.timezone,
+            self.cfg.get("system.market_open", "09:15"),
+            self.cfg.get("system.market_close", "15:30"),
+            self.cfg.get("system.trading_days"),
+        )
 
     def session_phase(self) -> str:
-        now = datetime.now()
-        if now.weekday() >= 5:
-            return "weekend"
-        t = now.time()
-        pre = _parse_time(self.cfg.get("system.premarket_scan_time", "08:45"), dtime(8, 45))
-        open_t = _parse_time(self.cfg.get("system.market_open", "09:15"), dtime(9, 15))
-        close_t = _parse_time(self.cfg.get("system.market_close", "15:30"), dtime(15, 30))
-        if t < pre:
-            return "closed"
-        if t < open_t:
-            return "premarket"
-        if t <= close_t:
-            return "open"
-        return "postmarket"
+        return clock.session_phase(
+            self.timezone,
+            self.cfg.get("system.premarket_scan_time", "08:45"),
+            self.cfg.get("system.market_open", "09:15"),
+            self.cfg.get("system.market_close", "15:30"),
+            self.cfg.get("system.trading_days"),
+        )
+
+    # ------------------------------------------------------------------ #
+    # Market switching
+    # ------------------------------------------------------------------ #
+    async def switch_market(self, code: str) -> dict[str, Any]:
+        """Point the whole desk at a different market.
+
+        Everything that was derived from the old market has to go: the broker
+        (Zerodha cannot quote AAPL), cached fundamentals, the synthetic price
+        seeds, and any cached scan. Open positions are NOT closed — switching
+        the view must never silently abandon a live trade — so the switch is
+        refused while positions are open.
+        """
+        previous = self.cfg.active_market
+        code = code.upper()
+        if code == previous:
+            return {"switched": False, "market": previous, "reason": "already active"}
+
+        if self.risk.state.open_positions > 0:
+            return {
+                "switched": False, "market": previous,
+                "reason": (f"{self.risk.state.open_positions} position(s) still open. "
+                           f"Close or square off before switching markets — the new "
+                           f"market's broker cannot manage them."),
+            }
+
+        active = self.cfg.switch_market(code)
+        if active != code:
+            return {"switched": False, "market": active,
+                    "reason": f"unknown market '{code}'"}
+
+        # A broker bound to the old market can't serve the new one.
+        from app.brokers.factory import build_broker, reset_broker
+        await reset_broker()
+        self.broker = await build_broker(self.cfg)
+
+        self.risk = RiskManager(self.cfg)
+        self.desk = TradingDesk(self.broker, self.cfg, risk_manager=self.risk)
+        self.data = MarketDataService(self.broker, self.cfg)
+        self.news = NewsCollector(self.cfg)
+        self.macro = MacroCollector(self.cfg)
+        self.outcomes = OutcomeTracker(self.broker, self.cfg, risk_manager=self.risk)
+        self.scanner = OpportunityScanner(self, self.cfg)
+        self.replay = WeeklyReplay(self, self.cfg)
+        self._fundamentals.clear()
+        self._premarket_done_on = None
+
+        log.info("desk switched to %s (%s) — broker=%s, %d symbols",
+                 self.cfg.market.name, active, self.broker.name,
+                 len(self.cfg.watchlist()))
+        await bus.publish("market.switched", {
+            "market": self.cfg.market.describe(),
+            "broker": self.broker.name,
+            "symbols": [w["symbol"] for w in self.cfg.watchlist()],
+        })
+        await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
+        return {"switched": True, "market": active,
+                "profile": self.cfg.market.describe(),
+                "broker": self.broker.name}
 
     # ------------------------------------------------------------------ #
     # Pre-market
@@ -126,7 +175,7 @@ class TradingEngine:
                                      "reason": ", ".join(report.extra.get("fails", []))
                                      or report.rationale})
 
-        self._premarket_done_on = datetime.now().date().isoformat()
+        self._premarket_done_on = clock.market_now(self.timezone).date().isoformat()
         summary = {
             "ts": datetime.now().isoformat(),
             "eligible": eligible,
@@ -235,7 +284,7 @@ class TradingEngine:
         while self.running:
             try:
                 phase = self.session_phase()
-                today = datetime.now().date().isoformat()
+                today = clock.market_now(self.timezone).date().isoformat()
 
                 if phase == "premarket" and self._premarket_done_on != today:
                     await self.run_premarket_scan()
@@ -282,6 +331,12 @@ class TradingEngine:
 
     def status(self) -> dict[str, Any]:
         return {
+            "market": {
+                **self.cfg.market.describe(),
+                **clock.describe(self.timezone),
+                "active": self.cfg.active_market,
+            },
+            "available_markets": self.cfg.available_markets(),
             "running": self.running,
             "paused": self.paused,
             "phase": self.session_phase(),
