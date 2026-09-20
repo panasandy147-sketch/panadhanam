@@ -14,8 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import get_llm_client
 from app.core.config import Config, get_config
+from app.core.llm import structured_complete
 from app.core.logging import get_logger
 from app.journal.models import JournalEntry, MistakeCard, MistakeTag, TradeVerdict
 
@@ -200,10 +200,6 @@ class PostMortemEngine:
 
     # ------------------------------------------------------------------ #
     async def _llm_card(self, entry: JournalEntry) -> MistakeCard | None:
-        client = await get_llm_client(self.cfg)
-        if client is None:
-            return None
-
         payload = {
             "symbol": entry.symbol,
             "instrument": entry.instrument,
@@ -236,16 +232,13 @@ class PostMortemEngine:
             f"a rule scores low. A losing trade that honoured its stop scores high."
         )
 
-        response = await client.messages.parse(
-            model=self.cfg.llm_model,
-            max_tokens=2000,
+        d = await structured_complete(
             system=self.system_prompt,
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.cfg.llm_effort},
-            messages=[{"role": "user", "content": prompt}],
-            output_format=_CardSchema,
+            prompt=prompt,
+            schema=_CardSchema,
+            max_tokens=2000,
+            cfg=self.cfg,
         )
-        d = response.parsed_output
         if d is None:
             return None
 
@@ -260,7 +253,7 @@ class PostMortemEngine:
             corrective_protocol=d.corrective_protocol,
             verdict=entry.verdict or TradeVerdict.GOOD_LOSS,
             r_multiple=entry.r_multiple,
-            generated_by="claude",
+            generated_by=self.cfg.llm_provider,
         )
 
 

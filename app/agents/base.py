@@ -14,7 +14,6 @@ Two design decisions worth knowing:
 from __future__ import annotations
 
 import abc
-import asyncio
 import json
 import time
 from typing import Any
@@ -23,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
+from app.core.llm import structured_complete
 from app.core.logging import get_logger
 from app.core.models import AgentReport, Bias, Evidence, MarketContext
 
@@ -41,27 +41,11 @@ class LLMVerdict(BaseModel):
         default=None, description="Price at which this view is proven wrong, or null")
 
 
-_llm_client: Any = None
-_llm_lock = asyncio.Lock()
-
-
 async def get_llm_client(cfg: Config) -> Any | None:
-    """Lazily build one shared AsyncAnthropic client."""
-    global _llm_client
-    if not cfg.llm_enabled:
-        return None
-    if _llm_client is not None:
-        return _llm_client
-    async with _llm_lock:
-        if _llm_client is None:
-            try:
-                from anthropic import AsyncAnthropic
-                _llm_client = AsyncAnthropic(api_key=cfg.anthropic_key)
-                log.info("LLM reasoning enabled (%s)", cfg.llm_model)
-            except ImportError:
-                log.warning("anthropic package not installed — rule-based mode only")
-                return None
-    return _llm_client
+    """Deprecated. Kept so older code keeps working; new call sites should use
+    `app.core.llm.structured_complete`, which is provider-agnostic."""
+    from app.core.llm import _get_anthropic
+    return await _get_anthropic(cfg)
 
 
 class BaseAgent(abc.ABC):
@@ -131,20 +115,13 @@ class BaseAgent(abc.ABC):
         payload = self.llm_payload(ctx, baseline)
         if not payload:
             return None
-        client = await get_llm_client(self.cfg)
-        if client is None:
-            return None
-
-        response = await client.messages.parse(
-            model=self.cfg.llm_model,
-            max_tokens=self.spec.get("max_tokens", 2000),
+        verdict = await structured_complete(
             system=self.system_prompt(),
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.cfg.llm_effort},
-            messages=[{"role": "user", "content": payload}],
-            output_format=LLMVerdict,
+            prompt=payload,
+            schema=LLMVerdict,
+            max_tokens=self.spec.get("max_tokens", 2000),
+            cfg=self.cfg,
         )
-        verdict = response.parsed_output
         if verdict is None:
             return None
 
@@ -163,7 +140,8 @@ class BaseAgent(abc.ABC):
             data_available=True,
             used_llm=True,
             extra={**baseline.extra, "rule_score": baseline.score,
-                   "rule_bias": baseline.bias.value},
+                   "rule_bias": baseline.bias.value,
+                   "llm_provider": self.cfg.llm_provider},
         )
 
         # Sharp disagreement between the deterministic prior and the model is a

@@ -330,7 +330,28 @@ Tune in `settings.yaml` under `learning:` — set `enabled: false` to freeze wei
 
 ---
 
-## Enabling Claude reasoning
+## Enabling AI reasoning (free or paid)
+
+Two options. **Both are optional** — the agents always have deterministic rule
+engines, and the risk manager never uses an LLM in any configuration.
+
+### Free: a model on your own PC
+
+No login, no signup, no API key, no cost. See **[docs/OLLAMA.md](docs/OLLAMA.md)**.
+
+```bash
+# 1. install from https://ollama.com/download
+ollama pull qwen2.5:7b
+# 2. in .env:
+#    LLM_PROVIDER=ollama
+#    OLLAMA_MODEL=qwen2.5:7b
+python run.py --check-llm
+```
+
+Slower and shallower than Claude, and entirely private — nothing leaves your
+machine.
+
+### Paid: Claude
 
 ```bash
 # .env
@@ -346,6 +367,9 @@ mode you're in.
 
 Cost control: `LLM_EFFORT=low` and a shorter watchlist cut token spend sharply;
 `system.cycle_seconds` controls how often the desk thinks.
+
+Both providers implement the same interface, so you can switch at any time —
+Ollama while practising, Claude when it matters.
 
 ---
 

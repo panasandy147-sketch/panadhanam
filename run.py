@@ -6,6 +6,7 @@
     python run.py --premarket        run the pre-market scan and exit
     python run.py --size 100000 1 24500 24400 75    position-sizing calculator
     python run.py --check-data       verify you are getting REAL market data
+    python run.py --check-llm        verify your LLM (Claude or local Ollama)
 """
 from __future__ import annotations
 
@@ -61,6 +62,57 @@ async def _one_cycle(premarket: bool = False) -> None:
     await broker.disconnect()
 
 
+async def _check_llm() -> bool:
+    from pydantic import BaseModel, Field
+
+    from app.core.config import get_config
+    from app.core.llm import probe, structured_complete
+
+    cfg = get_config()
+    bar = "=" * 72
+    print(f"\n{bar}\n  LLM CHECK\n{bar}")
+
+    info = await probe()
+    print(f"\n  Provider : {info['provider']}")
+    if info["provider"] == "ollama":
+        print(f"  Host     : {info.get('host')}")
+        print(f"  Model    : {info.get('model')}")
+        installed = info.get("installed") or []
+        print(f"  Installed: {', '.join(installed) if installed else '(none)'}")
+    elif info["provider"] == "anthropic":
+        print(f"  Model    : {info.get('model')}")
+
+    if not info["ok"]:
+        print(f"\n  [XX] NOT READY: {info.get('error')}")
+        print("\n  The system still runs — every agent has a deterministic rule")
+        print("  engine. An LLM adds judgement on top, it is not required.")
+        print(f"{bar}\n")
+        return False
+
+    # A live round trip proves more than a version check does.
+    class _Ping(BaseModel):
+        answer: str = Field(description="The single word: pong")
+        confidence: float = Field(description="0.0 to 1.0")
+
+    print("\n  Sending a test prompt (a local model may take a minute)…")
+    result = await structured_complete(
+        system="You are a test harness. Reply exactly as the schema requires.",
+        prompt="Reply with the single word 'pong' and confidence 1.0.",
+        schema=_Ping, max_tokens=200, cfg=cfg)
+
+    if result is None:
+        print("\n  [XX] The provider is reachable but produced no valid response.")
+        print("       A small local model may struggle with structured output —")
+        print("       try a larger one, e.g.  ollama pull qwen2.5:14b")
+        print(f"{bar}\n")
+        return False
+
+    print(f"\n  [OK] Round trip succeeded: {result.answer!r}")
+    print(f"\n  VERDICT: {cfg.llm_label} is working. Agents will use it.")
+    print(f"{bar}\n")
+    return True
+
+
 def _sizing(args: list[str]) -> None:
     from app.agents.risk import RiskManager
     capital, risk_pct, entry, stop = (float(x) for x in args[:4])
@@ -80,10 +132,14 @@ def main() -> None:
     parser.add_argument("--reload", action="store_true", help="auto-reload the server")
     parser.add_argument("--check-data", action="store_true",
                         help="probe every market-data feed and report what is real")
+    parser.add_argument("--check-llm", action="store_true",
+                        help="check the configured LLM provider is reachable")
     parser.add_argument("--market", metavar="CODE",
                         help="market for --check-data / --cycle (IN or US)")
     args = parser.parse_args()
 
+    if args.check_llm:
+        raise SystemExit(0 if asyncio.run(_check_llm()) else 1)
     if args.check_data:
         from app.data.feeds.check import run_check
         ok = asyncio.run(run_check(args.market))

@@ -11,7 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent, get_llm_client
+from app.agents.base import BaseAgent
+from app.core.llm import structured_complete
 from app.core.logging import get_logger
 from app.core.models import AgentReport, Bias, MarketContext
 from app.core.registry import register_agent
@@ -209,10 +210,6 @@ class CMIOAgent(BaseAgent):
     # ------------------------------------------------------------------ #
     async def _llm_synthesise(self, ctx: MarketContext, reports: list[AgentReport],
                               baseline: dict[str, Any]) -> dict[str, Any] | None:
-        client = await get_llm_client(self.cfg)
-        if client is None:
-            return None
-
         digest = []
         for r in reports:
             digest.append({
@@ -249,16 +246,13 @@ class CMIOAgent(BaseAgent):
             f"{self._recall_block(ctx)}"
         )
 
-        response = await client.messages.parse(
-            model=self.cfg.llm_model,
-            max_tokens=self.spec.get("max_tokens", 4000),
+        d = await structured_complete(
             system=self.system_prompt(),
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.cfg.llm_effort},
-            messages=[{"role": "user", "content": prompt}],
-            output_format=CMIODecision,
+            prompt=prompt,
+            schema=CMIODecision,
+            max_tokens=self.spec.get("max_tokens", 4000),
+            cfg=self.cfg,
         )
-        d = response.parsed_output
         if d is None:
             return None
 
@@ -282,4 +276,5 @@ class CMIOAgent(BaseAgent):
             "proceed": proceed,
             "abstained": baseline["abstained"],
             "used_llm": True,
+            "llm_provider": self.cfg.llm_provider,
         }

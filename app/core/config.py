@@ -207,8 +207,50 @@ class Config:
         return _env("LLM_EFFORT", "medium")
 
     @property
+    def llm_provider(self) -> str:
+        """anthropic | ollama | none."""
+        explicit = _env("LLM_PROVIDER")
+        if explicit:
+            return explicit.strip().lower()
+        # Infer: a key means Claude, otherwise a local Ollama if it is configured.
+        if self.anthropic_key:
+            return "anthropic"
+        if _env("OLLAMA_MODEL") or _env_bool("USE_OLLAMA", False):
+            return "ollama"
+        return "none"
+
+    @property
     def llm_enabled(self) -> bool:
-        return bool(self.anthropic_key)
+        provider = self.llm_provider
+        if provider == "anthropic":
+            return bool(self.anthropic_key)
+        if provider == "ollama":
+            return True          # reachability is checked at call time
+        return False
+
+    @property
+    def llm_label(self) -> str:
+        """What the dashboard shows."""
+        provider = self.llm_provider
+        if provider == "anthropic":
+            return f"claude ({self.llm_model})"
+        if provider == "ollama":
+            return f"ollama ({self.ollama_model}, local)"
+        return "rule-based"
+
+    # ---------------- Ollama (free, local) ----------------
+    @property
+    def ollama_host(self) -> str:
+        return _env("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+    @property
+    def ollama_model(self) -> str:
+        return _env("OLLAMA_MODEL", "qwen2.5:7b")
+
+    @property
+    def ollama_timeout(self) -> float:
+        # Local models on CPU are slow; a short timeout would look like a bug.
+        return float(_env("OLLAMA_TIMEOUT", "180"))
 
     @property
     def broker_name(self) -> str:
