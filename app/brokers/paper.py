@@ -164,6 +164,8 @@ class PaperBroker(BrokerAdapter):
         self._positions: dict[str, dict[str, Any]] = {}
         self._starting_cash = float((config or {}).get("total_capital", 100_000))
         self._cash = self._starting_cash
+        # True once a chain has been fabricated because no feed could serve one.
+        self.synthetic_chain = False
         # An upstream real-data feed can be injected; paper then only simulates fills.
         self.data_source: BrokerAdapter | None = None
 
@@ -234,7 +236,16 @@ class PaperBroker(BrokerAdapter):
         if self.data_source:
             chain = await self.data_source.get_option_chain(underlying, expiry)
             if chain:
+                self.synthetic_chain = False
                 return chain
+
+        # No feed could serve a chain. Fabricating OI, PCR and Max Pain while
+        # the header says "real market data" would be the worst kind of lie —
+        # those numbers drive the derivatives analyst. Flag it, and let the
+        # config decide whether to fabricate at all.
+        self.synthetic_chain = True
+        if not bool(get_config().get("data.synthetic_chain_fallback", True)):
+            return None
 
         quote = await self.get_quote(underlying)
         if not quote:

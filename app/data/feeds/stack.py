@@ -136,12 +136,20 @@ def describe_data_source(broker: Any) -> dict[str, Any]:
         # A real broker serving its own data.
         sources = [broker_name]
 
+    # Prices and option chains can come from different places, and one can be
+    # real while the other is fabricated. Reporting a single flag would let a
+    # synthetic chain hide behind real prices.
+    synthetic_chain = bool(getattr(broker, "synthetic_chain", False)) or simulated
+
     return {
         "simulated": simulated,
+        "synthetic_chain": synthetic_chain,
+        "prices_real": not simulated,
         "sources": sources,
         "label": ("SIMULATED DATA — prices are generated, not real"
                   if simulated else
-                  f"Real market data via {', '.join(sources)}"),
+                  f"Real prices via {', '.join(sources)}"
+                  + (" · option chain is SIMULATED" if synthetic_chain else "")),
         "execution": ("simulated fills (paper)" if broker_name == "paper"
                       else f"live broker: {broker_name}"),
         "broker": broker_name,

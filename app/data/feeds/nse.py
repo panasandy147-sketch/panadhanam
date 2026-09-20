@@ -41,12 +41,36 @@ INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"}
 _ALIASES = {"NIFTY 50": "NIFTY", "NIFTY BANK": "BANKNIFTY",
             "NIFTY FIN SERVICE": "FINNIFTY"}
 
-_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-    "Accept": "application/json, text/javascript, */*; q=0.01",
+# NSE fingerprints the whole request, not just the User-Agent. A thin header
+# set is rejected on most networks; this is what a real browser sends.
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+_PAGE_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,*/*;q=0.8"),
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
+
+_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
     "Referer": f"{BASE}/option-chain",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
 CACHE_SECONDS = 30
@@ -77,25 +101,55 @@ class NSEFeed(BrokerAdapter):
     async def connect(self) -> bool:
         self._client = httpx.AsyncClient(headers=_HEADERS, timeout=20.0,
                                          follow_redirects=True)
+        # NSE is flaky on first contact; a second attempt usually succeeds.
         ok = await self._bootstrap()
+        if not ok:
+            await asyncio.sleep(1.0)
+            ok = await self._bootstrap()
+
+        if ok:
+            # A handshake is not proof: confirm the API actually answers.
+            probe = await self._get(CHAIN_INDEX, {"symbol": "NIFTY"})
+            if not (probe or {}).get("records"):
+                log.warning("NSE handshake succeeded but the option-chain API "
+                            "returned nothing — treating it as unavailable.")
+                ok = False
+
         if ok:
             self._connected = True
-            log.info("NSE India feed connected — official exchange data")
+            log.info("NSE India feed connected — official option chain "
+                     "(real OI, IV and OI change)")
         else:
-            log.error("NSE India unreachable. It blocks some networks and "
-                      "non-Indian IPs; the Yahoo feed is the fallback.")
+            log.warning("NSE India unreachable. Indian OPTION CHAINS will be "
+                        "unavailable: Yahoo does not serve them. Prices still "
+                        "come from Yahoo. Common causes: a VPN, a corporate "
+                        "network, or a non-Indian IP.")
         return ok
 
     async def _bootstrap(self) -> bool:
-        """Collect the session cookies NSE requires before serving its API."""
+        """Collect the session cookies NSE requires before serving its API.
+
+        NSE hands out `nsit` and `nseappid` cookies only to something that looks
+        like a browser walking the site. Visiting the landing page and then the
+        option-chain page in order is what earns them; hitting the API cold
+        returns 401/403 forever.
+        """
         if not self._client:
             return False
         try:
-            r = await self._client.get(BASE)
+            r = await self._client.get(BASE, headers=_PAGE_HEADERS)
             if r.status_code != 200:
+                log.debug("nse landing page → HTTP %s", r.status_code)
                 return False
-            # Visiting the option-chain page sets the cookie the API checks for.
-            await self._client.get(f"{BASE}/option-chain")
+
+            # The API checks for the cookie this page sets.
+            await self._client.get(f"{BASE}/option-chain", headers=_PAGE_HEADERS)
+
+            cookies = self._client.cookies
+            if not any(c in cookies for c in ("nsit", "nseappid", "bm_sv")):
+                log.debug("nse did not issue session cookies")
+                return False
+
             self._cookies_at = time.time()
             return True
         except Exception as exc:

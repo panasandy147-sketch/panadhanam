@@ -365,7 +365,8 @@ async def test_status_names_the_live_sources_when_a_feed_is_attached(cfg):
 
     assert provenance["simulated"] is False
     assert provenance["sources"] == ["stubfeed"]
-    assert "Real market data" in provenance["label"]
+    assert provenance["prices_real"] is True
+    assert "Real prices" in provenance["label"]
     # Execution is still simulated — that distinction must stay visible.
     assert "paper" in provenance["execution"]
 
@@ -415,3 +416,90 @@ async def test_feed_stack_returns_nothing_when_every_source_fails():
     assert await stack.get_quote("NIFTY") is None
     assert await stack.get_candles("NIFTY", "5m", 10) == []
     assert await stack.get_option_chain("NIFTY") is None
+
+
+
+# --------------------------------------------------------------------------- #
+# A fabricated option chain must never hide behind real prices
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_a_synthetic_chain_is_reported_even_when_prices_are_real(cfg):
+    """The exact trap: NSE is unreachable and Yahoo serves no Indian chains, so
+    OI, PCR and Max Pain get fabricated while the header says "real data".
+    Those numbers drive the derivatives analyst, so they must be flagged."""
+    from app.brokers.paper import PaperBroker
+    from app.data.feeds.stack import describe_data_source
+
+    cfg.switch_market("IN")
+
+    class _PricesOnly(_StubFeed):
+        """Real prices, no option chain — exactly the live situation."""
+        name = "pricesonly"
+
+        async def get_option_chain(self, underlying, expiry=None):
+            return None
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = _PricesOnly()
+
+    chain = await broker.get_option_chain("NIFTY 50")
+    assert chain is not None, "the fallback still runs by default"
+    assert broker.synthetic_chain is True
+
+    provenance = describe_data_source(broker)
+    assert provenance["prices_real"] is True
+    assert provenance["synthetic_chain"] is True
+    assert "SIMULATED" in provenance["label"]
+
+
+@pytest.mark.asyncio
+async def test_a_real_chain_clears_the_synthetic_flag(cfg):
+    from app.brokers.paper import PaperBroker
+    from app.data.feeds.stack import describe_data_source
+
+    cfg.switch_market("IN")
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = _StubFeed()       # this one DOES serve a chain
+
+    chain = await broker.get_option_chain("NIFTY 50")
+    assert chain is not None
+    assert broker.synthetic_chain is False
+    assert describe_data_source(broker)["synthetic_chain"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_can_be_switched_off_entirely(cfg):
+    """Traders who take F&O seriously can refuse invented chains outright; the
+    derivatives analyst then abstains, which is the honest outcome."""
+    from app.brokers.paper import PaperBroker
+
+    cfg.switch_market("IN")
+    cfg.settings.setdefault("data", {})["synthetic_chain_fallback"] = False
+
+    class _PricesOnly(_StubFeed):
+        name = "pricesonly"
+
+        async def get_option_chain(self, underlying, expiry=None):
+            return None
+
+    broker = PaperBroker(config={"total_capital": 100_000})
+    await broker.connect()
+    broker.data_source = _PricesOnly()
+
+    assert await broker.get_option_chain("NIFTY 50") is None
+    cfg.settings["data"]["synthetic_chain_fallback"] = True
+
+
+@pytest.mark.asyncio
+async def test_derivatives_analyst_abstains_without_a_chain(cfg):
+    """No chain must mean abstention, not a neutral vote — that is what keeps a
+    missing feed from being read as agreement."""
+    from app.agents.derivatives import DerivativesAgent
+    from app.core.models import MarketContext
+
+    ctx = MarketContext(symbol="NIFTY 50", cycle_id="c")
+    report = DerivativesAgent(cfg).analyse_rules(ctx)
+    assert report.data_available is False
+    assert report.score == 0.0

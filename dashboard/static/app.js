@@ -250,6 +250,18 @@ function renderBanners(s) {
       <b>Real market data</b> via ${esc(ds.sources.join(", "))} ·
       ${esc(ds.execution || "")}. When the market is closed these are
       last-traded prices.</div>`);
+
+    // Prices and chains come from different places; one can be real while the
+    // other is invented, and the F&O numbers drive real decisions.
+    if (ds.synthetic_chain) {
+      out.push(`<div class="banner warn">
+        <b>Option chain is SIMULATED.</b> Prices are real, but no feed could
+        serve an option chain, so Open Interest, PCR and Max Pain are generated.
+        <b>Do not trade F&amp;O on these numbers.</b> For Indian chains you need
+        NSE reachable — Yahoo does not publish them. Set
+        <code>data.synthetic_chain_fallback: false</code> to make the
+        derivatives analyst abstain instead.</div>`);
+    }
   }
   if (s.risk?.halted) {
     out.push(`<div class="banner crit"><b>Desk halted.</b> ${esc(s.risk.halt_reason)}

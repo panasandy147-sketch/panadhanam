@@ -213,6 +213,15 @@ data:
   # makes PCR, Max Pain and buildup readings meaningful. It blocks some
   # networks and most non-Indian IPs; the stack falls back to Yahoo.
   use_nse: true
+  # When no feed can serve an option chain (NSE unreachable, and Yahoo does not
+  # publish Indian chains), should the system fabricate one?
+  #   true  = generate a plausible chain so the F&O machinery still runs. It is
+  #           labelled SIMULATED everywhere, but the OI, PCR and Max Pain are
+  #           invented — never trade on them.
+  #   false = serve no chain. The derivatives analyst then abstains, which is
+  #           the honest behaviour if you trade F&O for real.
+  synthetic_chain_fallback: true
+
   # Stooq is a third keyless source: reliable DAILY history, no option chains.
   # It is the safety net when Yahoo is blocked by a corporate network.
   use_stooq: true

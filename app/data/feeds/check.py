@@ -99,6 +99,9 @@ async def check_feeds(market: str | None = None) -> dict[str, Any]:
 
     report["verdict"] = "REAL" if any_real else "NO REAL DATA"
     report["any_real"] = any_real
+    # An Indian option chain comes only from NSE — Yahoo does not publish them.
+    report["chains_available"] = any(
+        s.get("option_legs") for f in report["feeds"] for s in f["samples"])
     return report
 
 
@@ -143,6 +146,17 @@ def print_report(report: dict[str, Any]) -> None:
         print("  VERDICT: REAL MARKET DATA IS AVAILABLE.")
         print("  The dashboard will show genuine prices. When the market is")
         print("  closed these are last-traded values, which is correct.")
+        if not report.get("chains_available"):
+            print("")
+            print("  BUT: no feed served an OPTION CHAIN.")
+            if cfg.active_market == "IN":
+                print("  Only NSE publishes Indian chains — Yahoo does not. With NSE")
+                print("  unreachable, the OI, PCR and Max Pain you see are SIMULATED.")
+                print("  Prices are real; the F&O numbers are not. Do not trade them.")
+                print("  Set data.synthetic_chain_fallback: false to make the")
+                print("  derivatives analyst abstain instead.")
+            else:
+                print("  Enable options on your broker account, or check the feed.")
     else:
         print("  VERDICT: NO REAL DATA.")
         print("  Every feed failed, so the dashboard falls back to a SYNTHETIC")
