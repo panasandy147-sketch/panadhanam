@@ -7,6 +7,7 @@
     python run.py --size 100000 1 24500 24400 75    position-sizing calculator
     python run.py --check-data       verify you are getting REAL market data
     python run.py --check-llm        verify your LLM (Claude or local Ollama)
+    python run.py --check-broker     verify your broker connection and account
 """
 from __future__ import annotations
 
@@ -134,10 +135,15 @@ def main() -> None:
                         help="probe every market-data feed and report what is real")
     parser.add_argument("--check-llm", action="store_true",
                         help="check the configured LLM provider is reachable")
+    parser.add_argument("--check-broker", action="store_true",
+                        help="check the broker connection, account type and data")
     parser.add_argument("--market", metavar="CODE",
                         help="market for --check-data / --cycle (IN or US)")
     args = parser.parse_args()
 
+    if args.check_broker:
+        from app.brokers.check import run_check as _broker_check
+        raise SystemExit(0 if asyncio.run(_broker_check()) else 1)
     if args.check_llm:
         raise SystemExit(0 if asyncio.run(_check_llm()) else 1)
     if args.check_data:

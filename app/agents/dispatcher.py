@@ -66,16 +66,27 @@ class Dispatcher:
         return result
 
     def _live_allowed(self) -> bool:
+        """May this signal become an actual order?
+
+        A simulator account and a real-money account are different questions.
+        Sending an order to Alpaca's paper endpoint IS the practice — gating it
+        behind the real-money switches would make practising impossible. Only a
+        broker pointed at real money needs the full three-switch guard.
+        """
         auto = bool(self.cfg.get("execution.auto_place_orders", False))
         if not auto:
             return False
-        if not self.cfg.live_orders_enabled:
-            log.warning("auto_place_orders is on, but TRADING_MODE/ENABLE_LIVE_ORDERS "
-                        "are not set to live — staying in alert-only mode")
-            return False
-        if not self.broker.supports_live_orders:
-            log.info("broker '%s' simulates fills — paper order will be recorded",
+
+        if getattr(self.broker, "is_paper_account", True):
+            log.info("placing SIMULATED order via %s (paper account — no real money)",
                      self.broker.name)
+            return True
+
+        if not self.cfg.live_orders_enabled:
+            log.warning("auto_place_orders is on and '%s' is a REAL-MONEY account, "
+                        "but TRADING_MODE/ENABLE_LIVE_ORDERS are not set to live "
+                        "— staying in alert-only mode", self.broker.name)
+            return False
         return True
 
     async def _external_alert(self, signal: TradeSignal) -> None:

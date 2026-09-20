@@ -232,7 +232,7 @@ Set `BROKER=` in `.env` and add that broker's credentials.
 | **Zerodha Kite** | `zerodha` | daily login | `pip install kiteconnect`, then `python -m scripts.kite_login` |
 | **Upstox** | `upstox` | daily login | `python -m scripts.upstox_login` |
 | **Angel One** | `angelone` | fully automatic (TOTP) | `pip install smartapi-python pyotp` — no daily ritual |
-| **Alpaca** (US) | `alpaca` | API key | Free paper account with real data. No SDK needed. |
+| **Alpaca** (US) | `alpaca` | API key | Free paper account, real data, $100k simulated. See [docs/ALPACA.md](docs/ALPACA.md) |
 
 **If a broker fails to authenticate the system falls back to paper mode and says
 so loudly.** A failed login never becomes a live trade.
@@ -408,6 +408,9 @@ python run.py                                  # server + dashboard
 python run.py --cycle                          # one analysis cycle, print, exit
 python run.py --premarket                      # fundamental + macro scan
 python run.py --size 100000 1 24500 24400 75   # position sizing calculator
+python run.py --check-broker                   # is my broker connected? real money?
+python run.py --check-llm                      # is my AI working?
+python run.py --check-data                     # am I getting REAL prices?
 python -m scripts.backtest --symbol RELIANCE   # replay the rules over history
                                                # (the dashboard's Replay panel
                                                #  does this for the whole list)

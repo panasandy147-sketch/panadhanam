@@ -32,6 +32,7 @@ class AngelOneBroker(BrokerAdapter):
     name = "angelone"
     supports_options = True
     supports_live_orders = True
+    is_paper_account = False  # real money
 
     def __init__(self, credentials: dict[str, str] | None = None,
                  config: dict[str, Any] | None = None) -> None:

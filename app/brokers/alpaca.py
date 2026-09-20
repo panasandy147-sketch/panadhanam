@@ -49,7 +49,9 @@ class AlpacaBroker(BrokerAdapter):
         super().__init__(credentials, config)
         self._trade: httpx.AsyncClient | None = None
         self._data: httpx.AsyncClient | None = None
+        # Defaults to the paper endpoint. You have to opt IN to real money.
         self._paper = str(self.credentials.get("paper", "true")).lower() != "false"
+        self.is_paper_account = self._paper
         self._feed = self.credentials.get("feed") or os.getenv("ALPACA_FEED", "iex")
 
     def _headers(self) -> dict[str, str]:
@@ -159,11 +161,16 @@ class AlpacaBroker(BrokerAdapter):
                 "expiration_date_gte": today.isoformat(), "limit": 1000,
             })
             if r.status_code != 200:
+                log.warning("alpaca expiries for %s → HTTP %s: %s",
+                            underlying, r.status_code, r.text[:200])
                 return []
             contracts = r.json().get("option_contracts") or []
+            if not contracts:
+                log.info("alpaca returned no option contracts for %s — options "
+                         "may not be enabled on this account", underlying)
             return sorted({c["expiration_date"] for c in contracts})[:6]
         except Exception as exc:
-            log.debug("alpaca expiries failed: %s", exc)
+            log.warning("alpaca expiries failed for %s: %s", underlying, exc)
             return []
 
     async def get_option_chain(self, underlying: str,
@@ -174,11 +181,14 @@ class AlpacaBroker(BrokerAdapter):
         expiries = await self.get_expiries(underlying)
         exp = expiry or (expiries[0] if expiries else None)
         if not exp:
+            log.info("alpaca: no option expiries available for %s", underlying)
             return None
 
         spot_q = await self.get_quote(underlying)
         spot = spot_q.last_price if spot_q else 0.0
         if not spot:
+            log.warning("alpaca: no spot price for %s, cannot build a chain",
+                        underlying)
             return None
 
         window = float(self.config.get("strikes_around_atm", 10))
@@ -193,9 +203,13 @@ class AlpacaBroker(BrokerAdapter):
                 "strike_price_lte": f"{hi:.2f}",
             })
             if r.status_code != 200:
+                log.warning("alpaca option contracts for %s → HTTP %s: %s",
+                            underlying, r.status_code, r.text[:200])
                 return None
             contracts = r.json().get("option_contracts") or []
             if not contracts:
+                log.info("alpaca: no %s contracts near spot for expiry %s",
+                         underlying, exp)
                 return None
 
             symbols = [c["symbol"] for c in contracts][:400]

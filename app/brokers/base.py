@@ -40,6 +40,11 @@ class BrokerAdapter(abc.ABC):
     name: str = "base"
     supports_options: bool = True
     supports_live_orders: bool = False
+    # True when orders go to a simulator rather than a real-money account.
+    # Alpaca's paper endpoint, and our own paper broker, are both simulators:
+    # sending orders there is practice, not risk, and must not be gated behind
+    # the real-money switches.
+    is_paper_account: bool = True
 
     def __init__(self, credentials: dict[str, str] | None = None,
                  config: dict[str, Any] | None = None) -> None:
@@ -121,5 +126,6 @@ class BrokerAdapter(abc.ABC):
             "connected": self._connected,
             "supports_options": self.supports_options,
             "supports_live_orders": self.supports_live_orders,
+            "is_paper_account": self.is_paper_account,
             "checked_at": datetime.now().isoformat(),
         }
