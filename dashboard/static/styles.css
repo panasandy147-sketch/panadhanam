@@ -896,3 +896,26 @@ button.primary {
 .verdict-pill.GOOD_LOSS { color: var(--series-1); background: color-mix(in srgb, var(--series-1) 18%, transparent); }
 .verdict-pill.BAD_WIN   { color: #0d0d0d; background: var(--warning); }
 .verdict-pill.BAD_LOSS  { color: #fff; background: var(--critical); }
+
+
+/* ==========================================================================
+   Practice day
+   ========================================================================== */
+.practice-clock {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--market-accent, var(--series-1));
+  font-variant-numeric: tabular-nums;
+}
+.practice-why {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.practice-why .k {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-muted); margin-bottom: 7px;
+}
+.practice-why ul { margin: 0; padding-left: 18px; font-size: 12px;
+                   color: var(--text-secondary); line-height: 1.7; }
+.practice-why b { color: var(--warning); font-family: var(--mono); }

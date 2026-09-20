@@ -98,6 +98,21 @@ a third market (one YAML file).
 
 ---
 
+## Practice Day
+
+**▶ Start practice day** replays a real session bar by bar, running the full
+agent desk at each step with **no lookahead** — at bar N the agents see bars
+0..N and nothing else. A day takes ~6 minutes at 60x, so you can practise at
+the weekend when the market is shut.
+
+When nothing fires, the panel tells you *what the desk was waiting for* rather
+than leaving you with a blank screen. Then **Log to journal** grades every
+practice trade through the post-mortem engine.
+
+See [docs/PRACTICE.md](docs/PRACTICE.md), including a two-week programme.
+
+---
+
 ## Trade journal & post-mortem
 
 Every completed trade gets a **Mistake Card**: graded 1-10 on *discipline, not
@@ -427,6 +442,9 @@ make lint
 | `POST /api/config/reload` | apply YAML changes with no restart |
 | `GET /api/signals` | signal history with rejection reasons |
 | `POST /api/risk/calculate` | position sizing |
+| `POST /api/practice/start` | replay a real trading day |
+| `GET /api/practice/status` | progress, trades, rejection reasons |
+| `POST /api/practice/log` | grade the session into the journal |
 | `GET /api/markets` | active market, all profiles, market clock |
 | `POST /api/markets/{code}` | switch the desk to IN or US |
 | `GET /api/opportunities` | top N setups per risk tier (cached) |

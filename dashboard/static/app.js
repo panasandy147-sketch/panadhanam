@@ -53,6 +53,7 @@ const state = {
   news: [],
   status: null,
   market: null,
+  practice: null,
   switching: false,
   chart: null,
   series: {},
@@ -107,6 +108,12 @@ function handle(event) {
     case "macro.update":        renderMacro(data); break;
     case "learning.update":     loadScorecard(); break;
     case "market.switched":     applyMarket(data.market); break;
+    case "practice.state":     renderPractice(data); break;
+    case "practice.progress":  if (state.practice) {
+                                 state.practice.result = data;
+                                 renderPractice(state.practice);
+                               } break;
+    case "practice.trade":     loadPracticeStatus(); break;
     case "position.update":     loadPositions(); break;
   }
 }
@@ -888,6 +895,129 @@ async function loadScorecard() {
 }
 
 
+
+/* ====================================================================== */
+/* Practice day                                                           */
+/* ====================================================================== */
+function renderPractice(st) {
+  if (!st) return;
+  state.practice = st;
+
+  const running = ["running", "paused", "loading"].includes(st.state);
+  $("btn-practice").disabled = running;
+  $("btn-practice").textContent = running ? "Running…" : "▶ Start practice day";
+  $("btn-practice-pause").disabled = !running;
+  $("btn-practice-pause").textContent = st.state === "paused" ? "Resume" : "Pause";
+  $("btn-practice-stop").disabled = !running;
+
+  const r = st.result;
+  $("btn-practice-log").disabled = !(r && r.trades_closed > 0);
+
+  if (st.state === "failed") {
+    $("practice-status").textContent = "";
+    $("practice-body").innerHTML =
+      `<div class="banner crit" style="margin:12px 14px">${esc(st.error)}</div>`;
+    return;
+  }
+  if (!r) return;
+
+  $("practice-meta").textContent =
+    `${r.trading_day} · ${r.symbols.join(", ")}`;
+  $("practice-meter").firstElementChild.style.width = `${r.progress_pct}%`;
+
+  const clock = st.clock ? st.clock.slice(11, 16) : "--:--";
+  $("practice-status").innerHTML = st.state === "finished"
+    ? "Session complete."
+    : `<span class="practice-clock">${esc(clock)}</span> · bar ${r.bars_done}/${r.bars_total}`;
+
+  const rows = (r.closed || []).map((t) => `
+    <tr>
+      <td>${esc((t.entry_ts || "").slice(11, 16))}</td>
+      <td>${esc(t.symbol)}</td>
+      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
+      <td class="num">${fmt(t.entry)}</td>
+      <td class="num">${fmt(t.exit)}</td>
+      <td>${esc(t.outcome)}</td>
+      <td class="num ${signClass(t.r_multiple)}"><b>${t.r_multiple >= 0 ? "+" : ""}${fmt(t.r_multiple, 2)}R</b></td>
+      <td class="num">${money(Math.round(t.pnl))}</td>
+      <td class="num">${fmtInt(t.bars_held)}</td>
+    </tr>`).join("");
+
+  const why = (r.top_rejections || []).map((x) =>
+    `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
+
+  $("practice-body").innerHTML = `
+    <div class="calc-out">
+      <div><div class="k">Progress</div><div class="v">${fmt(r.progress_pct, 0)}%</div></div>
+      <div><div class="k">Signals taken</div><div class="v">${fmtInt(r.signals)}</div></div>
+      <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(r.win_rate, 0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(r.total_r)}">${r.total_r >= 0 ? "+" : ""}${fmt(r.total_r, 2)}R</div></div>
+      <div><div class="k">P&amp;L</div>
+           <div class="v ${signClass(r.pnl)}">${money(Math.round(r.pnl))}</div></div>
+    </div>
+
+    ${rows ? `
+      <table style="margin-top:2px">
+        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
+        <th class="num">Exit</th><th>Outcome</th><th class="num">R</th>
+        <th class="num">P&amp;L</th><th class="num">Bars</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : ""}
+
+    ${why ? `
+      <div class="practice-why">
+        <div class="k">Why the desk stayed out (${fmtInt(r.rejected)} passes)</div>
+        <ul>${why}</ul>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
+          A day with few trades is normal — most bars contain no valid setup.
+          This is what the desk was waiting for.</p>
+      </div>` : ""}`;
+}
+
+async function startPractice() {
+  const body = {
+    trading_day: $("p-date").value || null,
+    speed: Number($("p-speed").value),
+  };
+  $("practice-status").textContent = "Loading the day's bars…";
+
+  const res = await fetch("/api/practice/start", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await res.json();
+  if (!res.ok) {
+    $("practice-body").innerHTML =
+      `<div class="banner crit" style="margin:12px 14px">${esc(d.detail || "Could not start.")}</div>`;
+    $("practice-status").textContent = "";
+    return;
+  }
+  loadPracticeStatus();
+}
+
+async function loadPracticeStatus() {
+  const res = await fetch("/api/practice/status");
+  if (res.ok) renderPractice(await res.json());
+}
+
+async function logPracticeToJournal() {
+  const btn = $("btn-practice-log");
+  btn.disabled = true;
+  btn.textContent = "Grading…";
+  try {
+    const res = await fetch("/api/practice/log", { method: "POST" });
+    const d = await res.json();
+    $("practice-status").textContent =
+      `${d.logged} trade(s) graded and written to journal/cards/.`;
+    await Promise.all([loadJournalStats(), loadJournalLog()]);
+  } finally {
+    btn.textContent = "Log to journal";
+    btn.disabled = false;
+  }
+}
+
 /* ====================================================================== */
 /* Trade journal & post-mortem                                            */
 /* ====================================================================== */
@@ -1168,6 +1298,19 @@ function bind() {
     const btn = e.target.closest("button[data-market]");
     if (btn) switchMarket(btn.dataset.market);
   };
+  $("btn-practice").onclick = startPractice;
+  $("btn-practice-pause").onclick = async () => {
+    renderPractice(await (await fetch("/api/practice/pause", { method: "POST" })).json());
+  };
+  $("btn-practice-stop").onclick = async () => {
+    renderPractice(await (await fetch("/api/practice/stop", { method: "POST" })).json());
+  };
+  $("btn-practice-log").onclick = logPracticeToJournal;
+  $("p-speed").onchange = () => {
+    if (state.practice && state.practice.state === "running") {
+      fetch(`/api/practice/speed?value=${$("p-speed").value}`, { method: "POST" });
+    }
+  };
   $("journal-form").onsubmit = submitTrade;
   $("btn-journal-export").onclick = exportJournal;
   $("btn-scan").onclick = () => loadOpportunities(true);
@@ -1200,7 +1343,8 @@ function bind() {
   initChart();
   await loadWatchlist();
   await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(),
-                     runCalc(), loadJournalStats(), loadJournalLog()]);
+                     runCalc(), loadJournalStats(), loadJournalLog(),
+                     loadPracticeStatus()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);

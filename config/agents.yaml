@@ -8,6 +8,7 @@
 # ==========================================================================
 
 cmio:
+  kind: orchestrator
   id: cmio
   name: "Chief Market Intelligence Officer"
   module: "app.agents.cmio"
@@ -27,6 +28,7 @@ cmio:
   max_tokens: 4000
 
 candlestick:
+  kind: analyst
   id: candlestick
   name: "Candlestick & Technical Analyst"
   module: "app.agents.candlestick"
@@ -47,6 +49,7 @@ candlestick:
   max_tokens: 2000
 
 derivatives:
+  kind: analyst
   id: derivatives
   name: "Options & Futures Derivatives Analyst"
   module: "app.agents.derivatives"
@@ -68,6 +71,7 @@ derivatives:
   max_tokens: 2000
 
 news_sentiment:
+  kind: analyst
   id: news_sentiment
   name: "News & Sentiment Lead"
   module: "app.agents.news_sentiment"
@@ -88,6 +92,7 @@ news_sentiment:
   max_tokens: 2000
 
 macro_flow:
+  kind: analyst
   id: macro_flow
   name: "Macro, Geopolitical & FII/DII Flow Analyst"
   module: "app.agents.macro_flow"
@@ -108,6 +113,7 @@ macro_flow:
   max_tokens: 2000
 
 fundamental:
+  kind: analyst
   id: fundamental
   name: "Fundamental & Quality Filter"
   module: "app.agents.fundamental"
@@ -125,6 +131,7 @@ fundamental:
   max_tokens: 1500
 
 risk:
+  kind: guardrail
   id: risk
   name: "Risk Management Officer"
   module: "app.agents.risk"
@@ -140,6 +147,7 @@ risk:
     - "Halt the desk for the day once max_daily_loss_pct is breached."
 
 dispatcher:
+  kind: execution
   id: dispatcher
   name: "Order & Signal Dispatcher"
   module: "app.agents.dispatcher"
@@ -154,6 +162,7 @@ dispatcher:
 # Edit this prompt to change how hard your coach is on you.
 # ==========================================================================
 post_mortem:
+  kind: journal
   id: post_mortem
   name: "Post-Mortem Mistake Card Engine"
   module: "app.journal.postmortem"

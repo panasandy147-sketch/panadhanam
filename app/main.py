@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.journal_routes import router as journal_router
+from app.api.practice_routes import router as practice_router
 from app.api.routes import router as api_router
 from app.api.ws import router as ws_router
 from app.brokers.factory import build_broker
@@ -52,12 +53,16 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.broker = broker
 
-    log.info("mode=%s | broker=%s | live_orders=%s | reasoning=%s",
+    log.info("mode=%s | broker=%s | live_orders=%s | capital=%s%s | reasoning=%s",
              cfg.trading_mode, broker.name, cfg.live_orders_enabled,
-             "claude" if cfg.llm_enabled else "rule-based")
+             cfg.market.currency_symbol,
+             f"{float(cfg.get('risk.total_capital', 0)):,.0f}",
+             cfg.llm_label)
     if not cfg.llm_enabled:
-        log.info("no ANTHROPIC_API_KEY set — agents run on their deterministic "
-                 "rule engines. Add a key to .env to enable Claude reasoning.")
+        log.info("No LLM configured — agents run on their deterministic rule "
+                 "engines. For a FREE local model: set LLM_PROVIDER=ollama and "
+                 "OLLAMA_MODEL in .env (see docs/OLLAMA.md). For Claude: set "
+                 "ANTHROPIC_API_KEY.")
     if cfg.live_orders_enabled and cfg.get("execution.auto_place_orders"):
         log.warning("!!! LIVE ORDER PLACEMENT IS ENABLED — real money is at risk !!!")
 
@@ -93,6 +98,7 @@ app.add_middleware(
 
 app.include_router(api_router)
 app.include_router(journal_router)
+app.include_router(practice_router)
 app.include_router(ws_router)
 
 if DASHBOARD_DIR.exists():

@@ -28,6 +28,7 @@ from app.data.market import MarketDataService, fetch_fundamentals
 from app.data.news import NewsCollector
 from app.learning.feedback import FeedbackLoop
 from app.learning.outcomes import OutcomeTracker
+from app.practice.session import PracticeSession
 from app.storage import db
 
 log = get_logger("scheduler")
@@ -46,6 +47,7 @@ class TradingEngine:
         self.outcomes = OutcomeTracker(broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
+        self.practice = PracticeSession(self, self.cfg)
 
         self.running = False
         self.paused = False
@@ -123,6 +125,7 @@ class TradingEngine:
         self.outcomes = OutcomeTracker(self.broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
+        self.practice = PracticeSession(self, self.cfg)
         self._fundamentals.clear()
         self._premarket_done_on = None
 
@@ -343,6 +346,7 @@ class TradingEngine:
             },
             "available_markets": self.cfg.available_markets(),
             "data_source": self.data_provenance(),
+            "practice": self.practice.status(),
             "running": self.running,
             "paused": self.paused,
             "phase": self.session_phase(),

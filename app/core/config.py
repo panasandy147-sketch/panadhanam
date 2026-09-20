@@ -160,12 +160,25 @@ class Config:
     def agent(self, agent_id: str) -> dict[str, Any]:
         return self.agents.get(agent_id, {})
 
+    # Roles that are NOT analysts and must never join the voting desk.
+    NON_ANALYST_KINDS = {"orchestrator", "guardrail", "execution", "journal"}
+    _KNOWN_NON_ANALYSTS = {"cmio", "risk", "dispatcher", "post_mortem"}
+
     def enabled_analysts(self) -> list[str]:
-        """Analyst agents (not cmio/risk/dispatcher) that are switched on."""
+        """The analysts that vote in a cycle.
+
+        Agents declare `kind:` in agents.yaml. Anything that is not an analyst
+        (the orchestrator, the risk guardrail, the dispatcher, the post-mortem
+        engine) is excluded by kind rather than by a hardcoded name list — a
+        blocklist silently mis-classifies every agent added later.
+        """
         out = []
         for aid, spec in self.agents.items():
-            if aid in {"cmio", "risk", "dispatcher"}:
+            kind = str(spec.get("kind", "")).lower()
+            if kind in self.NON_ANALYST_KINDS:
                 continue
+            if not kind and aid in self._KNOWN_NON_ANALYSTS:
+                continue      # older configs without a `kind:` field
             if spec.get("enabled", True):
                 out.append(aid)
         return out
