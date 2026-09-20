@@ -15,28 +15,62 @@ orders one environment variable at a time.
 
 ---
 
-## Quick start (3 commands)
+## Quick start
 
 ```bash
 git clone https://github.com/panasandy147-sketch/panadhanam.git
 cd panadhanam
-make install && make run
+bash setup.sh
 ```
 
-Open **http://127.0.0.1:8000**.
+Then start it with the line the setup script prints at the end, and open
+**http://127.0.0.1:8000**.
 
-No `make`? 
+`setup.sh` works in **Git Bash on Windows**, macOS and Linux. It finds your
+Python, builds the virtualenv, installs everything and creates `.env`.
+
+### On Windows
+
+Git Bash (the `MINGW64` terminal) runs `bash setup.sh` fine.
+From **cmd.exe or PowerShell** — or by just double-clicking it — use:
+
+```
+setup.bat
+```
+
+Windows puts virtualenv executables in `Scripts\`, not `bin/`, so afterwards run:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+.venv/Scripts/python.exe run.py          # Git Bash
+.venv\Scripts\python.exe run.py          # cmd / PowerShell
+```
+
+### Doing it by hand
+
+```bash
+python3 -m venv .venv                    # Windows: py -3 -m venv .venv
+source .venv/bin/activate                # Git Bash:  source .venv/Scripts/activate
+                                         # cmd:       .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 python run.py
 ```
 
-You'll see the full desk running against a synthetic market: five analysts
-scoring, the CMIO synthesising, the Risk Manager sizing and rejecting, and the
-dashboard updating live over a WebSocket.
+### With `make`
+
+`make` is **not** installed on Windows by default — that is what `setup.sh` is
+for. If you do have it (macOS, Linux, or Windows via Chocolatey/scoop):
+
+```bash
+make install && make run
+```
+
+---
+
+Whichever route you take, you'll see the full desk running against a synthetic
+market: five analysts scoring, the CMIO synthesising, the Risk Manager sizing and
+rejecting, and the dashboard updating live over a WebSocket. **No API keys
+required.**
 
 ---
 
@@ -273,6 +307,9 @@ Before you do:
 ---
 
 ## Command line
+
+On Windows use `.venv/Scripts/python.exe` in place of `python` below
+(or activate the venv first).
 
 ```bash
 python run.py                                  # server + dashboard

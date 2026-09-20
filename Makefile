@@ -3,6 +3,10 @@
 help:
 	@echo "panadhanam — Multi-Agent Trading Intelligence"
 	@echo ""
+	@echo "  No 'make' on your machine? Use the setup script instead:"
+	@echo "     Windows (Git Bash) / macOS / Linux :  bash setup.sh"
+	@echo "     Windows (cmd / double-click)       :  setup.bat"
+	@echo ""
 	@echo "  make install    create .venv and install dependencies"
 	@echo "  make run        start the server + dashboard (http://127.0.0.1:8000)"
 	@echo "  make cycle      run ONE analysis cycle in the terminal and exit"
@@ -14,15 +18,24 @@ help:
 	@echo "  make docker     build and run in Docker"
 
 VENV ?= .venv
-PY = $(VENV)/bin/python
+
+# Windows virtualenvs put executables in Scripts/, every other OS uses bin/.
+# This makes the Makefile work under Git Bash / MSYS as well as macOS + Linux.
+ifeq ($(OS),Windows_NT)
+	PY = $(VENV)/Scripts/python.exe
+	SYSPY ?= py -3
+else
+	PY = $(VENV)/bin/python
+	SYSPY ?= python3
+endif
 
 install:
-	python3 -m venv $(VENV)
+	$(SYSPY) -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r requirements.txt
 	@test -f .env || cp .env.example .env
 	@echo ""
-	@echo "✅ Installed. Edit .env if you want live data, then: make run"
+	@echo "Installed. Edit .env if you want live data, then: make run"
 
 run:
 	$(PY) run.py
