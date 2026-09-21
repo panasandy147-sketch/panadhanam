@@ -431,10 +431,11 @@ python run.py --size 100000 1 24500 24400 75   # position sizing calculator
 python run.py --check-broker                   # is my broker connected? real money?
 python run.py --check-llm                      # is my AI working?
 python run.py --check-data                     # am I getting REAL prices?
+python run.py --set TOTAL_CAPITAL=100          # change a setting in .env
 python -m scripts.backtest --symbol RELIANCE   # replay the rules over history
                                                # (the dashboard's Replay panel
                                                #  does this for the whole list)
-make test                                      # 60 tests
+make test                                      # the full suite
 make lint
 ```
 

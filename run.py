@@ -8,6 +8,7 @@
     python run.py --check-data       verify you are getting REAL market data
     python run.py --check-llm        verify your LLM (Claude or local Ollama)
     python run.py --check-broker     verify your broker connection and account
+    python run.py --set KEY=VALUE    change a setting in .env safely
 """
 from __future__ import annotations
 
@@ -124,6 +125,57 @@ def _sizing(args: list[str]) -> None:
         print(f"  {k:<32} {v}")
 
 
+def _set_env(assignments: list[str]) -> int:
+    """Edit .env for the user rather than making them do it by hand.
+
+    Every setting that differs per machine lives in .env, which is untracked —
+    so it cannot be changed by a git pull, and it has to be edited locally.
+    Doing that by hand on Windows is where this keeps going wrong, so the app
+    does it: `python run.py --set TOTAL_CAPITAL=100 --set OLLAMA_MODEL=qwen2.5:7b`.
+    """
+    from pathlib import Path
+
+    from app.core.envfile import mask, parse_assignment, set_values
+
+    root = Path(__file__).resolve().parent
+    env, template = root / ".env", root / ".env.example"
+
+    try:
+        updates = dict(parse_assignment(a) for a in assignments)
+    except ValueError as exc:
+        print(f"\n  {exc}\n\n  Expected: --set KEY=VALUE\n")
+        return 2
+
+    existed = env.exists()
+    outcome = set_values(env, updates, template=template)
+
+    print(f"\n=== {env} ===")
+    if not existed:
+        print("  created from .env.example")
+    for key, value in updates.items():
+        print(f"  {key:<24} {mask(key, value):<28} ({outcome[key]})")
+
+    # Two settings are worth a sentence of their own, because getting them
+    # wrong is the difference between a simulation and real money.
+    truthy = {"1", "true", "yes", "on"}
+    if updates.get("AUTO_PLACE_ORDERS", "").strip().lower() in truthy:
+        broker = updates.get("BROKER") or os.getenv("BROKER") or "paper"
+        real_money = (broker.lower() not in {"paper", ""}
+                      and os.getenv("ALPACA_PAPER", "true").lower() not in truthy)
+        print("\n  Approved signals will now become orders on the "
+              f"'{broker}' broker.")
+        if real_money:
+            print("  That broker may be pointed at REAL MONEY. Orders are still\n"
+                  "  blocked unless TRADING_MODE=live and ENABLE_LIVE_ORDERS=true.")
+        else:
+            print("  That is a simulator, so the fills are simulated.")
+        print("  You must still press 'Start trading day' each morning —\n"
+              "  arming lasts one session and expires at square-off.")
+
+    print("\n  Restart the app for this to take effect.\n")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="panadhanam trading intelligence")
     parser.add_argument("--cycle", action="store_true", help="run one cycle and exit")
@@ -139,7 +191,12 @@ def main() -> None:
                         help="check the broker connection, account type and data")
     parser.add_argument("--market", metavar="CODE",
                         help="market for --check-data / --cycle (IN or US)")
+    parser.add_argument("--set", nargs="+", metavar="KEY=VALUE", dest="set_env",
+                        help="write settings into .env (e.g. TOTAL_CAPITAL=100)")
     args = parser.parse_args()
+
+    if args.set_env:
+        raise SystemExit(_set_env(args.set_env))
 
     if args.check_broker:
         from app.brokers.check import run_check as _broker_check
