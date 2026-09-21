@@ -1,0 +1,17 @@
+# Line endings, pinned.
+#
+# Git on Windows often defaults to core.autocrlf=true, which rewrites shell
+# scripts to CRLF on checkout. bash then fails on the carriage return with
+# "$'\r': command not found" — a confusing error for a file that is perfectly
+# fine in the repository. Pin each type to what its interpreter expects, so a
+# clone behaves the same on every machine regardless of local git config.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.db   binary

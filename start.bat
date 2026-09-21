@@ -1,6 +1,11 @@
 @echo off
 REM ---------------------------------------------------------------------------
-REM panadhanam — pull, check, start, open the dashboard. Double-click me.
+REM panadhanam — pull, check, start, open the dashboard.
+REM
+REM Double-click it, or from cmd/PowerShell:   start.bat
+REM From Git Bash (MINGW64) use ./start.sh instead — bash does not run a
+REM bare `start.bat`, and does not search the current directory either, which
+REM is what "bash: start.bat: command not found" means.
 REM
 REM Everything here uses .venv\Scripts\python.exe explicitly. Plain `python` on
 REM Windows finds the Microsoft Store build, which has none of this project's

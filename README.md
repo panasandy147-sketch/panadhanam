@@ -436,6 +436,23 @@ Before you do:
 On Windows use `.venv/Scripts/python.exe` in place of `python` below
 (or activate the venv first).
 
+### Starting it
+
+| You are in | Run |
+|---|---|
+| Git Bash (MINGW64) | `./start.sh` |
+| cmd / PowerShell / File Explorer | `start.bat` (or double-click it) |
+| macOS / Linux | `./start.sh` |
+
+Either one pulls, installs, runs the three checks, starts the server and opens
+your browser. The leading `./` matters in bash: it does not search the current
+directory, so a bare `start.sh` is *"command not found"*.
+
+To run pieces by hand, always use the virtual environment's Python
+(`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere). A bare
+`python` on Windows finds the Microsoft Store build, which has none of this
+project's packages — that is what `No module named 'pydantic'` means.
+
 ```bash
 python run.py                                  # server + dashboard
 python run.py --cycle                          # one analysis cycle, print, exit

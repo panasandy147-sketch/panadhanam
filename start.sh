@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # panadhanam — pull, check, start, open the dashboard.
-# The Windows equivalent is start.bat.
+#
+# Works in Git Bash (MINGW64) on Windows, and on macOS/Linux. The Windows
+# double-click equivalent is start.bat.
+#
+#     ./start.sh          <- note the ./ — bash does not search the current
+#                            directory, so a bare `start.sh` is "command not found"
 set -uo pipefail
 cd "$(dirname "$0")"
 
+# .venv/bin on Unix, .venv/Scripts on Windows. Plain `python` on Windows finds
+# the Microsoft Store build, which has none of this project's packages — that
+# is where "No module named pydantic" comes from.
 PY=".venv/bin/python"
-[ -x "$PY" ] || PY=".venv/Scripts/python.exe"      # Git Bash on Windows
+[ -x "$PY" ] || PY=".venv/Scripts/python.exe"
 if [ ! -x "$PY" ]; then
-  echo "No virtual environment found. Run ./setup.sh first." >&2
+  echo "No virtual environment found at .venv — run ./setup.sh first." >&2
   exit 1
 fi
 
@@ -32,11 +40,20 @@ echo
 URL="http://127.0.0.1:8000"
 echo
 echo "Starting the dashboard at $URL — Ctrl+C to stop."
+echo "Leave this window open; closing it stops the desk."
+echo
 
-( sleep 4
-  if command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
-  elif command -v open     >/dev/null 2>&1; then open "$URL"
-  elif command -v start    >/dev/null 2>&1; then start "$URL"
-  fi ) >/dev/null 2>&1 &
+open_browser() {
+  sleep 4
+  case "$(uname -s)" in
+    # Git Bash has no xdg-open, and `start` is a cmd builtin rather than a
+    # program, so neither is on PATH. explorer.exe is, and it opens a URL in
+    # the default browser. It exits non-zero even on success, hence the `|| :`.
+    MINGW*|MSYS*|CYGWIN*) explorer.exe "$URL" || : ;;
+    Darwin)               open "$URL" ;;
+    *)                    command -v xdg-open >/dev/null && xdg-open "$URL" ;;
+  esac
+}
+open_browser >/dev/null 2>&1 &
 
 exec "$PY" run.py
