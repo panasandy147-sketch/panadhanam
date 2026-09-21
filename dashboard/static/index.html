@@ -133,6 +133,40 @@
     </div>
   </section>
 
+  <!-- ====================== WEEKLY REVIEW ========================= -->
+  <section class="card span-all">
+    <h2>Weekly Review <span class="count" id="weekly-meta"></span></h2>
+
+    <div class="chart-toolbar">
+      <button id="btn-weekly" class="primary">Build this week's review</button>
+
+      <label class="sr-only" for="w-date">Week</label>
+      <input type="date" id="w-date" style="width:auto"
+             title="Any day in the week you want — leave blank for this week">
+
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+        <input type="checkbox" id="w-coach" checked style="width:auto">
+        Ask the model for a strategy read (slower)
+      </label>
+
+      <button id="btn-weekly-md" disabled>Download .md</button>
+      <button id="btn-weekly-json" disabled>Download .json</button>
+      <button id="btn-weekly-save" disabled
+              title="Write it into journal/weekly/ so you can commit it">Save to repo</button>
+      <span id="weekly-status" style="font-size:11.5px;color:var(--text-muted)"></span>
+    </div>
+
+    <div id="weekly-body">
+      <div class="empty">
+        Every trade of the week with <b>the reasoning behind it</b> — each
+        analyst's vote and score at the moment of entry, what the CMIO weighed,
+        and the counter-argument recorded before the outcome was known. Then a
+        coach's read: what worked, what indiscipline cost, and which rules to
+        tighten. Best run after Friday's close.
+      </div>
+    </div>
+  </section>
+
   <!-- ========================== COLUMN 1 ========================== -->
   <section class="card">
     <h2>Agent Desk <span class="count" id="agent-symbol"></span></h2>

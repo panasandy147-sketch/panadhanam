@@ -127,12 +127,17 @@ def save_card(card: MistakeCard) -> Path:
 
 
 def entries(limit: int = 200, setup: str | None = None,
-            verdict: str | None = None) -> list[dict[str, Any]]:
+            verdict: str | None = None, since: str | None = None,
+            until: str | None = None) -> list[dict[str, Any]]:
     """Journal rows, or an empty list if the journal has never been written.
 
     The tables are created on first use, so any read-only caller — the day
     report, the analytics panel — must tolerate their absence rather than
     crash on a fresh install.
+
+    `since` and `until` are ISO dates bounding `ts`, both inclusive. `until`
+    is compared against the end of that day so a trade closed on Friday
+    afternoon is inside a week ending on Friday.
     """
     import sqlite3
 
@@ -144,6 +149,12 @@ def entries(limit: int = 200, setup: str | None = None,
     if verdict:
         clauses.append("verdict = ?")
         params.append(verdict)
+    if since:
+        clauses.append("ts >= ?")
+        params.append(str(since))
+    if until:
+        clauses.append("ts <= ?")
+        params.append(f"{until}T23:59:59.999999")
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY ts DESC LIMIT ?"

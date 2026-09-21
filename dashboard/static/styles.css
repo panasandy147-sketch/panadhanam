@@ -919,3 +919,24 @@ button.primary {
 .practice-why ul { margin: 0; padding-left: 18px; font-size: 12px;
                    color: var(--text-secondary); line-height: 1.7; }
 .practice-why b { color: var(--warning); font-family: var(--mono); }
+
+/* --- Weekly review: one collapsible block per trade ---------------------- */
+.weekly-trade {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: var(--bg-elevated, transparent);
+}
+.weekly-trade > summary {
+  cursor: pointer;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  list-style: none;
+}
+.weekly-trade > summary::-webkit-details-marker { display: none; }
+.weekly-trade > summary::before { content: "▸ "; color: var(--text-muted); }
+.weekly-trade[open] > summary::before { content: "▾ "; }
+.weekly-trade > summary:hover { background: var(--bg-hover, rgba(255,255,255,.04)); }
+.weekly-trade > div { padding: 0 10px 8px; }
+.weekly-trade .k { margin-top: 8px; }
+.weekly-trade ul { margin: 4px 0; padding-left: 18px; font-size: 12px; line-height: 1.55; }

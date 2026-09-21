@@ -135,6 +135,19 @@ clean losses excluded because those are the price of having an edge.
 Cards are written to `journal/` as markdown and **committed to git**, so your
 learning history outlives the database. See [docs/JOURNAL.md](docs/JOURNAL.md).
 
+### The weekend review
+
+After Friday's close, **Weekly Review → Build this week's review** gives you
+the week in one downloadable file: every trade with **each analyst's vote,
+score and reasoning at the moment of entry**, the counter-argument recorded
+before the outcome was known, the Mistake Cost Index, a scorecard of which
+analyst actually earned its weight — and a coach's read on what to change.
+
+It writes itself to `journal/weekly/` once the week closes, so it is waiting
+when you look. The coach **advises and never configures**: the risk desk stays
+deterministic, and no model can change a stop, a size or the confirmation
+requirement. See [docs/WEEKLY-REVIEW.md](docs/WEEKLY-REVIEW.md).
+
 ---
 
 ## Which trades should I take?
@@ -431,7 +444,7 @@ python run.py --size 100000 1 24500 24400 75   # position sizing calculator
 python run.py --check-broker                   # is my broker connected? real money?
 python run.py --check-llm                      # is my AI working?
 python run.py --check-data                     # am I getting REAL prices?
-python run.py --set TOTAL_CAPITAL=100          # change a setting in .env
+python run.py --set TOTAL_CAPITAL=10000        # change a setting in .env
 python -m scripts.backtest --symbol RELIANCE   # replay the rules over history
                                                # (the dashboard's Replay panel
                                                #  does this for the whole list)

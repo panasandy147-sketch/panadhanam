@@ -57,6 +57,8 @@ class TradingEngine:
         self._task: asyncio.Task | None = None
         self._fundamentals: dict[str, Fundamentals] = {}
         self._premarket_done_on: str | None = None
+        # ISO date of the week-end whose review is already written.
+        self._weekly_written_for: str | None = None
         self.last_cycle: dict[str, Any] = {}
         self.cycle_count = 0
 
@@ -307,6 +309,7 @@ class TradingEngine:
                     closed = await self.outcomes.poll()
                     if closed:
                         await self.feedback.update_from_closed(closed)
+                    await self._maybe_write_weekly_review()
 
                 await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
             except asyncio.CancelledError:
@@ -317,6 +320,35 @@ class TradingEngine:
 
             sleep_for = interval if self.session_phase() == "open" else max(interval, 120)
             await asyncio.sleep(sleep_for)
+
+    async def _maybe_write_weekly_review(self) -> None:
+        """Have the week's review waiting once Friday has closed.
+
+        Written once per week, after the last session ends, so it is on disk
+        before you go looking for it. Building it on demand from the dashboard
+        still works — this only means you do not have to remember to.
+        """
+        from app.journal import weekly
+
+        try:
+            start, end = weekly.current_week(self.cfg)
+            if self._weekly_written_for == end.isoformat():
+                return
+            if not weekly.is_complete(end, self.cfg):
+                return
+
+            review = await weekly.build(start, end, cfg=self.cfg)
+            self._weekly_written_for = end.isoformat()
+            if not review.trades:
+                log.info("no trades in the week to %s — no review written", end)
+                return
+            weekly.save(review)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not write the weekly review: %s", exc)
+            # Do not retry every two minutes for the rest of the weekend.
+            self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
 
     async def start(self) -> None:
         if self.running:

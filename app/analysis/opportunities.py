@@ -392,5 +392,5 @@ class OpportunityScanner:
         out = describe_data_source(self.engine.broker)
         if out["simulated"]:
             out["label"] = "SIMULATED DATA — these are not real market prices"
-        out["llm"] = "claude" if self.cfg.llm_enabled else "rule-based"
+        out["llm"] = self.cfg.llm_label
         return out

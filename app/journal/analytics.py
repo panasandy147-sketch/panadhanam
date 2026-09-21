@@ -7,8 +7,15 @@ from typing import Any
 from app.journal.store import entries
 
 
-def compute_analytics(limit: int = 1000) -> dict[str, Any]:
-    rows = entries(limit=limit)
+def compute_analytics(limit: int = 1000, since: str | None = None,
+                      until: str | None = None) -> dict[str, Any]:
+    """The scorecard. Bound it with `since`/`until` for one week's view."""
+    return analyse(entries(limit=limit, since=since, until=until))
+
+
+def analyse(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The same maths over rows you already have, so a caller that has read
+    the window once does not read it again just to score it."""
     if not rows:
         return _empty()
 

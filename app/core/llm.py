@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, TypeVar
 
 import httpx
@@ -72,11 +73,67 @@ async def _anthropic_structured(cfg: Config, system: str, prompt: str,
 # --------------------------------------------------------------------------- #
 # Ollama — a model running locally
 # --------------------------------------------------------------------------- #
+class _Health:
+    """Stops a dead Ollama from producing one ERROR per agent per cycle.
+
+    `OLLAMA_MODEL` in .env is enough to select the Ollama provider, so a
+    machine where Ollama is configured but not installed will try — and fail —
+    on every analyst of every cycle. That is five errors a minute saying the
+    same thing, which buries the one line that matters underneath the noise it
+    generates.
+
+    So the first failure is logged loudly with the fix, and after that the
+    provider is treated as down: calls return None immediately, without a
+    socket attempt, until the cooldown expires and one probe is allowed
+    through. Recovery is logged too, because "it started working again" is
+    also something you want to see.
+    """
+
+    RETRY_AFTER = 120.0      # seconds before trying a dead provider again
+
+    def __init__(self) -> None:
+        self.down_since: float = 0.0
+        self.reason: str = ""
+
+    @property
+    def is_down(self) -> bool:
+        return bool(self.down_since)
+
+    def should_skip(self) -> bool:
+        if not self.down_since:
+            return False
+        if time.monotonic() - self.down_since < self.RETRY_AFTER:
+            return True
+        # Cooldown is up: let exactly one call through to test the water.
+        self.down_since = time.monotonic()
+        return False
+
+    def mark_down(self, reason: str) -> None:
+        first = not self.down_since
+        self.down_since = time.monotonic()
+        self.reason = reason
+        if first:
+            log.error("%s — agents fall back to their rule engines until it is "
+                      "fixed. This will not be repeated every cycle.", reason)
+
+    def mark_up(self) -> None:
+        if self.down_since:
+            log.info("Ollama is answering again — LLM reasoning is back on.")
+        self.down_since = 0.0
+        self.reason = ""
+
+
+ollama_health = _Health()
+
+
 async def _ollama_structured(cfg: Config, system: str, prompt: str,
                              schema: type[T], max_tokens: int) -> T | None:
     host = cfg.ollama_host.rstrip("/")
     model = cfg.ollama_model
     json_schema = schema.model_json_schema()
+
+    if ollama_health.should_skip():
+        return None
 
     messages = [
         {"role": "system", "content": system},
@@ -99,22 +156,26 @@ async def _ollama_structured(cfg: Config, system: str, prompt: str,
                     },
                 })
             except httpx.ConnectError:
-                log.error("Ollama is not running at %s. Start it with "
-                          "`ollama serve`, or see docs/OLLAMA.md", host)
+                ollama_health.mark_down(
+                    f"Ollama is not reachable at {host}. Install it from "
+                    f"https://ollama.com/download, then run `ollama serve` and "
+                    f"`ollama pull {model}` (see docs/OLLAMA.md)")
                 return None
             except Exception as exc:
                 log.warning("Ollama request failed: %s", exc)
                 return None
 
             if r.status_code == 404:
-                log.error("Ollama has no model called '%s'. Run: ollama pull %s",
-                          model, model)
+                ollama_health.mark_down(
+                    f"Ollama is running but has no model called '{model}'. "
+                    f"Run: ollama pull {model}")
                 return None
             if r.status_code != 200:
                 log.warning("Ollama returned HTTP %s: %s", r.status_code, r.text[:200])
                 return None
 
             content = (r.json().get("message") or {}).get("content", "")
+            ollama_health.mark_up()
             try:
                 return schema.model_validate_json(content)
             except (ValidationError, json.JSONDecodeError) as exc:

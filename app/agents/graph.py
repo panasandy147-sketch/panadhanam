@@ -68,7 +68,7 @@ class TradingDesk:
         log.info("desk assembled: %s analysts (%s) | orchestrator=%s | reasoning=%s",
                  len(self.analysts), ", ".join(a.agent_id for a in self.analysts),
                  "langgraph" if self._graph else "builtin",
-                 "claude" if self.cfg.llm_enabled else "rule-based")
+                 self.cfg.llm_label)
 
     # ------------------------------------------------------------------ #
     def _build_analysts(self) -> list[BaseAgent]:
@@ -235,6 +235,13 @@ class TradingDesk:
                 state.update(await self._node_dispatch(state))
         return state
 
+    def _llm_degraded(self) -> str:
+        """Why the configured LLM is not actually answering, if it is not."""
+        if self.cfg.llm_provider != "ollama" or not self.cfg.llm_enabled:
+            return ""
+        from app.core.llm import ollama_health
+        return ollama_health.reason if ollama_health.is_down else ""
+
     # ------------------------------------------------------------------ #
     def describe(self) -> dict[str, Any]:
         """What the dashboard shows in the agent roster panel."""
@@ -246,6 +253,10 @@ class TradingDesk:
             "reasoning": self.cfg.llm_provider if self.cfg.llm_enabled else "rule-based",
             "reasoning_label": self.cfg.llm_label,
             "llm_enabled": self.cfg.llm_enabled,
+            # Configured is not the same as working. OLLAMA_MODEL in .env is
+            # enough to select the provider, so a machine where Ollama is not
+            # installed reads as "LLM on" while every call quietly fails.
+            "llm_degraded": self._llm_degraded(),
             "model": (self.cfg.ollama_model if self.cfg.llm_provider == "ollama"
                       else self.cfg.llm_model) if self.cfg.llm_enabled else None,
             "broker": self.broker.name,

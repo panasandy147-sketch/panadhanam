@@ -146,3 +146,23 @@ configuration, not to trade it anyway.
 
 Setting a small capital does **not** make live trading safer — it only makes
 position sizes smaller or zero. Paper mode is what makes it safe.
+
+---
+
+## Weekly Review
+
+| Button | What it does | When to press it |
+|---|---|---|
+| **Build this week's review** | Reads the week's journal and the decision log, then (optionally) asks the model for a strategy read. | After Friday's close. Mid-week works and is labelled provisional. |
+| **Week** (date box) | Any day inside the week you want. Blank = this week. | Reviewing an earlier week. |
+| **Ask the model for a strategy read** | Untick to skip the LLM pass. Sections 1 and 2 are pure database reads and appear instantly; a local model takes a minute or two. | Untick when you just want the numbers. |
+| **Download .md** | The report as a markdown file. | To keep, print, or read outside the app. |
+| **Download .json** | The same data, structured. | To compare weeks or feed something else. |
+| **Save to repo** | Writes it to `journal/weekly/` so you can commit it. | You want the history in git. The engine also does this automatically once the week closes. |
+
+Each trade expands to show **what every analyst said at the moment of entry** —
+its score, its confidence and its reasoning — plus the counter-argument the
+desk recorded before the outcome was known. Abstentions are listed too: an
+analyst with no data was never a quiet vote of agreement.
+
+Full details in [WEEKLY-REVIEW.md](WEEKLY-REVIEW.md).

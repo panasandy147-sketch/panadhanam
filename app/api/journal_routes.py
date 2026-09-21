@@ -1,13 +1,14 @@
 """Journal and post-mortem API."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
-from app.journal import store
+from app.journal import store, weekly
 from app.journal.analytics import compute_analytics
 from app.journal.models import JournalEntry, MistakeTag, SetupType, TradeVerdict
 from app.journal.postmortem import PostMortemEngine
@@ -135,3 +136,60 @@ async def export() -> dict[str, Any]:
     store.init_journal()
     path = store.export_summary()
     return {"exported": str(path)}
+
+
+# --------------------------------------------------------------------------- #
+# The weekend review
+# --------------------------------------------------------------------------- #
+def _week(week: str | None) -> tuple[date, date]:
+    """Resolve ?week=YYYY-MM-DD (any day in it) to that Monday..Friday."""
+    if not week:
+        return weekly.current_week()
+    try:
+        return weekly.week_bounds(date.fromisoformat(week))
+    except ValueError as exc:
+        raise HTTPException(400, f"'{week}' is not a YYYY-MM-DD date") from exc
+
+
+@router.get("/weekly")
+async def weekly_review(week: str | None = None,
+                        coach: bool = True) -> dict[str, Any]:
+    """The week's trades, the reasoning behind each, and the coach's read.
+
+    Readable mid-week: `complete` says whether the week has actually finished,
+    so a Wednesday snapshot is never mistaken for the week's verdict.
+
+    `coach=false` skips the LLM pass, which on a local model is the slow part.
+    """
+    start, end = _week(week)
+    review = await weekly.build(start, end, with_coach=coach)
+    return review.model_dump(mode="json")
+
+
+@router.post("/weekly/save")
+async def save_weekly(week: str | None = None) -> dict[str, Any]:
+    """Write the review to journal/weekly/ so it can be committed to git."""
+    start, end = _week(week)
+    review = await weekly.build(start, end)
+    return weekly.save(review)
+
+
+@router.get("/weekly/download")
+async def download_weekly(week: str | None = None,
+                          format: str = "md") -> Response:
+    """The review as a file. `format=md` to read, `format=json` for the data."""
+    if format not in {"md", "json"}:
+        raise HTTPException(400, "format must be 'md' or 'json'")
+
+    start, end = _week(week)
+    review = await weekly.build(start, end)
+
+    if format == "json":
+        body, media = review.model_dump_json(indent=2), "application/json"
+    else:
+        body, media = weekly.to_markdown(review), "text/markdown; charset=utf-8"
+
+    name = f"weekly-review-{review.label}.{format}"
+    return Response(
+        content=body, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'})

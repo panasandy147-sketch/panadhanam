@@ -191,8 +191,13 @@ def main() -> None:
                         help="check the broker connection, account type and data")
     parser.add_argument("--market", metavar="CODE",
                         help="market for --check-data / --cycle (IN or US)")
-    parser.add_argument("--set", nargs="+", metavar="KEY=VALUE", dest="set_env",
-                        help="write settings into .env (e.g. TOTAL_CAPITAL=100)")
+    # action="extend" matters: with a plain nargs="+" argparse keeps only the
+    # LAST --set on the line and silently drops the rest, so
+    # `--set A=1 --set B=2` would write B and quietly lose A.
+    parser.add_argument("--set", nargs="+", action="extend", metavar="KEY=VALUE",
+                        dest="set_env",
+                        help="write settings into .env; repeatable "
+                             "(e.g. --set TOTAL_CAPITAL=10000 --set LLM_PROVIDER=ollama)")
     args = parser.parse_args()
 
     if args.set_env:
