@@ -85,15 +85,23 @@ it connected.
 By default the desk is **alert-only**: it tells you about setups but sends
 nothing. To have it trade your paper account:
 
-```yaml
-# config/settings.yaml
-execution:
-  auto_place_orders: true
+```bash
+# .env
+AUTO_PLACE_ORDERS=true
 ```
 
-That's the only switch needed for a paper account. **`TRADING_MODE=live` and
+Restart the app after changing it, then press **Start trading day** each
+morning — the flag says orders are *allowed*, arming says they are allowed
+*today*.
+
+That's all a paper account needs. **`TRADING_MODE=live` and
 `ENABLE_LIVE_ORDERS` are not required and should stay off** — those guard
 real money, and Alpaca's paper endpoint is a simulator.
+
+You can also set `execution.auto_place_orders` in `config/settings.yaml`, but
+that file is tracked by git, so your edit will collide with the next `git pull`.
+`.env` is per-machine and untracked, which is where a decision about your own
+account belongs. When both are set, `.env` wins.
 
 The dashboard header will show `SIMULATOR (paper)`, and every order log line
 says so.

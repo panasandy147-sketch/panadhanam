@@ -147,6 +147,13 @@ class Config:
         if broker:
             execu["broker"] = broker
 
+        # settings.yaml is tracked, so an edit to auto_place_orders is a change
+        # to somebody else's file that the next `git pull` will argue with.
+        # .env is per-machine and untracked, which is where a decision about
+        # placing orders on YOUR account belongs.
+        if os.getenv("AUTO_PLACE_ORDERS"):
+            execu["auto_place_orders"] = _env_bool("AUTO_PLACE_ORDERS", False)
+
     # ---------------- accessors ----------------
     def get(self, path: str, default: Any = None) -> Any:
         """Dotted lookup: cfg.get('risk.min_risk_reward', 2.0)."""

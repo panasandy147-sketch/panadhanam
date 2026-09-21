@@ -144,3 +144,28 @@ async def test_the_desk_keeps_analysing_while_disarmed(engine):
     result = await engine.desk.dispatcher.dispatch(_signal())
     assert result["dispatched"] is True        # the alert still went out
     assert result["order"]["ok"] is False      # but no order
+
+
+# --------------------------------------------------------------------------- #
+# settings.yaml is tracked, so editing auto_place_orders there is a change the
+# next `git pull` will argue with. .env has to be able to win.
+# --------------------------------------------------------------------------- #
+def test_env_can_turn_order_placement_on_over_the_tracked_yaml(cfg, monkeypatch):
+    cfg.settings["execution"]["auto_place_orders"] = False
+    monkeypatch.setenv("AUTO_PLACE_ORDERS", "true")
+    cfg.reload()
+    assert cfg.get("execution.auto_place_orders") is True
+
+
+def test_env_can_also_force_order_placement_off(cfg, monkeypatch):
+    cfg.settings["execution"]["auto_place_orders"] = True
+    monkeypatch.setenv("AUTO_PLACE_ORDERS", "false")
+    cfg.reload()
+    assert cfg.get("execution.auto_place_orders") is False
+
+
+def test_yaml_still_decides_when_env_says_nothing(cfg, monkeypatch):
+    monkeypatch.delenv("AUTO_PLACE_ORDERS", raising=False)
+    cfg.reload()
+    assert cfg.get("execution.auto_place_orders") is False, \
+        "the shipped default must stay alert-only"

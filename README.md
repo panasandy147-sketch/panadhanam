@@ -397,16 +397,16 @@ Ollama while practising, Claude when it matters.
 
 Real orders require **all three** switches. This friction is deliberate.
 
-```yaml
-# config/settings.yaml
-execution:
-  auto_place_orders: true
-```
 ```bash
-# .env
+# .env  — all three, and .env is untracked so a git pull cannot undo them
+AUTO_PLACE_ORDERS=true
 TRADING_MODE=live
 ENABLE_LIVE_ORDERS=true
 ```
+
+Plus a fourth, taken fresh each morning: press **Start trading day**. Arming
+lasts for that one session and expires at square-off, so a flag left on from
+last week can never trade today's market on its own.
 
 Before you do:
 

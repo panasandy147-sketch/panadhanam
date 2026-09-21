@@ -919,6 +919,13 @@ function renderTradingDay(td) {
       ? `ARMED · orders will be placed (${td.broker})`
       : `ARMED · alerts only (auto_place_orders is off)`;
     badge.className = "badge " + (td.is_paper_account ? "ok" : "live");
+    // "Why is it still alert-only?" is the obvious next question, so answer it
+    // where the badge is rather than leaving them to search the docs.
+    badge.title = td.orders_will_be_placed
+      ? "Approved signals become orders on this account."
+      : "The desk is analysing and alerting but placing nothing. To let it "
+        + "place orders, set AUTO_PLACE_ORDERS=true in .env and restart. "
+        + "You still have to arm each session with Start trading day.";
   } else {
     badge.textContent = td.disarm_reason ? `not armed — ${td.disarm_reason}` : "not armed";
     badge.className = "badge";

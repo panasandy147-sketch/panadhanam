@@ -179,11 +179,14 @@ ALPACA_API_SECRET=...
 ALPACA_PAPER=true
 ```
 
-```yaml
-# config/settings.yaml
-execution:
-  auto_place_orders: true     # the only switch a paper account needs
+```bash
+# .env  (untracked, so a git pull will not undo it)
+AUTO_PLACE_ORDERS=true       # the only switch a paper account needs
 ```
+
+Restart the app, then press **Start trading day**. Until you do, the badge
+reads `ARMED · alerts only` or `not armed` and nothing is sent — arming is a
+decision taken each morning and it expires at square-off.
 
 Then just leave the app running. At 09:30 ET it starts cycling every
 60 seconds: the analysts run, the CMIO synthesises, the risk desk sizes, and an
