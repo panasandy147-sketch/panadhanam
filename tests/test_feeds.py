@@ -503,3 +503,64 @@ async def test_derivatives_analyst_abstains_without_a_chain(cfg):
     report = DerivativesAgent(cfg).analyse_rules(ctx)
     assert report.data_available is False
     assert report.score == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# MacroReplay: the macro dashboard as it printed on a past day. The whole point
+# is that it refuses to serve a number the replayed bar could not have seen.
+# --------------------------------------------------------------------------- #
+def _tape(cfg, day, prints, prev_close=100.0):
+    from datetime import UTC, datetime
+
+    from app.data.macro import MacroReplay
+    replay = MacroReplay(cfg)
+    replay._labels = {"us_sp500": "S&P 500 Futures"}
+    replay._tape = {"us_sp500": [
+        (datetime.combine(day, t).replace(tzinfo=UTC), px) for t, px in prints]}
+    replay._prev_close = {"us_sp500": prev_close}
+    return replay
+
+
+def test_macro_replay_serves_the_last_print_at_or_before_the_bar(cfg):
+    from datetime import UTC, date, datetime, time
+
+    day = date(2026, 9, 21)
+    replay = _tape(cfg, day, [(time(9, 30), 101.0),
+                              (time(10, 0), 104.0),
+                              (time(10, 30), 108.0)])
+
+    snap = replay.snapshot_at(datetime.combine(day, time(10, 5), tzinfo=UTC))
+    assert snap.values["us_sp500"] == 104.0, \
+        "10:30's print had not happened yet at 10:05"
+    assert snap.changes_pct["us_sp500"] == pytest.approx(4.0)
+
+
+def test_macro_replay_has_nothing_to_say_before_the_first_print(cfg):
+    from datetime import UTC, date, datetime, time
+
+    day = date(2026, 9, 21)
+    replay = _tape(cfg, day, [(time(10, 0), 104.0)])
+    assert replay.snapshot_at(datetime.combine(day, time(9, 40), tzinfo=UTC)) is None
+
+
+def test_macro_replay_without_a_tape_abstains_rather_than_guessing(cfg):
+    from datetime import UTC, datetime
+
+    from app.data.macro import MacroReplay
+    replay = MacroReplay(cfg)
+    assert replay.loaded is False
+    assert replay.snapshot_at(datetime.now(UTC)) is None
+
+
+def test_macro_replay_reads_a_yahoo_chart_payload_and_drops_gaps(cfg):
+    from app.data.macro import _closes
+
+    payload = {"chart": {"result": [{
+        "timestamp": [1758450600, 1758450900, 1758451200],
+        "indicators": {"quote": [{"close": [101.0, None, 103.0]}]},
+    }]}}
+    out = _closes(payload)
+    assert [px for _, px in out] == [101.0, 103.0], \
+        "a null bucket is a gap in the tape, and filling it would invent a price"
+    assert _closes({"chart": {"result": []}}) == []
+    assert _closes({}) == []

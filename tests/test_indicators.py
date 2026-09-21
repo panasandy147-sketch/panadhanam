@@ -96,3 +96,56 @@ def test_scan_returns_well_formed_hits(df):
         assert set(hit) == {"name", "direction", "strength", "note"}
         assert hit["direction"] in {-1, 0, 1}
         assert 0.0 <= hit["strength"] <= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Rolling 5m bars up into 15m is how Practice Day gets a higher timeframe
+# without fetching one — so it must never invent a bar or reorder the tape.
+# --------------------------------------------------------------------------- #
+def _five_min(n: int, start_price: float = 100.0):
+    from datetime import datetime, timedelta
+
+    from app.core.models import Candle
+    base = datetime(2026, 9, 21, 9, 30)
+    return [Candle(ts=base + timedelta(minutes=5 * i),
+                   open=start_price + i, high=start_price + i + 2,
+                   low=start_price + i - 1, close=start_price + i + 1,
+                   volume=100.0) for i in range(n)]
+
+
+def test_resample_rolls_three_five_minute_bars_into_one():
+    bars = _five_min(6)
+    out = ta.resample(bars, 15)
+
+    assert len(out) == 2
+    assert out[0].open == bars[0].open          # first open of the bucket
+    assert out[0].close == bars[2].close        # last close of the bucket
+    assert out[0].high == max(b.high for b in bars[:3])
+    assert out[0].low == min(b.low for b in bars[:3])
+    assert out[0].volume == sum(b.volume for b in bars[:3])
+
+
+def test_resample_keeps_the_bucket_that_is_still_forming():
+    # 7 bars = two complete 15m candles and one still printing. Dropping the
+    # partial one would hide the bar you are actually trading.
+    out = ta.resample(_five_min(7), 15)
+    assert len(out) == 3
+    assert out[-1].volume == 100.0
+
+
+def test_resample_never_looks_past_the_bars_it_was_given():
+    bars = _five_min(20)
+    out = ta.resample(bars[:9], 15)
+    assert max(c.ts for c in out) <= bars[8].ts
+    assert max(c.high for c in out) == max(b.high for b in bars[:9])
+
+
+def test_resample_tolerates_an_unsorted_or_empty_tape():
+    assert ta.resample([], 15) == []
+    assert ta.resample(_five_min(3), 0) == []
+    shuffled = _five_min(6)
+    shuffled = [shuffled[3], shuffled[0], shuffled[5],
+                shuffled[1], shuffled[4], shuffled[2]]
+    out = ta.resample(shuffled, 15)
+    assert [c.ts for c in out] == sorted(c.ts for c in out)
+    assert len(out) == 2

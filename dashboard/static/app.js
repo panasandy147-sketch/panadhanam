@@ -1069,6 +1069,11 @@ function renderPractice(st) {
   const why = (r.top_rejections || []).map((x) =>
     `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
 
+  // Replay cannot rebuild every input. Say which analysts sat out and why,
+  // so their silence is not misread as a verdict on the market.
+  const sittingOut = (r.unavailable_analysts || []).map((x) =>
+    `<li><b>${esc(AGENT_LABELS[x.agent] || x.agent)}</b> — ${esc(x.reason)}</li>`).join("");
+
   $("practice-body").innerHTML = `
     <div class="calc-out">
       <div><div class="k">Progress</div><div class="v">${fmt(r.progress_pct, 0)}%</div></div>
@@ -1096,6 +1101,17 @@ function renderPractice(st) {
         <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
           A day with few trades is normal — most bars contain no valid setup.
           This is what the desk was waiting for.</p>
+      </div>` : ""}
+
+    ${sittingOut ? `
+      <div class="practice-why">
+        <div class="k">Analysts that could not vote in this replay</div>
+        <ul>${sittingOut}</ul>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
+          A replay can rebuild price and macro honestly; headlines and option
+          chains cannot be reconstructed after the fact. Fewer voices means the
+          two-confirmation rule is harder to meet here than it is live, so a
+          quiet replay is not proof of a quiet market.</p>
       </div>` : ""}`;
 }
 

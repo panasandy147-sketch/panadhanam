@@ -25,6 +25,8 @@ from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
 from app.core.logging import get_logger
 from app.core.models import Candle, MarketContext, Quote, SignalStatus, TradeSignal
+from app.data.macro import MacroReplay
+from app.data.market import MarketDataService
 
 log = get_logger("practice")
 
@@ -63,6 +65,10 @@ class PracticeResult:
     # Why nothing fired. A day with no trades is a normal outcome, but only
     # useful if you can see what the desk was waiting for.
     rejection_reasons: dict[str, int] = field(default_factory=dict)
+    # Analysts that cannot vote in a replay, and why. Without this the
+    # dashboard shows abstentions with no explanation and they read as a
+    # judgement on the market rather than a limit of the replay.
+    unavailable_analysts: dict[str, str] = field(default_factory=dict)
     closed: list[dict[str, Any]] = field(default_factory=list)
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -85,6 +91,9 @@ class PracticeResult:
             "total_r": round(self.total_r, 2),
             "pnl": round(self.pnl, 2),
             "rejected": self.rejected,
+            "unavailable_analysts": [
+                {"agent": k, "reason": v}
+                for k, v in sorted(self.unavailable_analysts.items())],
             "top_rejections": sorted(
                 ({"reason": k, "count": v} for k, v in self.rejection_reasons.items()),
                 key=lambda x: x["count"], reverse=True)[:6],
@@ -108,6 +117,10 @@ class PracticeSession:
         self._bars: dict[str, list[Candle]] = {}
         self._open: dict[str, OpenPractice] = {}
         self._current_ts: datetime | None = None
+        self._macro: MacroReplay | None = None
+        # Injectable so tests (and an offline network) can supply their own
+        # tape instead of reaching for Yahoo.
+        self.macro_replay: MacroReplay | None = None
 
     # ------------------------------------------------------------------ #
     @property
@@ -203,6 +216,55 @@ class PracticeSession:
 
         self.result.symbols = list(self._bars)
         self.result.bars_total = max((len(v) for v in self._bars.values()), default=0)
+        if self._bars:
+            await self._load_macro()
+
+    async def _load_macro(self) -> None:
+        """Rebuild the macro dashboard for the replayed day.
+
+        Serving today's futures and VIX against last Tuesday's chart would leak
+        the answer into the question, so the tape is the replayed day's own
+        prints. If it will not load, the macro analyst abstains — one fewer
+        voice, never a fabricated one.
+        """
+        assert self.result is not None
+        self.result.unavailable_analysts = {
+            "news_sentiment": ("Headlines are not retrievable for a past session, "
+                               "so the news desk sits this replay out."),
+            "derivatives": ("Historical option chains (OI, IV) are not available "
+                            "from the free feeds, so the F&O desk abstains."),
+            "fundamental": ("The fundamental screen uses today's filings, which "
+                            "the replayed day had not seen."),
+        }
+        try:
+            day = datetime.fromisoformat(self.result.trading_day).date()
+        except ValueError:
+            self.result.unavailable_analysts["macro_flow"] = "No dated session to rebuild macro for."
+            return
+
+        if not self.cfg.get("practice.rebuild_macro", True):
+            self._macro = None
+            self.result.unavailable_analysts["macro_flow"] = (
+                "Macro rebuilding is switched off (practice.rebuild_macro), so "
+                "price is the only voice — which cannot on its own meet the "
+                "two-confirmation rule.")
+            return
+
+        replay = self.macro_replay or MacroReplay(self.cfg)
+        try:
+            ok = await replay.load(day)
+        except Exception as exc:
+            log.warning("macro replay tape unavailable: %s", exc)
+            ok = False
+
+        if ok:
+            self._macro = replay
+        else:
+            self._macro = None
+            self.result.unavailable_analysts["macro_flow"] = (
+                "The macro tape for that day could not be fetched, so the macro "
+                "desk abstains too — leaving price as the only voice, which "
+                "cannot on its own meet the two-confirmation rule.")
 
     # ------------------------------------------------------------------ #
     async def _run(self, timeframe: str) -> None:
@@ -302,24 +364,60 @@ class PracticeSession:
 
     async def _context(self, symbol: str, window: list[Candle],
                        bar: Candle, timeframe: str) -> MarketContext:
-        """Build the desk's view using only the bars seen so far."""
+        """Build the desk's view using only what was knowable at this bar.
+
+        The desk gates on at least `consensus.min_confirmations` INDEPENDENT
+        analysts, so a replay that feeds price alone can never trade: one voice
+        is not two, however good the chart looks. Replay therefore reconstructs
+        every input it can do honestly —
+
+          * higher timeframes, rolled up from the bars already seen;
+          * the macro dashboard as it printed at this bar.
+
+        News and the option chain are not reconstructible after the fact, so
+        those analysts abstain and the desk votes with fewer voices. That is a
+        limit of replay, and `unavailable_analysts` says so on the dashboard
+        rather than letting it look like a market verdict.
+        """
         from app.indicators import patterns as pattern_mod
         from app.indicators import ta
 
         tech = self.cfg.get("technical", {}) or {}
-        df = ta.candles_to_df(window)
-        snapshot = ta.compute_all(df, tech)
-        snapshot["patterns"] = pattern_mod.scan(df, tech.get("patterns_enabled"))
+
+        series: dict[str, list[Candle]] = {timeframe: window}
+        base = _minutes(timeframe)
+        for tf in tech.get("timeframes", []) or []:
+            higher = _minutes(tf)
+            if tf in series or not base or higher <= base:
+                continue
+            rolled = ta.resample(window, higher)
+            if len(rolled) >= 3:       # fewer bars than this and the indicators lie
+                series[tf] = rolled
+
+        by_tf: dict[str, dict] = {}
+        for tf, bars in series.items():
+            df = ta.candles_to_df(bars)
+            if df.empty:
+                continue
+            snap = ta.compute_all(df, tech)
+            snap["patterns"] = pattern_mod.scan(df, tech.get("patterns_enabled"))
+            by_tf[tf] = snap
+
+        snapshot = by_tf.get(timeframe, {})
 
         ctx = MarketContext(symbol=symbol,
                             cycle_id=f"practice-{len(window)}",
-                            quote=Quote(symbol=symbol, last_price=bar.close))
+                            quote=Quote(symbol=symbol, last_price=bar.close),
+                            candles=series)
         ctx.indicators = {
             "primary": snapshot,
-            "by_timeframe": {timeframe: snapshot},
-            "mtf_alignment": {"aligned": False, "direction": 0},
+            "by_timeframe": by_tf,
+            "mtf_alignment": MarketDataService._mtf_alignment(by_tf),
             "primary_timeframe": timeframe,
         }
+        if self._macro is not None:
+            ctx.macro = self._macro.snapshot_at(bar.ts)
+
         regime = snapshot.get("regime")
         from app.core.models import Regime
         if regime in {r.value for r in Regime}:
@@ -477,3 +575,14 @@ class PracticeSession:
         store.export_summary()
         log.info("practice session logged %d trades to the journal", logged)
         return {"logged": logged, "session_id": self.result.session_id}
+
+
+def _minutes(timeframe: str) -> int:
+    """'5m' -> 5, '1h' -> 60, '1d' -> 1440. 0 for anything unrecognised."""
+    tf = timeframe.strip().lower()
+    try:
+        value = int(tf[:-1])
+    except (ValueError, IndexError):
+        return 0
+    unit = tf[-1]
+    return value * {"m": 1, "h": 60, "d": 1440}.get(unit, 0)

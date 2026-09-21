@@ -242,6 +242,17 @@ opportunities:
   min_conviction: 0.15
 
 # --------------------------------------------------------------------------
+# PRACTICE DAY (replay)
+# --------------------------------------------------------------------------
+practice:
+  # Rebuild the macro dashboard (futures, VIX, yields, crude, dollar) as it
+  # printed on the replayed day, so the macro analyst can vote without seeing
+  # anything that happened after the bar. Turn this off if your network blocks
+  # the data feed — but be aware that price then becomes the only voice, and
+  # one voice can never satisfy consensus.min_confirmations.
+  rebuild_macro: true
+
+# --------------------------------------------------------------------------
 # EXECUTION
 # --------------------------------------------------------------------------
 execution:

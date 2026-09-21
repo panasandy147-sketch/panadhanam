@@ -55,6 +55,41 @@ Two more honesty rules:
 
 ---
 
+## What the desk can and cannot see in a replay
+
+The desk will not fire a signal on fewer than `consensus.min_confirmations`
+(default **2**) independent analysts. So a replay is only useful if it can put
+more than one analyst in the room. Here is exactly what it rebuilds:
+
+| Analyst | In a replay | Why |
+|---|---|---|
+| **Candlestick & Technical** | ✅ votes | Recomputed from bars 0..N |
+| **Macro & Flow** | ✅ votes | The macro tape (futures, VIX, yields, crude, dollar) is re-fetched **for the replayed day** and served as it printed at each bar |
+| **News & Sentiment** | ❌ abstains | Headlines for a past session are not retrievable from the RSS feeds |
+| **Options & Futures** | ❌ abstains | Historical option chains (OI, IV) are not available without a paid feed |
+| **Fundamental Filter** | ❌ abstains | It screens on today's filings, which the replayed day had not seen |
+
+The macro tape is fetched for the replayed date specifically — serving
+*today's* VIX against last Tuesday's chart would leak the answer into the
+question, which is the one thing a replay must never do.
+
+So a replay runs on **two voices where live trading has up to five**. That
+means:
+
+- Replay is **stricter** than live. A setup that trades live may not clear the
+  bar here.
+- A quiet replay is **not** evidence of a quiet market. The panel headed
+  *"Analysts that could not vote in this replay"* names every silent seat so
+  you can tell the two apart.
+
+If the macro tape will not load — a firewall, an offline laptop — the macro
+analyst abstains too, leaving **one** voice, and the desk then cannot trade at
+all by construction. You will see `macro_flow` in the same panel saying so. Set
+`practice.rebuild_macro: false` in `config/settings.yaml` if you want to skip
+the fetch deliberately; it will not change the arithmetic, only the wait.
+
+---
+
 ## Reading the result
 
 | Metric | What it tells you |

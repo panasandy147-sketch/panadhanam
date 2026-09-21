@@ -48,6 +48,27 @@ class _DayFeed:
         return None
 
 
+class _MacroTape:
+    """A stand-in for the replayed day's macro tape — no network, and it
+    refuses to serve any print later than the bar being asked about."""
+
+    def __init__(self, bias: float = 1.2) -> None:
+        self.bias = bias
+        self.loaded_for: object = None
+
+    async def load(self, day, interval="5m"):
+        self.loaded_for = day
+        return True
+
+    def snapshot_at(self, ts):
+        from app.core.models import MacroSnapshot
+        return MacroSnapshot(fetched_at=ts,
+                             values={"us_sp500": 5000.0, "gift_nifty": 23000.0},
+                             changes_pct={"us_sp500": self.bias,
+                                          "gift_nifty": self.bias},
+                             notes=["US futures firm overnight — risk-on backdrop"])
+
+
 @pytest.fixture
 async def engine(cfg):
     cfg.switch_market("IN")
@@ -68,6 +89,7 @@ async def engine(cfg):
 
     eng.news.fetch = _no_news
     eng.macro.fetch = _no_macro
+    eng.practice.macro_replay = _MacroTape()
     return eng
 
 
@@ -222,3 +244,100 @@ async def test_practice_trades_can_be_graded_by_the_post_mortem(engine, tmp_path
     assert out["logged"] == len(status["result"]["closed"])
     if out["logged"]:
         assert len(store.entries(limit=50)) >= out["logged"]
+
+
+# --------------------------------------------------------------------------- #
+# Replay has to rebuild every input it can, or the two-confirmation rule can
+# never be met and a quiet replay gets mistaken for a quiet market.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_desk_sees_a_higher_timeframe_built_from_bars_already_shown(engine):
+    eng = engine
+    bars = await eng.broker.get_candles("RELIANCE", "5m", 200)
+    window = bars[:40]
+
+    ctx = await eng.practice._context("RELIANCE", window, window[-1], "5m")
+
+    assert "15m" in ctx.indicators["by_timeframe"], \
+        "without a second timeframe the alignment check is dead weight"
+    assert ctx.indicators["mtf_alignment"]["direction"] != 0, \
+        "a clean uptrend on both timeframes should register as aligned"
+    # The rolled-up series must not reach past the bar being replayed.
+    assert max(c.ts for c in ctx.candles["15m"]) <= window[-1].ts
+
+
+@pytest.mark.asyncio
+async def test_the_macro_analyst_gets_the_day_it_is_replaying(engine):
+    eng = engine
+    bars = await eng.broker.get_candles("RELIANCE", "5m", 200)
+    window = bars[:30]
+
+    ctx = await eng.practice._context("RELIANCE", window, window[-1], "5m")
+    assert ctx.macro is None, "the tape is only wired up once a session loads"
+
+    await eng.practice.start(symbols=["RELIANCE"], speed=600)
+    await _run_to_completion(eng)
+
+    assert eng.practice.macro_replay.loaded_for == _DayFeed.DAY.date()
+    ctx = await eng.practice._context("RELIANCE", window, window[-1], "5m")
+    assert ctx.macro is not None and ctx.macro.changes_pct
+
+
+@pytest.mark.asyncio
+async def test_two_analysts_can_now_vote_in_a_replay(engine):
+    eng = engine
+    bars = await eng.broker.get_candles("RELIANCE", "5m", 200)
+    await eng.practice.start(symbols=["RELIANCE"], speed=600)
+    await _run_to_completion(eng)
+
+    window = bars[:40]
+    ctx = await eng.practice._context("RELIANCE", window, window[-1], "5m")
+    result = await eng.desk.run_cycle(ctx, cycle_id="vote-check")
+
+    voting = {r.agent_id for r in result.reports if r.data_available}
+    assert {"candlestick", "macro_flow"} <= voting, (
+        "price alone is one voice, and one voice can never satisfy "
+        f"min_confirmations=2 — got {voting}")
+
+
+@pytest.mark.asyncio
+async def test_analysts_that_cannot_be_replayed_are_named_not_silently_dropped(engine):
+    eng = engine
+    await eng.practice.start(symbols=["RELIANCE"], speed=600)
+    await _run_to_completion(eng)
+
+    out = eng.practice.result.unavailable_analysts
+    assert {"news_sentiment", "derivatives", "fundamental"} <= set(out)
+    assert "macro_flow" not in out, "the tape loaded, so macro should be voting"
+    assert all(len(reason) > 20 for reason in out.values()), \
+        "an abstention without a reason reads as a verdict on the market"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_macro_tape_says_so_rather_than_inventing_one(engine):
+    eng = engine
+
+    class _DeadTape:
+        async def load(self, day, interval="5m"):
+            raise RuntimeError("feed unreachable")
+
+        def snapshot_at(self, ts):
+            raise AssertionError("must not be consulted after a failed load")
+
+    eng.practice.macro_replay = _DeadTape()
+    await eng.practice.start(symbols=["RELIANCE"], speed=600)
+    await _run_to_completion(eng)
+
+    assert "macro_flow" in eng.practice.result.unavailable_analysts
+    assert eng.practice.result.to_dict()["unavailable_analysts"]
+
+
+@pytest.mark.asyncio
+async def test_rebuilding_macro_can_be_switched_off(engine, cfg):
+    eng = engine
+    cfg.settings.setdefault("practice", {})["rebuild_macro"] = False
+    await eng.practice.start(symbols=["RELIANCE"], speed=600)
+    await _run_to_completion(eng)
+
+    assert "macro_flow" in eng.practice.result.unavailable_analysts
+    assert eng.practice.macro_replay.loaded_for is None
