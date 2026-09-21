@@ -22,16 +22,21 @@ system:
 # talked out of these numbers by any prompt.
 # --------------------------------------------------------------------------
 risk:
-  # Account size every position is sized against. Change it here, or live from
-  # the dashboard (Capital tile → "edit"), or per-machine via TOTAL_CAPITAL
-  # in .env, which overrides this file.
+  # Account size every position is sized against. Set it per-machine with
+  # TOTAL_CAPITAL in .env, which overrides this file and survives a git pull:
+  #
+  #     python run.py --set TOTAL_CAPITAL=10000
+  #
+  # You can also change it live from the dashboard (Capital tile → "edit"), or
+  # edit the value here — but this file is tracked, so an edit here is a change
+  # to a file git owns and the next pull will argue with it.
   #
   # NOTE at very small values: risk_per_trade_pct of a tiny account rounds to
-  # zero shares for most instruments, so the board will show WATCH with
-  # "cannot fit even one share". That is the sizing maths being honest, not a
-  # fault. Small capital does not make live trading safer — staying in paper
-  # mode does.
-  total_capital: 100
+  # zero shares for most instruments, so the board shows WATCH with "cannot fit
+  # even one share" and you get almost no fills to learn from. 10,000 is a
+  # sensible practice size. That is the sizing maths being honest, not a fault
+  # — and small capital does not make live trading safer, staying in paper does.
+  total_capital: 10000
   risk_per_trade_pct: 1.0        # 1% of capital risked per trade (0.5 is safer)
   max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
   max_daily_loss_pct: 3.0        # kill-switch: halt all new trades for the day
