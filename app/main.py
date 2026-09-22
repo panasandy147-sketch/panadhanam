@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.journal_routes import router as journal_router
@@ -101,9 +101,46 @@ app.include_router(journal_router)
 app.include_router(live_router)
 app.include_router(ws_router)
 
+class _VersionedStatic(StaticFiles):
+    """Static files the browser may cache hard, because the URL changes.
+
+    Every asset is requested with a ?v= stamp derived from its own modification
+    time (see `_asset_version`), so a changed file is a different URL and the
+    old one is never reused. That makes it safe — and correct — to tell the
+    browser to keep it.
+    """
+
+    def file_response(self, *args, **kwargs):          # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+def _asset_version(name: str) -> str:
+    """A cache key for one asset: its modification time, to the second.
+
+    Without this a `git pull` leaves the browser serving the previous app.js
+    from cache — the code is updated, the page is not, and the update looks
+    like it did not happen.
+    """
+    try:
+        return str(int((DASHBOARD_DIR / name).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
 if DASHBOARD_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(DASHBOARD_DIR)), name="static")
+    app.mount("/static", _VersionedStatic(directory=str(DASHBOARD_DIR)),
+              name="static")
 
     @app.get("/", include_in_schema=False)
-    async def dashboard() -> FileResponse:
-        return FileResponse(str(DASHBOARD_DIR / "index.html"))
+    async def dashboard() -> Response:
+        """index.html, with its asset URLs stamped and itself never cached."""
+        html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+        for asset in ("app.js", "styles.css"):
+            html = html.replace(f"/static/{asset}",
+                                f"/static/{asset}?v={_asset_version(asset)}")
+        return HTMLResponse(html, headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        })

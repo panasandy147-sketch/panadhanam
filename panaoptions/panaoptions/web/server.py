@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from panaoptions import clock, preflight
@@ -118,13 +118,42 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
                                cfg.get("contracts.max_delta")]}
 
     # ---------------------------------------------------------------- #
-    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+    app.mount("/static", _VersionedStatic(directory=str(STATIC)), name="static")
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(str(STATIC / "index.html"))
+    async def index() -> Response:
+        """The page itself is never cached; its assets are stamped instead.
+
+        Without this a `git pull` leaves the browser serving the previous
+        app.js from cache — the code is updated, the page is not, and the
+        update looks like it never happened.
+        """
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for asset in ("app.js", "styles.css"):
+            html = html.replace(f"/static/{asset}",
+                                f"/static/{asset}?v={_asset_version(asset)}")
+        return HTMLResponse(html, headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        })
 
     return app
+
+
+class _VersionedStatic(StaticFiles):
+    """Cacheable for a year, because a changed file gets a different URL."""
+
+    def file_response(self, *args, **kwargs):          # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+def _asset_version(name: str) -> str:
+    try:
+        return str(int((STATIC / name).stat().st_mtime))
+    except OSError:
+        return "0"
 
 
 def _config_payload(cfg) -> dict[str, Any]:

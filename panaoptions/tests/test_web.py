@@ -189,3 +189,26 @@ async def test_a_failed_connection_does_not_read_as_connected(monkeypatch):
     feed = YahooFeed()
     assert await feed.connect() is False
     assert feed.connected is False
+
+
+# --------------------------------------------------------------------------- #
+# A `git pull` must actually change what people see.
+# --------------------------------------------------------------------------- #
+def test_the_page_is_never_cached_and_its_assets_are_stamped(client):
+    res = client.get("/")
+    assert "no-store" in res.headers.get("cache-control", "")
+    for asset in ("app.js", "styles.css"):
+        assert f"/static/{asset}?v=" in res.text
+
+
+def test_a_stamped_asset_may_be_cached_hard(client):
+    stamped = client.get("/").text.split("/static/app.js?v=")[1].split('"')[0]
+    res = client.get(f"/static/app.js?v={stamped}")
+    assert res.status_code == 200
+    assert "immutable" in res.headers.get("cache-control", "")
+
+
+def test_a_missing_asset_does_not_break_the_page(monkeypatch, tmp_path):
+    from panaoptions.web import server
+    monkeypatch.setattr(server, "STATIC", tmp_path)
+    assert server._asset_version("nope.js") == "0"
