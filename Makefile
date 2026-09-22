@@ -55,6 +55,22 @@ lint:
 fmt:
 	$(PY) -m ruff format app tests scripts run.py
 
+# --- panaoptions: the separate US options app in ./panaoptions -------------
+options:
+	cd panaoptions && $(PY) run.py
+
+options-test:
+	cd panaoptions && $(PY) -m pytest -q
+
+options-lint:
+	cd panaoptions && $(PY) -m ruff check panaoptions tests run.py
+
+options-contracts:
+	cd panaoptions && $(PY) run.py --explain-contracts
+
+options-report:
+	cd panaoptions && $(PY) run.py --report 30
+
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .pytest_cache .ruff_cache

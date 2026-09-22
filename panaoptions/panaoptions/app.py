@@ -1,0 +1,286 @@
+"""The desk. One loop, one decision at a time, all of it paper.
+
+Each cycle:
+    1. Roll the session date, resetting yesterday's counters.
+    2. Mark and manage anything already open. This happens FIRST and in every
+       phase — an open position must be managed after the entry window shuts,
+       and on a day the breaker has tripped.
+    3. Inside the entry window only, and only when flat, look for a setup.
+    4. Force-exit everything at the square-off time.
+
+The order is deliberate. Looking for new trades before managing open ones is
+how a desk ends up doubling down while a loser runs.
+"""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime
+from typing import Any
+
+from panaoptions import clock
+from panaoptions.config import Config, get_config
+from panaoptions.data.feed import YahooFeed
+from panaoptions.data.premarket import screen
+from panaoptions.engine import contracts as contract_filter
+from panaoptions.engine import indicators as ta
+from panaoptions.engine import setups
+from panaoptions.ledger import store
+from panaoptions.ledger.paper import PaperLedger
+from panaoptions.logging import get_logger
+from panaoptions.models import ExitReason, PreMarketRead
+from panaoptions.notify.webhook import Notifier
+from panaoptions.risk.guardrails import RiskManager
+
+log = get_logger("app")
+
+
+class OptionsDesk:
+    def __init__(self, cfg: Config | None = None, feed: Any | None = None) -> None:
+        self.cfg = cfg or get_config()
+        self.feed = feed or YahooFeed()
+        self.risk = RiskManager(self.cfg)
+        self.ledger = PaperLedger(self.cfg, self.risk)
+        self.notifier = Notifier(self.cfg)
+        self.running = False
+        self.screened: list[PreMarketRead] = []
+        self._screened_on: str = ""
+        self._predictor: Any = None
+
+    # ------------------------------------------------------------------ #
+    async def start(self, cycle_seconds: int = 60) -> None:
+        store.init()
+        if not await self.feed.connect():
+            log.error("no market data — refusing to start. A desk that cannot "
+                      "see prices must not pretend to trade.")
+            return
+
+        self._load_predictor()
+        self.running = True
+        log.info("panaoptions desk started — paper only, capital $%.2f, "
+                 "entries %s-%s %s", self.risk.capital,
+                 self.cfg.get("session.entry_open"),
+                 self.cfg.get("session.entry_close"), self.cfg.timezone)
+
+        try:
+            while self.running:
+                try:
+                    await self.cycle()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log.exception("cycle failed: %s", exc)
+                await asyncio.sleep(cycle_seconds)
+        finally:
+            await self.feed.close()
+
+    async def stop(self) -> None:
+        self.running = False
+
+    def _load_predictor(self) -> None:
+        if not bool(self.cfg.get("ml.enabled", False)):
+            return
+        try:
+            from panaoptions.ml.predict import Predictor
+            self._predictor = Predictor(self.cfg)
+            log.info("ML filter active — signals need p > %.0f%%",
+                     float(self.cfg.get("ml.min_probability", 0.65)) * 100)
+        except Exception as exc:
+            log.warning("ML is enabled but the model would not load (%s). "
+                        "Carrying on with the rule engine alone.", exc)
+
+    # ------------------------------------------------------------------ #
+    async def cycle(self) -> dict[str, Any]:
+        now = clock.now(self.cfg.timezone)
+        today = now.date().isoformat()
+        self.risk.roll_day(today)
+
+        phase = clock.session_phase(self.cfg, now)
+        result: dict[str, Any] = {"phase": phase, "ts": now.isoformat(),
+                                  "actions": []}
+
+        if phase == "weekend":
+            return result
+
+        # 1. Manage what is already open, always and first.
+        managed = await self._manage(now)
+        result["actions"].extend(managed)
+
+        if phase == "closed":
+            await self._square_off(now)
+            store.save_session(today, self.risk.state)
+            return result
+
+        # 2. The pre-market screen runs once a day.
+        if phase in {"premarket", "entry_window"} and self._screened_on != today:
+            self.screened = await screen(self.feed, self.cfg, now)
+            self._screened_on = today
+
+        # 3. New entries: only in the window, only when flat.
+        if phase == "entry_window":
+            hunted = await self._hunt(now)
+            result["actions"].extend(hunted)
+        elif phase == "managing":
+            await self._maybe_tighten(now)
+
+        store.save_session(today, self.risk.state)
+        return result
+
+    # ------------------------------------------------------------------ #
+    async def _hunt(self, now: datetime) -> list[str]:
+        """Look for one trade among the symbols that passed the screen."""
+        if self.risk.state.halted:
+            return []
+        if len(self.ledger.open_trades) >= int(self.cfg.get("risk.max_open_trades", 1)):
+            return []
+
+        candidates = [r.symbol for r in self.screened if r.passed]
+        if not candidates:
+            return []
+
+        actions: list[str] = []
+        for symbol in candidates:
+            candles = await self.feed.candles(symbol, self.cfg.get("technical.timeframe", "5m"))
+            if not candles:
+                continue
+
+            setup = setups.evaluate(symbol, candles, self.cfg)
+            signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
+
+            if not setup.triggered:
+                store.save_signal_seen(
+                    signal_id, now, symbol, setup.direction.value, False,
+                    "; ".join(setup.blockers) or "no setup",
+                    {"confirmations": setup.confirmations})
+                continue
+
+            # The ML filter, when it is switched on, is a veto — never a reason
+            # to trade something the rules rejected.
+            probability = None
+            if self._predictor is not None:
+                probability = self._predictor.probability(candles, self.cfg)
+                floor = float(self.cfg.get("ml.min_probability", 0.65))
+                if probability is not None and probability < floor:
+                    store.save_signal_seen(
+                        signal_id, now, symbol, setup.direction.value, False,
+                        f"model probability {probability:.2f} below {floor:.2f}")
+                    actions.append(f"{symbol}: model vetoed ({probability:.0%})")
+                    continue
+
+            search = await self._pick_contract(symbol, setup, now)
+            if search.chosen is None:
+                store.save_signal_seen(signal_id, now, symbol,
+                                       setup.direction.value, False,
+                                       search.note or "no contract qualified",
+                                       {"rejected": search.rejected})
+                actions.append(f"{symbol}: {search.note}")
+                log.info("%s setup fired but no contract qualified. %s",
+                         symbol, search.note)
+                continue
+
+            signal, refusal = self.risk.size(setup, search.chosen, signal_id,
+                                             now, probability)
+            if signal is None:
+                store.save_signal_seen(signal_id, now, symbol,
+                                       setup.direction.value, False, refusal)
+                actions.append(f"{symbol}: {refusal}")
+                continue
+
+            trade = self.ledger.open(signal, now)
+            store.save_signal_seen(signal_id, now, symbol,
+                                   setup.direction.value, True, "taken",
+                                   {"trade_id": trade.id})
+            await self.notifier.entry(signal)
+            actions.append(f"{symbol}: ENTERED {signal.alert_line()}")
+            break            # one trade at a time; stop hunting
+
+        return actions
+
+    async def _pick_contract(self, symbol: str, setup, now: datetime):
+        spot = setup.indicators.close
+        chain = await self.feed.chain_for_window(
+            symbol, spot,
+            int(self.cfg.get("contracts.min_dte", 7)),
+            int(self.cfg.get("contracts.max_dte", 14)))
+        return contract_filter.choose(symbol, chain, setup.direction, self.cfg)
+
+    # ------------------------------------------------------------------ #
+    async def _manage(self, now: datetime) -> list[str]:
+        """Re-price every open trade and apply the exit rules."""
+        if not self.ledger.open_trades:
+            return []
+
+        actions: list[str] = []
+        for trade_id, trade in list(self.ledger.open_trades.items()):
+            price = await self._contract_price(trade)
+            candles = await self.feed.candles(trade.symbol,
+                                              self.cfg.get("technical.timeframe", "5m"))
+            underlying = candles[-1].close if candles else None
+            ema_fast = None
+            if candles:
+                df = ta.to_frame(candles)
+                ema_fast = float(ta.ema(df["close"],
+                                        int(self.cfg.get("technical.fast_ema", 9))).iloc[-1])
+
+            if price is None:
+                continue
+            fills = self.ledger.mark(trade_id, price, underlying, now, ema_fast)
+            for fill in fills:
+                actions.append(f"{trade.symbol}: {fill.reason} at {fill.price:.2f}")
+            if not trade.is_open:
+                store.save_trade(trade)
+                await self.notifier.exit(trade)
+        return actions
+
+    async def _contract_price(self, trade) -> float | None:
+        """Re-price the exact contract being held."""
+        chain = await self.feed.chain_for_window(
+            trade.symbol, 0.0, 0, 60)
+        for c in chain:
+            if c.label == trade.contract_label:
+                return c.mid
+        log.debug("could not re-price %s this cycle", trade.contract_label)
+        return None
+
+    async def _maybe_tighten(self, now: datetime) -> None:
+        """After the tighten time, pull stops to breakeven on anything green."""
+        if not clock.at_or_after(self.cfg.timezone,
+                                 str(self.cfg.get("session.tighten_stops_at", "10:45")),
+                                 now):
+            return
+        for trade in self.ledger.open_trades.values():
+            if not trade.breakeven_armed and trade.stop_price < trade.entry_price:
+                trade.stop_price = trade.entry_price
+                trade.breakeven_armed = True
+                log.info("%s past the tighten time — stop moved to breakeven "
+                         "%.2f", trade.contract_label, trade.stop_price)
+
+    async def _square_off(self, now: datetime) -> None:
+        if not self.ledger.open_trades:
+            return
+        prices: dict[str, float] = {}
+        for trade in self.ledger.open_trades.values():
+            price = await self._contract_price(trade)
+            if price is not None:
+                prices[trade.contract_label] = price
+        closed = list(self.ledger.open_trades.values())
+        self.ledger.close_all(prices, ExitReason.DAY_END, now)
+        for trade in closed:
+            store.save_trade(trade)
+            await self.notifier.exit(trade)
+
+    # ------------------------------------------------------------------ #
+    def status(self) -> dict[str, Any]:
+        now = clock.now(self.cfg.timezone)
+        return {
+            "phase": clock.session_phase(self.cfg, now),
+            "market_time": now.strftime("%Y-%m-%d %H:%M %Z"),
+            "risk": self.risk.describe(),
+            "ledger": self.ledger.stats(),
+            "screened": [r.model_dump() for r in self.screened],
+            "open_trades": [t.model_dump(mode="json")
+                            for t in self.ledger.open_trades.values()],
+            "ml_enabled": self._predictor is not None,
+            "notifications": self.notifier.enabled,
+            "paper_only": True,
+        }

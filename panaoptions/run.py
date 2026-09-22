@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""panaoptions — intraday US options paper trading on a small account.
+
+    python run.py                     start the desk (paper only)
+    python run.py --once              run one cycle and exit
+    python run.py --status            print the current state and exit
+    python run.py --screen            run the pre-market screen and exit
+    python run.py --explain-contracts what your budget actually buys, live
+    python run.py --report [DAYS]     the paper-trading record so far
+    python run.py --train [SYMBOLS]   train the optional ML filter
+    python run.py --check             verify the data feed is reachable
+
+Nothing here can place a real order. There is no broker adapter in this
+package, by design.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from panaoptions import clock  # noqa: E402
+from panaoptions.config import get_config  # noqa: E402
+from panaoptions.logging import get_logger  # noqa: E402
+
+log = get_logger("run")
+
+BANNER = r"""
+  ____                       ____        _   _
+ |  _ \ __ _ _ __   __ _    / __ \ _ __ | |_(_) ___  _ __  ___
+ | |_) / _` | '_ \ / _` |  | |  | | '_ \| __| |/ _ \| '_ \/ __|
+ |  __/ (_| | | | | (_| |  | |__| | |_) | |_| | (_) | | | \__ \
+ |_|   \__,_|_| |_|\__,_|   \____/| .__/ \__|_|\___/|_| |_|___/
+                                  |_|
+  Intraday US options — PAPER ONLY, no broker connection exists.
+"""
+
+
+async def _desk():
+    from panaoptions.app import OptionsDesk
+    return OptionsDesk()
+
+
+async def _check() -> bool:
+    from panaoptions.data.feed import YahooFeed
+    cfg = get_config()
+    print("\n=== DATA FEED ===")
+    async with YahooFeed() as feed:
+        ok = await feed.connect()
+        if not ok:
+            print("  Yahoo Finance UNREACHABLE — check your connection, a VPN, "
+                  "or a corporate proxy.")
+            return False
+        print("  Yahoo Finance connected.")
+        for symbol in cfg.symbols[:3]:
+            quote = await feed.quote(symbol)
+            if quote and quote.get("last_price"):
+                print(f"  {symbol:5s} last {quote['last_price']:,.2f} "
+                      f"prev close {quote.get('previous_close') or 0:,.2f}")
+            else:
+                print(f"  {symbol:5s} no quote")
+        expiries = await feed.expiries(cfg.symbols[0])
+        print(f"  {cfg.symbols[0]} option expiries available: {len(expiries)}")
+    return True
+
+
+async def _explain_contracts() -> None:
+    """What the configured budget actually buys, on live chains.
+
+    This exists because the shipped delta band and the shipped price cap
+    cannot both be satisfied on this universe, and an empty signal list is
+    indistinguishable from a quiet market until somebody prints the numbers.
+    """
+    from panaoptions.data.feed import YahooFeed
+    from panaoptions.data.greeks import atm_premium_estimate
+    from panaoptions.engine.contracts import affordable_delta
+    from panaoptions.models import Direction, OptionRight
+
+    cfg = get_config()
+    multiplier = cfg.multiplier
+    min_price = float(cfg.get("contracts.min_contract_price", 0.60)) * multiplier
+    max_price = float(cfg.get("contracts.max_contract_price", 1.00)) * multiplier
+    min_delta = float(cfg.get("contracts.min_delta", 0.45))
+    max_delta = float(cfg.get("contracts.max_delta", 0.60))
+    min_dte = int(cfg.get("contracts.min_dte", 7))
+    max_dte = int(cfg.get("contracts.max_dte", 14))
+
+    print("\n=== WHAT YOUR BUDGET ACTUALLY BUYS ===")
+    print(f"  Configured: delta {min_delta}-{max_delta}, "
+          f"${min_price:.0f}-${max_price:.0f} per contract, {min_dte}-{max_dte} DTE\n")
+    print(f"  {'Symbol':7s} {'Spot':>9s} {'ATM cost':>10s} "
+          f"{'In budget':>10s} {'Delta you can afford':>22s}")
+    print("  " + "-" * 62)
+
+    impossible = []
+    async with YahooFeed() as feed:
+        if not await feed.connect():
+            print("  No data feed — cannot check live prices.")
+            return
+        for symbol in cfg.symbols:
+            quote = await feed.quote(symbol)
+            spot = float((quote or {}).get("last_price") or 0)
+            if not spot:
+                print(f"  {symbol:7s} {'no quote':>9s}")
+                continue
+
+            chain = await feed.chain_for_window(symbol, spot, min_dte, max_dte)
+            atm = [c for c in chain
+                   if c.right is OptionRight.CALL
+                   and min_delta <= abs(c.delta) <= max_delta and c.mid > 0]
+            if atm:
+                cheapest_atm = min(atm, key=lambda c: c.mid).cost(multiplier)
+            else:
+                iv = next((c.implied_volatility for c in chain
+                           if c.implied_volatility), 0.25)
+                cheapest_atm = atm_premium_estimate(spot, iv, 10) * multiplier
+
+            band = affordable_delta(chain, Direction.LONG, cfg)
+            fits = min_price <= cheapest_atm <= max_price
+            if not fits:
+                impossible.append(symbol)
+            band_text = f"{band[0]:.2f}-{band[1]:.2f}" if band else "nothing in range"
+            print(f"  {symbol:7s} {spot:9,.2f} {cheapest_atm:10,.0f} "
+                  f"{('yes' if fits else 'NO'):>10s} {band_text:>22s}")
+
+    if impossible:
+        print(f"\n  {len(impossible)} of {len(cfg.symbols)} symbols cannot produce a "
+              f"contract that is both {min_delta}-{max_delta} delta and under "
+              f"${max_price:.0f}.")
+        print("  These two rules describe an empty set, so the desk will keep\n"
+              "  finding setups and taking none of them. That is the arithmetic\n"
+              "  being honest, not a fault in the scanner.\n")
+        print("  One contract is 100 shares, and 0.45-0.60 delta means at the\n"
+              "  money. At-the-money costs what it costs.\n")
+        print("  Pick one:")
+        print("    1. Raise contracts.max_contract_price to what ATM actually")
+        print("       costs above, and paper-trade the strategy as designed.")
+        print("       Recommended: you are learning the rules, and the account")
+        print("       size is the constraint, not the rules.")
+        print("    2. Trade cheaper underlyings where ATM fits the budget.")
+        print("    3. Lower contracts.min_delta to roughly 0.15-0.20 and accept")
+        print("       out-of-the-money contracts. Theta and the spread will take")
+        print("       most of the edge. Not recommended.\n")
+
+
+async def _screen() -> None:
+    from panaoptions.data.feed import YahooFeed
+    from panaoptions.data.premarket import screen
+
+    cfg = get_config()
+    now = clock.now(cfg.timezone)
+    async with YahooFeed() as feed:
+        if not await feed.connect():
+            return
+        reads = await screen(feed, cfg, now)
+
+    print(f"\n=== PRE-MARKET SCREEN  {now:%Y-%m-%d %H:%M %Z} ===")
+    print(f"  {'Symbol':7s} {'Last':>9s} {'Gap %':>8s} {'RVOL':>7s}  Verdict")
+    print("  " + "-" * 62)
+    for r in sorted(reads, key=lambda r: (not r.passed, -abs(r.gap_pct))):
+        print(f"  {r.symbol:7s} {r.last_price:9,.2f} {r.gap_pct:+8.2f} "
+              f"{r.rvol:7.2f}  {'PASS' if r.passed else 'skip'}")
+        for reason in r.reasons:
+            print(f"          {reason}")
+
+
+def _report(days: int) -> None:
+    from datetime import date, timedelta
+
+    from panaoptions.ledger import store
+
+    store.init()
+    since = (date.today() - timedelta(days=days)).isoformat()
+    rows = store.trades(limit=1000, since=since)
+    sessions = store.sessions(limit=days)
+
+    print(f"\n=== PAPER TRADING RECORD — last {days} days ===")
+    if not rows:
+        print("  No trades recorded yet.\n")
+        tally = store.rejection_tally(since)
+        if tally:
+            print("  Setups considered and passed over:")
+            for reason, count in list(tally.items())[:8]:
+                print(f"    {count:4d}x  {reason}")
+            print("\n  If one reason dominates, that is the rule to look at.")
+            print("  `python run.py --explain-contracts` checks the usual suspect.")
+        return
+
+    wins = [r for r in rows if (r["realised_pnl"] or 0) > 0]
+    total = sum(r["realised_pnl"] or 0 for r in rows)
+    print(f"  Trades: {len(rows)} | Wins: {len(wins)} "
+          f"({len(wins) / len(rows) * 100:.0f}%) | P&L: ${total:+,.2f}")
+    print(f"  Sessions traded: {len(sessions)}\n")
+    print(f"  {'Date':11s} {'Symbol':7s} {'Contract':26s} {'Exit':16s} {'P&L':>9s}")
+    print("  " + "-" * 74)
+    for r in rows[:40]:
+        print(f"  {r['session_date']:11s} {r['symbol']:7s} "
+              f"{(r['contract'] or '')[:26]:26s} {(r['exit_reason'] or ''):16s} "
+              f"{r['realised_pnl'] or 0:+9.2f}")
+    print()
+
+
+async def _train(symbols: list[str]) -> int:
+    import pandas as pd
+
+    from panaoptions.data.feed import YahooFeed
+    from panaoptions.engine import indicators as ta
+    from panaoptions.ml.train import MissingDependencies, dataset, save, walk_forward
+
+    cfg = get_config()
+    symbols = symbols or cfg.symbols
+
+    try:
+        frames = []
+        async with YahooFeed() as feed:
+            if not await feed.connect():
+                return 1
+            for symbol in symbols:
+                bars = await feed.candles(symbol, "5m")
+                daily = await feed.candles(symbol, "1d")
+                if len(bars) < 500:
+                    print(f"  {symbol}: only {len(bars)} bars, skipping")
+                    continue
+                frame = dataset(ta.to_frame(bars), ta.to_frame(daily), cfg)
+                frame["symbol"] = symbol
+                frames.append(frame)
+                print(f"  {symbol}: {len(frame):,} labelled rows "
+                      f"({frame['label'].mean() * 100:.1f}% positive)")
+
+        if not frames:
+            print("\n  No usable data. Yahoo serves only ~60 days of 5m bars,\n"
+                  "  which may be too short for the configured walk-forward.\n")
+            return 1
+
+        combined = pd.concat(frames).sort_index()
+        model, report = walk_forward(combined, cfg, symbol=",".join(symbols))
+        paths = save(model, report)
+
+        summary = report.to_dict()
+        print(f"\n  Folds: {len(summary['folds'])} | mean AUC: {summary['mean_auc']}")
+        print(f"  Precision at p>={report.threshold}: "
+              f"{summary['mean_precision_at_threshold']}")
+        print("\n  Top features:")
+        for name, score in list(report.feature_importance.items())[:8]:
+            print(f"    {name:24s} {score:.4f}")
+        print(f"\n  Saved: {paths['model']}")
+        print("  Set ml.enabled: true in config/settings.yaml to use it.\n")
+        return 0
+    except MissingDependencies as exc:
+        print(f"\n  {exc}\n")
+        return 1
+    except ValueError as exc:
+        print(f"\n  {exc}\n")
+        return 1
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="panaoptions — paper options desk")
+    parser.add_argument("--once", action="store_true", help="one cycle, then exit")
+    parser.add_argument("--status", action="store_true", help="print state and exit")
+    parser.add_argument("--screen", action="store_true", help="pre-market screen only")
+    parser.add_argument("--explain-contracts", action="store_true",
+                        help="what your budget actually buys, on live chains")
+    parser.add_argument("--report", nargs="?", const=30, type=int, metavar="DAYS",
+                        help="the paper-trading record (default 30 days)")
+    parser.add_argument("--train", nargs="*", metavar="SYMBOL",
+                        help="train the optional ML filter")
+    parser.add_argument("--check", action="store_true", help="verify the data feed")
+    parser.add_argument("--interval", type=int, default=60,
+                        help="seconds between cycles (default 60)")
+    args = parser.parse_args()
+
+    if args.check:
+        raise SystemExit(0 if asyncio.run(_check()) else 1)
+    if args.explain_contracts:
+        asyncio.run(_explain_contracts())
+        return
+    if args.screen:
+        asyncio.run(_screen())
+        return
+    if args.report is not None:
+        _report(args.report)
+        return
+    if args.train is not None:
+        raise SystemExit(asyncio.run(_train(args.train)))
+
+    if args.status:
+        desk = asyncio.run(_desk())
+        print(json.dumps(desk.status(), indent=2, default=str))
+        return
+
+    print(BANNER)
+    desk = asyncio.run(_desk())
+    if args.once:
+        from panaoptions.ledger import store
+        store.init()
+        asyncio.run(_run_once(desk))
+        return
+    try:
+        asyncio.run(desk.start(cycle_seconds=args.interval))
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
+async def _run_once(desk) -> None:
+    if not await desk.feed.connect():
+        return
+    try:
+        result = await desk.cycle()
+        print(json.dumps(result, indent=2, default=str))
+    finally:
+        await desk.feed.close()
+
+
+if __name__ == "__main__":
+    main()

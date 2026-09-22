@@ -1,0 +1,102 @@
+# ==========================================================================
+# panaoptions — intraday US options paper trading on a $500 account.
+# Every rule below is enforced in code. Change it here, not in the source.
+# ==========================================================================
+
+account:
+  # Paper capital. Real money is not supported by this app at all: there is no
+  # broker adapter, and nothing here can place an order anywhere.
+  starting_capital: 500.0
+  currency: "$"
+
+session:
+  timezone: "America/New_York"
+  # Entries only inside this window. 09:30-09:35 is skipped deliberately:
+  # opening spreads are wide and the first prints are noise.
+  entry_open: "09:35"
+  entry_close: "10:30"
+  # Tighten stops to breakeven after this, before the midday volume slump.
+  tighten_stops_at: "10:45"
+  # Nothing may stay open past this.
+  force_exit_at: "15:45"
+
+universe:
+  symbols: ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD", "MSFT", "AMZN"]
+
+premarket:
+  min_rvol: 1.5          # relative volume vs the 20-day average at this time
+  min_gap_pct: 1.0       # |open vs previous close|, in percent
+
+technical:
+  timeframe: "5m"
+  trend_timeframe: "15m"
+  fast_ema: 9
+  slow_ema: 20
+  atr_period: 14
+  volume_lookback: 20
+  volume_multiplier: 1.0   # candle volume must beat this x the average
+
+contracts:
+  # --------------------------------------------------------------------
+  # READ THIS BEFORE CHANGING THE BUDGET.
+  #
+  # delta 0.45-0.60 means "at the money". An at-the-money option 7-14 days
+  # out on SPY, NVDA or AAPL costs roughly $350-$650 per contract, because
+  # one contract is 100 shares. A $60-$100 budget buys roughly 0.10-0.20
+  # delta — well out of the money.
+  #
+  # So max_contract_price and the delta band below are in direct conflict
+  # for this universe, and the filter will correctly return NOTHING. That
+  # is the arithmetic being honest, not a bug. `run.py --explain-contracts`
+  # prints what each symbol actually costs right now.
+  #
+  # Your three options, in order of how much we would recommend them:
+  #   1. Keep paper-trading the ATM rule and raise max_contract_price to
+  #      what ATM actually costs. You learn the strategy; the account size
+  #      is the thing that is wrong, not the rule.
+  #   2. Trade cheaper underlyings where ATM fits $100 (see docs).
+  #   3. Drop min_delta to ~0.15 and accept OTM lottery tickets. Theta and
+  #      the spread will eat most of the edge. We do not recommend it.
+  # --------------------------------------------------------------------
+  min_dte: 7
+  max_dte: 14
+  min_delta: 0.45
+  max_delta: 0.60
+  max_spread_pct_of_mid: 5.0
+  min_contract_price: 0.60      # per share, so $60 per contract
+  max_contract_price: 1.00      # per share, so $100 per contract
+  contract_multiplier: 100
+
+risk:
+  max_open_trades: 1
+  # Premium paid as a share of the account. This is capital DEPLOYED, not
+  # capital at risk: the stop below is what decides the real loss.
+  max_capital_deployed_pct: 20.0
+  # Hard stop on the contract price itself.
+  stop_loss_pct: 20.0
+  # So the real risk per trade is 20% of 20% = 4% of the account. The app
+  # prints both numbers on every signal so the distinction stays visible.
+  take_profit_1_pct: 40.0        # scale out half here
+  take_profit_1_size_pct: 50.0
+  take_profit_2_pct: 70.0        # or the 9-EMA trail, whichever comes first
+  trail_on_ema: true
+  breakeven_after_tp1: true
+  # Halt for the rest of the day at this cumulative loss.
+  daily_loss_limit: 50.0
+  # Simulated fill cost per contract, per side.
+  slippage_per_contract: 0.02
+
+ml:
+  enabled: false                 # needs the extra packages; see docs
+  min_probability: 0.65
+  target_atr_multiple: 1.5       # a win is +1.5 ATR ...
+  stop_atr_multiple: 1.0         # ... before -1.0 ATR
+  horizon_bars: 6                # within 6 five-minute candles
+  train_window_days: 120
+  test_window_days: 20
+
+notify:
+  # Left blank = no webhook calls are made at all.
+  discord_webhook_url: ""
+  telegram_bot_token: ""
+  telegram_chat_id: ""

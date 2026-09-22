@@ -1,0 +1,196 @@
+"""The vocabulary. Everything crossing a module boundary is one of these."""
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class Direction(str, Enum):
+    LONG = "LONG"       # buy calls
+    SHORT = "SHORT"     # buy puts
+    NONE = "NONE"
+
+
+class OptionRight(str, Enum):
+    CALL = "CALL"
+    PUT = "PUT"
+
+
+class Candle(BaseModel):
+    ts: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+
+
+class PreMarketRead(BaseModel):
+    """What the pre-market screener found for one symbol."""
+    symbol: str
+    previous_close: float = 0.0
+    last_price: float = 0.0
+    gap_pct: float = 0.0
+    rvol: float = 0.0
+    passed: bool = False
+    reasons: list[str] = Field(default_factory=list)
+
+
+class Indicators(BaseModel):
+    ema_fast: float = 0.0
+    ema_slow: float = 0.0
+    vwap: float = 0.0
+    atr: float = 0.0
+    volume: float = 0.0
+    avg_volume: float = 0.0
+    rvol: float = 0.0
+    close: float = 0.0
+
+
+class Setup(BaseModel):
+    """A technical trigger on the underlying, before any option is chosen."""
+    symbol: str
+    ts: datetime
+    direction: Direction = Direction.NONE
+    pattern: str = ""
+    confirmations: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    indicators: Indicators = Field(default_factory=Indicators)
+    trend_aligned: bool = False
+    underlying_support: float = 0.0   # the level that invalidates the trade
+
+    @property
+    def triggered(self) -> bool:
+        return self.direction is not Direction.NONE and not self.blockers
+
+
+class OptionContract(BaseModel):
+    symbol: str
+    right: OptionRight
+    strike: float
+    expiry: str
+    dte: int = 0
+    bid: float = 0.0
+    ask: float = 0.0
+    delta: float = 0.0
+    implied_volatility: float = 0.0
+    open_interest: int = 0
+    volume: int = 0
+
+    @property
+    def mid(self) -> float:
+        if self.bid and self.ask:
+            return round((self.bid + self.ask) / 2, 4)
+        return self.ask or self.bid
+
+    @property
+    def spread(self) -> float:
+        return round(max(self.ask - self.bid, 0.0), 4)
+
+    @property
+    def spread_pct_of_mid(self) -> float:
+        mid = self.mid
+        return round(self.spread / mid * 100, 2) if mid else 999.0
+
+    def cost(self, multiplier: int = 100) -> float:
+        """What one contract actually costs, in dollars."""
+        return round(self.mid * multiplier, 2)
+
+    @property
+    def label(self) -> str:
+        return f"{self.symbol} {self.expiry} {self.strike:g}{self.right.value[0]}"
+
+
+class ContractSearch(BaseModel):
+    """The result of filtering a chain — including why nothing qualified.
+
+    A filter that returns nothing is only useful if it says what it rejected
+    and by how much. Without the counts, an impossible rule looks exactly like
+    a quiet market.
+    """
+    symbol: str
+    chosen: OptionContract | None = None
+    examined: int = 0
+    rejected: dict[str, int] = Field(default_factory=dict)
+    closest_by_price: OptionContract | None = None
+    note: str = ""
+
+
+class Signal(BaseModel):
+    id: str
+    ts: datetime
+    symbol: str
+    direction: Direction
+    contract: OptionContract
+    quantity: int = 1
+    entry_price: float = 0.0          # per share of premium
+    stop_price: float = 0.0
+    target_1: float = 0.0
+    target_2: float = 0.0
+    underlying_at_entry: float = 0.0
+    underlying_support: float = 0.0
+    pattern: str = ""
+    confirmations: list[str] = Field(default_factory=list)
+    ml_probability: float | None = None
+
+    def cost(self, multiplier: int = 100) -> float:
+        return round(self.entry_price * self.quantity * multiplier, 2)
+
+    def risk_at_stop(self, multiplier: int = 100) -> float:
+        return round((self.entry_price - self.stop_price)
+                     * self.quantity * multiplier, 2)
+
+    def alert_line(self) -> str:
+        arrow = "CALL" if self.direction is Direction.LONG else "PUT"
+        return (f"[{self.symbol} | {self.contract.expiry} "
+                f"{self.contract.strike:g}{arrow[0]}] BUY "
+                f"[{self.entry_price:.2f}] "
+                f"SL [{self.stop_price:.2f}] "
+                f"TP1 [{self.target_1:.2f}] TP2 [{self.target_2:.2f}]")
+
+
+class ExitReason(str, Enum):
+    STOP = "STOP"
+    TARGET_1 = "TARGET_1"
+    TARGET_2 = "TARGET_2"
+    TRAIL = "TRAIL"
+    UNDERLYING_BREAK = "UNDERLYING_BREAK"
+    TIME_EXIT = "TIME_EXIT"
+    DAY_END = "DAY_END"
+    CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
+
+
+class Fill(BaseModel):
+    ts: datetime
+    quantity: int
+    price: float
+    reason: str = ""
+
+
+class PaperTrade(BaseModel):
+    id: str
+    signal_id: str
+    symbol: str
+    direction: Direction
+    contract_label: str
+    opened_at: datetime
+    quantity: int
+    entry_price: float
+    stop_price: float
+    target_1: float
+    target_2: float
+    underlying_support: float = 0.0
+
+    remaining: int = 0
+    fills: list[Fill] = Field(default_factory=list)
+    realised_pnl: float = 0.0
+    closed_at: datetime | None = None
+    exit_reason: ExitReason | None = None
+    breakeven_armed: bool = False
+    max_price_seen: float = 0.0
+
+    @property
+    def is_open(self) -> bool:
+        return self.remaining > 0

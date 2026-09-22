@@ -1,0 +1,7 @@
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.csv
+data/models/
+__pycache__/
+*.pyc

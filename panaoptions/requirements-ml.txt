@@ -1,0 +1,8 @@
+# Optional: the machine-learning filter (run.py --train).
+# The desk runs perfectly well without these — the classifier is a veto on top
+# of the rules, never a reason to take a trade the rules rejected.
+-r requirements.txt
+scikit-learn>=1.5
+xgboost>=2.0
+joblib>=1.4
+shap>=0.45          # per-trade explanations; without it you get gain importance
