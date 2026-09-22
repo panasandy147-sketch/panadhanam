@@ -193,3 +193,185 @@ async def test_status_reports_whether_today_is_armed(engine):
     assert engine.status()["armed"] is False
     await engine.trading_day.start()
     assert engine.status()["armed"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Auto-arming: paper accounts only, and never twice a day.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def market_open(engine, monkeypatch):
+    """Pin the session to open. Auto-arm only fires during the session, so
+    without this the tests pass or fail according to the wall clock."""
+    monkeypatch.setattr(engine, "session_phase", lambda: "open")
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_waits_for_the_session_to_open(engine, cfg, monkeypatch):
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    monkeypatch.setattr(engine, "session_phase", lambda: "premarket")
+
+    assert await engine.trading_day.maybe_auto_arm() is None
+    assert not engine.trading_day.armed
+@pytest.mark.asyncio
+async def test_the_desk_arms_itself_at_the_open_on_a_paper_account(market_open, engine, cfg):
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    assert not engine.trading_day.armed
+
+    result = await engine.trading_day.maybe_auto_arm()
+    assert result and result["armed"] is True
+    assert engine.trading_day.armed
+    assert engine.trading_day.status()["armed_by"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_pressing_the_button_is_still_recorded_as_yours(engine, cfg):
+    await engine.trading_day.start()
+    assert engine.trading_day.status()["armed_by"] == "you"
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_is_refused_on_a_real_money_account(market_open, engine, cfg, monkeypatch):
+    # Deliberately not configurable. Committing real capital is a decision a
+    # person takes each morning, not one a config file takes overnight.
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    monkeypatch.setattr(engine.broker, "is_paper_account", False, raising=False)
+
+    assert await engine.trading_day.maybe_auto_arm() is None
+    assert not engine.trading_day.armed, \
+        "no setting may arm a real-money account without a person"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_auto_arm_is_not_retried_every_cycle(market_open, engine, cfg, monkeypatch):
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    monkeypatch.setattr(engine.broker, "is_paper_account", False, raising=False)
+
+    calls = []
+    original = engine.trading_day.start
+
+    async def _counted(by="you"):
+        calls.append(by)
+        return await original(by=by)
+
+    monkeypatch.setattr(engine.trading_day, "start", _counted)
+    for _ in range(5):
+        await engine.trading_day.maybe_auto_arm()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_does_nothing_when_switched_off(market_open, engine, cfg):
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = False
+    assert await engine.trading_day.maybe_auto_arm() is None
+    assert not engine.trading_day.armed
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_leaves_an_already_armed_day_alone(market_open, engine, cfg):
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    await engine.trading_day.start()
+    armed_at = engine.trading_day.status()["armed_at"]
+
+    assert await engine.trading_day.maybe_auto_arm() is None
+    assert engine.trading_day.status()["armed_at"] == armed_at
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_day_is_not_undone_by_the_next_auto_arm(market_open, engine, cfg):
+    # Pressing Stop must mean stopped. Re-arming what somebody just disarmed
+    # would make the button useless.
+    cfg.settings.setdefault("trading_day", {})["auto_arm_on_open"] = True
+    await engine.trading_day.maybe_auto_arm()
+    await engine.trading_day.stop()
+    assert not engine.trading_day.armed
+
+    await engine.trading_day.maybe_auto_arm()
+    assert not engine.trading_day.armed
+
+
+# --------------------------------------------------------------------------- #
+# The end-of-day summary publishes itself after square-off.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_day_summary_publishes_once_after_square_off(engine, cfg,
+                                                               monkeypatch):
+    from datetime import datetime
+
+    from app.core import clock as clock_mod
+
+    cfg.settings["system"]["square_off_time"] = "15:15"
+    cfg.settings.setdefault("trading_day", {})["summary_after_square_off_minutes"] = 5
+    monkeypatch.setattr(clock_mod, "market_now",
+                        lambda tz: datetime(2026, 9, 22, 15, 25))
+
+    published = []
+    monkeypatch.setattr("app.scheduler.bus.publish",
+                        lambda topic, data: published.append((topic, data))
+                        or _done())
+
+    await engine._maybe_publish_day_summary()
+    assert [t for t, _ in published] == ["trading_day.summary"]
+
+    # Once a day, not once a cycle.
+    await engine._maybe_publish_day_summary()
+    assert len(published) == 1
+
+
+async def _done():
+    return None
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_published_before_square_off(engine, cfg, monkeypatch):
+    from datetime import datetime
+
+    from app.core import clock as clock_mod
+
+    cfg.settings["system"]["square_off_time"] = "15:15"
+    monkeypatch.setattr(clock_mod, "market_now",
+                        lambda tz: datetime(2026, 9, 22, 14, 0))
+
+    published = []
+    monkeypatch.setattr("app.scheduler.bus.publish",
+                        lambda topic, data: published.append(topic) or _done())
+
+    await engine._maybe_publish_day_summary()
+    assert published == []
+
+
+@pytest.mark.asyncio
+async def test_the_summary_reaches_the_dashboard_payload(engine, cfg, monkeypatch):
+    from datetime import datetime
+
+    from app.core import clock as clock_mod
+
+    cfg.settings["system"]["square_off_time"] = "15:15"
+    monkeypatch.setattr(clock_mod, "market_now",
+                        lambda tz: datetime(2026, 9, 22, 15, 30))
+    monkeypatch.setattr("app.scheduler.bus.publish",
+                        lambda topic, data: _done())
+
+    assert engine.status()["day_summary"] is None
+    await engine._maybe_publish_day_summary()
+
+    summary = engine.status()["day_summary"]
+    assert summary is not None
+    assert "published_at" in summary
+    assert "trades" in summary and "top_rejections" in summary
+
+
+@pytest.mark.asyncio
+async def test_a_weekend_publishes_nothing(engine, cfg, monkeypatch):
+    from datetime import datetime
+
+    from app.core import clock as clock_mod
+
+    monkeypatch.setattr(clock_mod, "market_now",
+                        lambda tz: datetime(2026, 9, 26, 16, 0))   # Saturday
+    published = []
+    monkeypatch.setattr("app.scheduler.bus.publish",
+                        lambda topic, data: published.append(topic) or _done())
+
+    await engine._maybe_publish_day_summary()
+    assert published == []

@@ -166,3 +166,22 @@ desk recorded before the outcome was known. Abstentions are listed too: an
 analyst with no data was never a quiet vote of agreement.
 
 Full details in [WEEKLY-REVIEW.md](WEEKLY-REVIEW.md).
+
+
+---
+
+## Trading Day
+
+| Button | What it does | When to press it |
+|---|---|---|
+| **▶ Start trading day** | Arms order placement for **today only**. The desk already arms itself at the open, so this is for starting by hand or restarting after a Stop. | Any time during the session. |
+| **Stop** | Disarms immediately. The desk keeps analysing and alerting; it just stops sending orders. A Stop is not undone by the next auto-arm. | When you want it to stop trading but keep watching. |
+| **Day report** | The session so far, on demand. | Any time — the **Today** panel publishes the same thing by itself after square-off. |
+
+The badge beside them says which of three states you are in:
+
+| Badge | Meaning |
+|---|---|
+| `ALERT ONLY (no orders)` | `AUTO_PLACE_ORDERS` is off. Nothing is sent anywhere. |
+| `PAPER ORDERS ON` | Approved signals become **simulated** orders, on a day you have armed. |
+| `LIVE ORDERS` | Real orders. Real money. |

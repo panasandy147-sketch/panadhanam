@@ -98,55 +98,21 @@ a third market (one YAML file).
 
 ---
 
-## Practice Day
+## Paper trading
 
-> **Practice Day replays a PAST session — it is not live trading.** For live
-> paper trading during market hours, just leave the app running with a broker
-> configured; that is the normal engine. See
-> [docs/PRACTICE.md](docs/PRACTICE.md#live-paper-trading-the-other-thing).
+Leave the app running with a broker configured and it trades on real prices
+with simulated fills. It **arms itself when the session opens**, so you do not
+have to be at the screen; **Start trading day** is there for the mornings you
+want to start it by hand, or to restart after a Stop.
 
-**▶ Start practice day** replays a real session bar by bar, running the full
-agent desk at each step with **no lookahead** — at bar N the agents see bars
-0..N and nothing else. A day takes ~6 minutes at 60x, so you can practise at
-the weekend when the market is shut.
+A real-money account is never auto-armed, and no setting permits it.
 
-When nothing fires, the panel tells you *what the desk was waiting for* rather
-than leaving you with a blank screen. Then **Log to journal** grades every
-practice trade through the post-mortem engine.
+A few minutes after square-off the **Today** panel fills in by itself — signals,
+trades, win rate, total R, P&L, and what the desk was waiting for on a day it
+took nothing. Every trade is journalled as it closes, and the **Weekly Review**
+panel builds the week from them.
 
-See [docs/PRACTICE.md](docs/PRACTICE.md), including a two-week programme.
-
----
-
-## Trade journal & post-mortem
-
-Every completed trade gets a **Mistake Card**: graded 1-10 on *discipline, not
-profit*, with the root cause and one measurable corrective rule.
-
-The verdict is the point — **a winning trade that broke your rules is a BAD WIN**,
-and it is the most dangerous outcome because it teaches you to break the rule
-again. The engine detects a widened stop, a chased entry, an oversized position
-or a blown time stop from the numbers alone, whether or not you own up to them.
-
-Two metrics drive it: **R-multiple realisation** (P&L ÷ initial risk) and the
-**Mistake Cost Index** — the money lost specifically to rule violations, with
-clean losses excluded because those are the price of having an edge.
-
-Cards are written to `journal/` as markdown and **committed to git**, so your
-learning history outlives the database. See [docs/JOURNAL.md](docs/JOURNAL.md).
-
-### The weekend review
-
-After Friday's close, **Weekly Review → Build this week's review** gives you
-the week in one downloadable file: every trade with **each analyst's vote,
-score and reasoning at the moment of entry**, the counter-argument recorded
-before the outcome was known, the Mistake Cost Index, a scorecard of which
-analyst actually earned its weight — and a coach's read on what to change.
-
-It writes itself to `journal/weekly/` once the week closes, so it is waiting
-when you look. The coach **advises and never configures**: the risk desk stays
-deterministic, and no model can change a stop, a size or the confirmation
-requirement. See [docs/WEEKLY-REVIEW.md](docs/WEEKLY-REVIEW.md).
+See [docs/PAPER-TRADING.md](docs/PAPER-TRADING.md).
 
 ---
 
@@ -478,9 +444,6 @@ make lint
 | `POST /api/config/reload` | apply YAML changes with no restart |
 | `GET /api/signals` | signal history with rejection reasons |
 | `POST /api/risk/calculate` | position sizing |
-| `POST /api/practice/start` | replay a real trading day |
-| `GET /api/practice/status` | progress, trades, rejection reasons |
-| `POST /api/practice/log` | grade the session into the journal |
 | `GET /api/markets` | active market, all profiles, market clock |
 | `POST /api/markets/{code}` | switch the desk to IN or US |
 | `GET /api/opportunities` | top N setups per risk tier (cached) |

@@ -84,6 +84,7 @@
       <button id="btn-td-stop" disabled>Stop</button>
       <button id="btn-td-report">Day report</button>
       <span class="badge" id="td-badge">not armed</span>
+      <span class="badge" id="td-autoarm" hidden>auto-arms at the open</span>
       <span style="font-size:11.5px;color:var(--text-muted)">
         Arms order placement for <b>today only</b>. The desk keeps analysing
         either way — disarmed means alerts, not orders.
@@ -91,46 +92,17 @@
     </div>
     <div id="td-body">
       <div class="empty">
-        Press <b>Start trading day</b> at the open. The desk cycles on its own
-        from then on; you do not need to do anything else.
+        The desk arms itself when the session opens and cycles every minute
+        from then on. The button is there for the mornings you want to start
+        it yourself, or restart it after a Stop.
       </div>
     </div>
   </section>
 
-  <!-- ====================== PRACTICE DAY ========================== -->
-  <section class="card span-all">
-    <h2>Practice Day <span class="count" id="practice-meta"></span></h2>
-
-    <div class="chart-toolbar">
-      <button id="btn-practice" class="primary">▶ Start practice day</button>
-      <button id="btn-practice-pause" disabled>Pause</button>
-      <button id="btn-practice-stop" disabled>Stop</button>
-
-      <label class="sr-only" for="p-date">Trading day</label>
-      <input type="date" id="p-date" style="width:auto"
-             title="Leave blank for the most recent session">
-
-      <label class="sr-only" for="p-speed">Speed</label>
-      <select id="p-speed" style="width:auto">
-        <option value="12">12x — slow, watch it unfold</option>
-        <option value="60" selected>60x — a day in ~6 min</option>
-        <option value="180">180x — a day in ~2 min</option>
-        <option value="600">600x — as fast as possible</option>
-      </select>
-
-      <button id="btn-practice-log" disabled>Log to journal</button>
-      <span id="practice-status" style="font-size:11.5px;color:var(--text-muted)"></span>
-    </div>
-
-    <div class="meter" id="practice-meter" style="margin:0 14px"><span style="width:0%"></span></div>
-
-    <div id="practice-body">
-      <div class="empty">
-        Replays a <b>real</b> trading day bar by bar, running the full agent desk
-        at each step with no lookahead. Practise a fortnight of sessions in an
-        afternoon — including at weekends, when the market is shut.
-      </div>
-    </div>
+  <!-- ====================== END OF DAY ============================ -->
+  <section class="card span-all" id="s-day-summary" hidden>
+    <h2>Today <span class="count" id="ds-meta"></span></h2>
+    <div id="ds-body"></div>
   </section>
 
   <!-- ====================== WEEKLY REVIEW ========================= -->

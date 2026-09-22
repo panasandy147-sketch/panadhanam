@@ -35,6 +35,10 @@ class TradingDay:
         self._armed_for: str | None = None     # ISO date this arming covers
         self._armed_at: datetime | None = None
         self._disarm_reason: str = ""
+        self._armed_by: str = ""               # "you" or "auto"
+        # Dates the auto-arm has already tried, so a refusal is not retried
+        # every cycle for the rest of the day.
+        self._auto_attempted: set[str] = set()
 
     # ------------------------------------------------------------------ #
     @property
@@ -62,8 +66,41 @@ class TradingDay:
         self._armed_for = None
         self._disarm_reason = reason
 
+    async def maybe_auto_arm(self) -> dict[str, Any] | None:
+        """Arm by itself when the session opens, on a PAPER account only.
+
+        Real money is deliberately excluded and there is no setting to permit
+        it. Committing real capital is a decision a person takes each morning,
+        not one a config file takes while they are asleep — the button is
+        thirty seconds of work and it is the right thirty seconds.
+
+        Returns the arming result, or None when there was nothing to do.
+        """
+        if not bool(self.cfg.get("trading_day.auto_arm_on_open", False)):
+            return None
+        if self.armed or self.today in self._auto_attempted:
+            return None
+        if self.engine.session_phase() != "open":
+            return None
+
+        if not getattr(self.engine.broker, "is_paper_account", True):
+            self._auto_attempted.add(self.today)
+            log.warning("auto-arm refused: '%s' is a REAL-MONEY account. Arming "
+                        "it is a decision you take at the screen — press Start "
+                        "trading day.", self.engine.broker.name)
+            return None
+
+        self._auto_attempted.add(self.today)
+        result = await self.start(by="auto")
+        if result.get("armed"):
+            log.info("auto-armed for %s at the open — paper account, simulated "
+                     "fills only", self.today)
+        else:
+            log.info("auto-arm declined: %s", result.get("reason"))
+        return result
+
     # ------------------------------------------------------------------ #
-    async def start(self) -> dict[str, Any]:
+    async def start(self, by: str = "you") -> dict[str, Any]:
         phase = self.engine.session_phase()
 
         if self.engine.risk.state.halted:
@@ -88,6 +125,7 @@ class TradingDay:
         self._armed_for = self.today
         self._armed_at = datetime.now()
         self._disarm_reason = ""
+        self._armed_by = by
         self.engine.paused = False
 
         paper = getattr(self.engine.broker, "is_paper_account", True)
@@ -114,6 +152,8 @@ class TradingDay:
             "armed": self.armed,
             "armed_for": self._armed_for,
             "armed_at": self._armed_at.isoformat() if self._armed_at else None,
+            "armed_by": self._armed_by if self.armed else "",
+            "auto_arm": bool(self.cfg.get("trading_day.auto_arm_on_open", False)),
             "disarm_reason": self._disarm_reason,
             "today": self.today,
             "phase": phase,

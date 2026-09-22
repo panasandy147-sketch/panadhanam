@@ -16,7 +16,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.journal_routes import router as journal_router
 from app.api.live_routes import router as live_router
-from app.api.practice_routes import router as practice_router
 from app.api.routes import router as api_router
 from app.api.ws import router as ws_router
 from app.brokers.factory import build_broker
@@ -99,7 +98,6 @@ app.add_middleware(
 
 app.include_router(api_router)
 app.include_router(journal_router)
-app.include_router(practice_router)
 app.include_router(live_router)
 app.include_router(ws_router)
 

@@ -29,7 +29,6 @@ from app.data.news import NewsCollector
 from app.learning.feedback import FeedbackLoop
 from app.learning.outcomes import OutcomeTracker
 from app.live.session import TradingDay
-from app.practice.session import PracticeSession
 from app.storage import db
 
 log = get_logger("scheduler")
@@ -48,7 +47,6 @@ class TradingEngine:
         self.outcomes = OutcomeTracker(broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
-        self.practice = PracticeSession(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
 
@@ -59,6 +57,9 @@ class TradingEngine:
         self._premarket_done_on: str | None = None
         # ISO date of the week-end whose review is already written.
         self._weekly_written_for: str | None = None
+        # ISO date whose end-of-day summary has already been published.
+        self._day_summary_on: str | None = None
+        self._last_day_summary: dict[str, Any] | None = None
         self.last_cycle: dict[str, Any] = {}
         self.cycle_count = 0
 
@@ -130,7 +131,6 @@ class TradingEngine:
         self.outcomes = OutcomeTracker(self.broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
-        self.practice = PracticeSession(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
         self._fundamentals.clear()
@@ -302,6 +302,9 @@ class TradingEngine:
                 elif phase == "open" and not self.paused:
                     if self._premarket_done_on != today:
                         await self.run_premarket_scan()
+                    # Arm by itself at the open, so the desk can act on what it
+                    # finds without somebody being at the screen. Paper only.
+                    await self.trading_day.maybe_auto_arm()
                     await self.run_cycle()
 
                 elif phase in {"closed", "weekend", "postmarket"}:
@@ -309,6 +312,7 @@ class TradingEngine:
                     closed = await self.outcomes.poll()
                     if closed:
                         await self.feedback.update_from_closed(closed)
+                    await self._maybe_publish_day_summary()
                     await self._maybe_write_weekly_review()
 
                 await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
@@ -320,6 +324,48 @@ class TradingEngine:
 
             sleep_for = interval if self.session_phase() == "open" else max(interval, 120)
             await asyncio.sleep(sleep_for)
+
+    async def _maybe_publish_day_summary(self) -> None:
+        """Put the day's result on screen once the session is over.
+
+        Written once per day, shortly after square-off, so the answer to "what
+        happened today" is waiting rather than something you have to go and
+        ask for. A day with no trades still publishes — "nothing today, and
+        here is what the desk was waiting for" is the more common outcome and
+        the more useful one to read.
+        """
+        today = clock.market_now(self.timezone).date().isoformat()
+        if self._day_summary_on == today:
+            return
+
+        delay = int(self.cfg.get("trading_day.summary_after_square_off_minutes", 5))
+        square_off = str(self.cfg.get("system.square_off_time", "15:15"))
+        hour, _, minute = square_off.partition(":")
+        after = (int(hour) * 60 + int(minute or 0) + delay)
+        now = clock.market_now(self.timezone)
+        if (now.hour * 60 + now.minute) < after:
+            return
+        if now.weekday() >= 5:
+            self._day_summary_on = today
+            return
+
+        try:
+            summary = self.trading_day.report()
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not build the day summary: %s", exc)
+            self._day_summary_on = today
+            return
+
+        self._day_summary_on = today
+        summary["published_at"] = now.isoformat()
+        self._last_day_summary = summary
+        await bus.publish("trading_day.summary", summary)
+
+        cur = self.cfg.market.currency_symbol
+        log.info("DAY SUMMARY %s — %d signals, %d trades, %d closed, "
+                 "%+.2fR, %s%+.0f", today, summary.get("signals_generated", 0),
+                 summary.get("trades_taken", 0), summary.get("trades_closed", 0),
+                 summary.get("total_r", 0.0), cur, summary.get("pnl", 0.0))
 
     async def _maybe_write_weekly_review(self) -> None:
         """Have the week's review waiting once Friday has closed.
@@ -383,7 +429,6 @@ class TradingEngine:
             },
             "available_markets": self.cfg.available_markets(),
             "data_source": self.data_provenance(),
-            "practice": self.practice.status(),
             "trading_day": self.trading_day.status(),
             "running": self.running,
             "paused": self.paused,
@@ -395,6 +440,7 @@ class TradingEngine:
             "desk": self.desk.describe(),
             "risk": self.risk.snapshot(),
             "trading_mode": self.cfg.trading_mode,
+            "day_summary": self._last_day_summary,
             "live_orders": self.cfg.live_orders_enabled,
             "auto_place_orders": self.cfg.get("execution.auto_place_orders", False),
             # A paper broker with auto_place_orders on DOES place orders — they

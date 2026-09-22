@@ -247,15 +247,22 @@ opportunities:
   min_conviction: 0.15
 
 # --------------------------------------------------------------------------
-# PRACTICE DAY (replay)
+# TRADING DAY — arming order placement
 # --------------------------------------------------------------------------
-practice:
-  # Rebuild the macro dashboard (futures, VIX, yields, crude, dollar) as it
-  # printed on the replayed day, so the macro analyst can vote without seeing
-  # anything that happened after the bar. Turn this off if your network blocks
-  # the data feed — but be aware that price then becomes the only voice, and
-  # one voice can never satisfy consensus.min_confirmations.
-  rebuild_macro: true
+trading_day:
+  # Arm the desk by itself when the session opens, so you do not have to be at
+  # the screen at 09:15 (or 09:30 ET) to press the button. The button still
+  # works and still arms immediately.
+  #
+  # PAPER ACCOUNTS ONLY. This is refused on a real-money broker, deliberately
+  # and without a setting to override it: committing real capital is a
+  # decision a person takes each morning, not one a config file takes on your
+  # behalf while you are asleep. On a real account you press the button.
+  auto_arm_on_open: true
+
+  # Write the day's summary to the dashboard and the log this many minutes
+  # after square-off, so the result is waiting when you come back.
+  summary_after_square_off_minutes: 5
 
 # --------------------------------------------------------------------------
 # EXECUTION

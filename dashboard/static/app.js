@@ -53,7 +53,6 @@ const state = {
   news: [],
   status: null,
   market: null,
-  practice: null,
   tradingDay: null,
   switching: false,
   chart: null,
@@ -110,12 +109,7 @@ function handle(event) {
     case "learning.update":     loadScorecard(); break;
     case "market.switched":     applyMarket(data.market); break;
     case "trading_day.state":  renderTradingDay(data); break;
-    case "practice.state":     renderPractice(data); break;
-    case "practice.progress":  if (state.practice) {
-                                 state.practice.result = data;
-                                 renderPractice(state.practice);
-                               } break;
-    case "practice.trade":     loadPracticeStatus(); break;
+    case "trading_day.summary": renderDaySummary(data); break;
     case "position.update":     loadPositions(); break;
   }
 }
@@ -226,6 +220,7 @@ function applyStatus(s) {
   // people nothing would be sent while the desk was filling positions.
   const live = s.live_orders && s.auto_place_orders;
   const simulating = !live && s.auto_place_orders;
+  if (s.day_summary) renderDaySummary(s.day_summary);
   const modeBadge = $("mode-badge");
   modeBadge.textContent = live ? "LIVE ORDERS"
     : simulating ? "PAPER ORDERS ON"
@@ -926,6 +921,66 @@ async function loadScorecard() {
 
 
 /* ====================================================================== */
+/* End of day                                                             */
+/* ====================================================================== */
+function renderDaySummary(r) {
+  if (!r) { $("s-day-summary").hidden = true; return; }
+  $("s-day-summary").hidden = false;
+  $("ds-meta").textContent =
+    `${esc(r.date)} · ${esc(r.market)} · ${esc(r.broker)}`;
+
+  const rows = (r.trades || []).map((t) => `
+    <tr>
+      <td>${esc(t.time)}</td>
+      <td>${esc(t.symbol)}</td>
+      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
+      <td class="num">${fmt(t.entry)}</td>
+      <td class="num">${t.exit ? fmt(t.exit) : "—"}</td>
+      <td>${esc(t.status)}</td>
+      <td class="num ${signClass(t.r_multiple)}">${t.r_multiple != null
+        ? (t.r_multiple >= 0 ? "+" : "") + fmt(t.r_multiple, 2) + "R" : "open"}</td>
+      <td class="num ${signClass(t.pnl)}">${t.pnl != null ? money(Math.round(t.pnl)) : "—"}</td>
+    </tr>`).join("");
+
+  const why = (r.top_rejections || []).map((x) =>
+    `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
+
+  // A day with no trades is the common outcome, and the more useful one to
+  // read — provided it says what the desk was waiting for.
+  const body = rows
+    ? `<table style="margin-top:2px">
+         <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
+         <th class="num">Exit</th><th>Status</th><th class="num">R</th>
+         <th class="num">P&amp;L</th></tr></thead>
+         <tbody>${rows}</tbody>
+       </table>`
+    : `<div class="empty">No trades taken today.</div>`;
+
+  $("ds-body").innerHTML = `
+    <div class="calc-out">
+      <div><div class="k">Signals</div><div class="v">${fmtInt(r.signals_generated)}</div></div>
+      <div><div class="k">Trades taken</div><div class="v">${fmtInt(r.trades_taken)}</div></div>
+      <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div>
+           <div class="k" style="margin-top:3px">${fmtInt(r.still_open)} still open</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(r.win_rate, 0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(r.total_r)}">${r.total_r >= 0 ? "+" : ""}${fmt(r.total_r, 2)}R</div></div>
+      <div><div class="k">P&amp;L</div>
+           <div class="v ${signClass(r.pnl)}">${money(Math.round(r.pnl))}</div></div>
+    </div>
+    ${body}
+    ${why ? `
+      <div class="callout">
+        <div class="k">What the desk was waiting for</div>
+        <ul>${why}</ul>
+      </div>` : ""}
+    <div style="padding:10px 14px;font-size:11.5px;color:var(--text-muted)">
+      Published after square-off. Every trade is in the journal — the
+      <b>Weekly Review</b> panel builds the week from them.
+    </div>`;
+}
+
+/* ====================================================================== */
 /* Weekly review                                                          */
 /* ====================================================================== */
 function weekQuery() {
@@ -1028,7 +1083,300 @@ function renderWeekly(r) {
   const c = r.coach;
   const list = (xs) => (xs || []).map((x) => `<li>${esc(x)}</li>`).join("");
   const coach = !c ? "" : `
-    <div class="practice-why">
+    <div class="callout">
+      <div class="k">The coach's read (${esc(c.generated_by)})</div>
+      <p style="margin:6px 0"><b>${esc(c.headline)}</b></p>
+      ${c.what_worked?.length ? `<div class="k">What worked</div><ul>${list(c.what_worked)}</ul>` : ""}
+      ${c.what_cost_money?.length ? `<div class="k">What cost money</div><ul>${list(c.what_cost_money)}</ul>` : ""}
+      ${c.rule_changes?.length ? `
+        <div class="k">Proposed rule changes</div>
+        <table><thead><tr><th>Rule</th><th>Change</th><th>Evidence</th></tr></thead>
+        <tbody>${c.rule_changes.map((x) => `
+          <tr><td>${esc(x.rule)}</td><td>${esc(x.change)}</td><td>${esc(x.why)}</td></tr>`).join("")}
+        </tbody></table>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
+          Suggestions only — <b>nothing here has been applied</b>. The risk desk
+          stays deterministic: no model can change a stop, a position size or the
+          confirmation requirement.</p>` : ""}
+      <div class="k" style="margin-top:8px">Focus next week</div>
+      <p style="margin:4px 0">${esc(c.focus_next_week)}</p>
+    </div>`;
+
+  $("weekly-body").innerHTML = `${provisional}
+    <div class="calc-out">
+      <div><div class="k">Trades</div><div class="v">${fmtInt(s.total)}</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(s.win_rate, 0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(s.total_r)}">${s.total_r >= 0 ? "+" : ""}${fmt(s.total_r, 2)}R</div></div>
+      <div><div class="k">Clean execution</div><div class="v">${fmt(s.clean_pct, 0)}%</div></div>
+      <div><div class="k">Discipline</div><div class="v">${fmt(s.avg_execution_score, 1)}/10</div></div>
+      <div><div class="k">Mistake Cost</div>
+           <div class="v neg">${money(Math.round(s.mistake_cost_index || 0))}</div>
+           <div class="k" style="margin-top:3px">${fmt(s.avoidable_loss_pct, 0)}% of losses avoidable</div></div>
+    </div>
+
+    ${agents ? `
+      <div style="padding:10px 14px 0" class="k">Which analyst earned its weight</div>
+      <table>
+        <thead><tr><th>Analyst</th><th class="num">Confirmed</th>
+        <th class="num">Win rate</th><th class="num">Total R</th></tr></thead>
+        <tbody>${agents}</tbody>
+      </table>` : ""}
+
+    <div style="padding:10px 14px 0" class="k">Every trade, and why the desk took it</div>
+    <div style="padding:4px 14px 10px">${trades}</div>
+    ${coach}`;
+}
+
+function downloadWeekly(format) {
+  const q = [weekQuery(), `format=${format}`].filter(Boolean).join("&");
+  window.location.href = `/api/journal/weekly/download?${q}`;
+}
+
+async function saveWeekly() {
+  $("weekly-status").textContent = "Writing to journal/weekly/…";
+  const res = await fetch(`/api/journal/weekly/save?${weekQuery()}`, { method: "POST" });
+  const d = await res.json();
+  $("weekly-status").textContent = res.ok
+    ? `Saved ${d.label}. Commit journal/weekly/ to keep it.`
+    : (d.detail || "Could not save it.");
+}
+
+/* ====================================================================== */
+/* Trading day                                                            */
+/* ====================================================================== */
+function renderTradingDay(td) {
+  if (!td) return;
+  state.tradingDay = td;
+
+  $("btn-td-start").disabled = td.armed;
+  $("btn-td-stop").disabled = !td.armed;
+
+  const badge = $("td-badge");
+  if (td.armed) {
+    badge.textContent = td.orders_will_be_placed
+      ? `ARMED · orders will be placed (${td.broker})`
+      : `ARMED · alerts only (auto_place_orders is off)`;
+    badge.className = "badge " + (td.is_paper_account ? "ok" : "live");
+    // "Why is it still alert-only?" is the obvious next question, so answer it
+    // where the badge is rather than leaving them to search the docs.
+    badge.title = td.orders_will_be_placed
+      ? "Approved signals become orders on this account."
+      : "The desk is analysing and alerting but placing nothing. To let it "
+        + "place orders, set AUTO_PLACE_ORDERS=true in .env and restart. "
+        + "You still have to arm each session with Start trading day.";
+  } else {
+    badge.textContent = td.disarm_reason ? `not armed — ${td.disarm_reason}` : "not armed";
+    badge.className = "badge";
+  }
+
+  $("td-meta").textContent =
+    `${td.today} · market ${td.market_time} · ${td.phase}`
+    + (td.armed && td.armed_by === "auto" ? " · armed automatically" : "");
+
+  // Say that it arms itself, so an unpressed button is not read as a desk
+  // that was never switched on.
+  const auto = $("td-autoarm");
+  auto.hidden = !td.auto_arm || td.armed;
+  auto.title = "The desk arms itself when the session opens. Paper accounts "
+    + "only — a real-money account is never armed without you.";
+
+  const halted = td.halted
+    ? `<div class="banner crit" style="margin:12px 14px">Desk halted — no new
+       positions today.</div>` : "";
+
+  $("td-body").innerHTML = `${halted}
+    <div class="calc-out">
+      <div><div class="k">Session</div><div class="v" style="font-size:14px">${esc(td.phase)}</div>
+           <div class="k" style="margin-top:3px">market ${esc(td.market_time)}</div></div>
+      <div><div class="k">Account</div>
+           <div class="v ${td.is_paper_account ? "" : "neg"}" style="font-size:13px">
+             ${td.is_paper_account ? "SIMULATOR" : "REAL MONEY"}</div>
+           <div class="k" style="margin-top:3px">${esc(td.broker)}</div></div>
+      <div><div class="k">Day P&amp;L</div>
+           <div class="v ${signClass(td.day_pnl)}">${td.day_pnl >= 0 ? "+" : ""}${money(Math.round(td.day_pnl))}</div></div>
+      <div><div class="k">Trades today</div><div class="v">${fmtInt(td.trades_today)}</div>
+           <div class="k" style="margin-top:3px">${td.wins}W / ${td.losses}L</div></div>
+      <div><div class="k">Open now</div><div class="v">${fmtInt(td.open_positions)}</div></div>
+      <div><div class="k">Room before halt</div>
+           <div class="v">${money(Math.round(td.room_before_halt))}</div></div>
+    </div>`;
+}
+
+async function loadTradingDay() {
+  const res = await fetch("/api/trading-day/status");
+  if (res.ok) renderTradingDay(await res.json());
+}
+
+async function startTradingDay() {
+  const res = await fetch("/api/trading-day/start", { method: "POST" });
+  const d = await res.json();
+  if (!res.ok) {
+    $("td-body").innerHTML =
+      `<div class="banner crit" style="margin:12px 14px">${esc(d.detail)}</div>`;
+    return;
+  }
+  renderTradingDay(d.status);
+}
+
+async function showDayReport() {
+  const res = await fetch("/api/trading-day/report");
+  if (!res.ok) return;
+  const r = await res.json();
+
+  const rows = (r.trades || []).map((t) => `
+    <tr>
+      <td>${esc(t.time)}</td>
+      <td>${esc(t.symbol)}</td>
+      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
+      <td class="num">${fmt(t.entry)}</td>
+      <td class="num neg">${fmt(t.stop)}</td>
+      <td class="num pos">${fmt(t.target)}</td>
+      <td class="num">${t.exit ? fmt(t.exit) : "—"}</td>
+      <td>${esc(t.status)}</td>
+      <td class="num ${signClass(t.r_multiple)}">${t.r_multiple != null
+        ? (t.r_multiple >= 0 ? "+" : "") + fmt(t.r_multiple, 2) + "R" : "open"}</td>
+      <td class="num ${signClass(t.pnl)}">${t.pnl != null ? money(Math.round(t.pnl)) : "—"}</td>
+    </tr>`).join("");
+
+  const why = (r.top_rejections || []).map((x) =>
+    `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
+
+  $("td-body").innerHTML = `
+    <div class="calc-out">
+      <div><div class="k">Signals generated</div><div class="v">${fmtInt(r.signals_generated)}</div></div>
+      <div><div class="k">Trades taken</div><div class="v">${fmtInt(r.trades_taken)}</div></div>
+      <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div>
+           <div class="k" style="margin-top:3px">${r.still_open} still open</div></div>
+      <div><div class="k">Win rate</div><div class="v">${fmt(r.win_rate, 0)}%</div></div>
+      <div><div class="k">Total R</div>
+           <div class="v ${signClass(r.total_r)}">${r.total_r >= 0 ? "+" : ""}${fmt(r.total_r, 2)}R</div></div>
+      <div><div class="k">P&amp;L</div>
+           <div class="v ${signClass(r.pnl)}">${money(Math.round(r.pnl))}</div></div>
+    </div>
+
+    <div style="padding:10px 14px;font-size:11.5px;color:var(--text-muted)">
+      ${esc(r.date)} · ${esc(r.market)} · ${esc(r.broker)}
+      (${r.is_paper_account ? "simulator" : "REAL MONEY"}) ·
+      ${esc(r.data_source?.label || "")}
+    </div>
+
+    ${rows ? `<table><thead><tr>
+      <th>Time</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
+      <th class="num">Stop</th><th class="num">Target</th><th class="num">Exit</th>
+      <th>Status</th><th class="num">R</th><th class="num">P&amp;L</th>
+      </tr></thead><tbody>${rows}</tbody></table>`
+      : `<div class="empty">No trades taken today.</div>`}
+
+    ${why ? `<div class="callout">
+      <div class="k">Why the desk stayed out (${fmtInt(r.rejected)} rejections)</div>
+      <ul>${why}</ul></div>` : ""}`;
+}
+
+/* ====================================================================== */
+/* Weekly review                                                          */
+/* ====================================================================== */
+function weekQuery() {
+  const d = $("w-date").value;
+  return d ? `week=${encodeURIComponent(d)}` : "";
+}
+
+async function buildWeekly() {
+  const btn = $("btn-weekly");
+  const coach = $("w-coach").checked;
+  btn.disabled = true;
+  $("weekly-status").textContent = coach
+    ? "Reading the week and asking the model… a local model takes a minute."
+    : "Reading the week…";
+
+  try {
+    const q = [weekQuery(), `coach=${coach}`].filter(Boolean).join("&");
+    const res = await fetch(`/api/journal/weekly?${q}`);
+    if (!res.ok) throw new Error((await res.json()).detail || "Could not build it.");
+    renderWeekly(await res.json());
+    $("weekly-status").textContent = "";
+  } catch (e) {
+    $("weekly-body").innerHTML =
+      `<div class="banner crit" style="margin:12px 14px">${esc(e.message)}</div>`;
+    $("weekly-status").textContent = "";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderWeekly(r) {
+  state.weekly = r;
+  for (const id of ["btn-weekly-md", "btn-weekly-json", "btn-weekly-save"]) {
+    $(id).disabled = false;
+  }
+  $("weekly-meta").textContent = `${r.week_start} → ${r.week_end} · ${r.market}`;
+
+  const s = r.stats || {};
+  // Mid-week numbers are real but partial. Saying so is the difference between
+  // a progress check and a verdict filed under the wrong week.
+  const provisional = r.complete ? "" : `
+    <div class="banner warn" style="margin:12px 14px">
+      <b>This week is not finished.</b> These numbers are provisional and will
+      change before Friday's close.</div>`;
+
+  if (!r.trades?.length) {
+    $("weekly-body").innerHTML = `${provisional}
+      <div class="empty">No trades were logged in this window. That is either a
+      genuinely quiet week or a switch left off — check the desk was armed and
+      that <code>AUTO_PLACE_ORDERS</code> is on.</div>`;
+    return;
+  }
+
+  const agents = (r.agent_scorecard || []).map((a) => `
+    <tr>
+      <td>${esc(AGENT_LABELS[a.agent] || a.agent)}</td>
+      <td class="num">${fmtInt(a.confirmed)}/${fmtInt(a.voted)}</td>
+      <td class="num">${fmt(a.win_rate, 0)}%</td>
+      <td class="num ${signClass(a.total_r)}">${a.total_r >= 0 ? "+" : ""}${fmt(a.total_r, 2)}R</td>
+    </tr>`).join("");
+
+  const trades = (r.trades || []).map((t) => {
+    const votes = (t.votes || [])
+      .filter((v) => v.data_available)
+      .sort((a, b) => Math.abs(b.score || 0) - Math.abs(a.score || 0))
+      .map((v) => `<li><b>${esc(AGENT_LABELS[v.agent] || v.agent)}</b>
+          <span class="${signClass(v.score)}">${v.score >= 0 ? "+" : ""}${fmt(v.score, 2)}</span>
+          (${fmt((v.confidence || 0) * 100, 0)}% sure) — ${esc(v.rationale)}</li>`).join("");
+    const sat = (t.votes || []).filter((v) => !v.data_available)
+      .map((v) => esc(AGENT_LABELS[v.agent] || v.agent)).join(", ");
+
+    return `
+      <details class="weekly-trade">
+        <summary>
+          <b>${esc(t.symbol)} ${esc(t.side)}</b> · ${esc(t.setup || "Other")}
+          <span class="${signClass(t.r_multiple)}">${t.r_multiple >= 0 ? "+" : ""}${fmt(t.r_multiple, 2)}R</span>
+          · ${esc(t.verdict || "ungraded")} · ${t.execution_score ?? "—"}/10
+        </summary>
+        <div style="padding:8px 4px 2px">
+          <div style="font-size:12px;margin-bottom:6px">
+            Entry ${fmt(t.planned_entry)} · stop ${fmt(t.planned_stop)} ·
+            target ${fmt(t.planned_target)} · exited ${fmt(t.actual_exit)} ·
+            ${fmtInt(t.quantity)} × · ${money(Math.round(t.pnl || 0))}
+          </div>
+          ${t.mistakes?.length
+            ? `<div class="banner warn" style="margin:6px 0">Mistakes: ${esc(t.mistakes.join(", "))}</div>` : ""}
+          ${t.verdict === "BAD_WIN"
+            ? `<div class="banner crit" style="margin:6px 0">Made money <b>while breaking a rule</b> —
+               the P&amp;L is rewarding a habit that will eventually cost you.</div>` : ""}
+          ${votes ? `<div class="k">What each analyst said at entry</div><ul>${votes}</ul>` : ""}
+          ${sat ? `<div style="font-size:11.5px;color:var(--text-muted)">Abstained: ${sat}</div>` : ""}
+          ${t.rationale ? `<p style="font-size:12px"><b>CMIO:</b> ${esc(t.rationale)}</p>` : ""}
+          ${t.counter_argument
+            ? `<p style="font-size:12px"><b>Counter-argument recorded at entry:</b>
+               ${esc(t.counter_argument)}</p>` : ""}
+        </div>
+      </details>`;
+  }).join("");
+
+  const c = r.coach;
+  const list = (xs) => (xs || []).map((x) => `<li>${esc(x)}</li>`).join("");
+  const coach = !c ? "" : `
+    <div class="callout">
       <div class="k">The coach's read (${esc(c.generated_by)})</div>
       <p style="margin:6px 0"><b>${esc(c.headline)}</b></p>
       ${c.what_worked?.length ? `<div class="k">What worked</div><ul>${list(c.what_worked)}</ul>` : ""}
@@ -1205,147 +1553,9 @@ async function showDayReport() {
       </tr></thead><tbody>${rows}</tbody></table>`
       : `<div class="empty">No trades taken today.</div>`}
 
-    ${why ? `<div class="practice-why">
+    ${why ? `<div class="callout">
       <div class="k">Why the desk stayed out (${fmtInt(r.rejected)} rejections)</div>
       <ul>${why}</ul></div>` : ""}`;
-}
-
-/* ====================================================================== */
-/* Practice day                                                           */
-/* ====================================================================== */
-function renderPractice(st) {
-  if (!st) return;
-  state.practice = st;
-
-  const running = ["running", "paused", "loading"].includes(st.state);
-  $("btn-practice").disabled = running;
-  $("btn-practice").textContent = running ? "Running…" : "▶ Start practice day";
-  $("btn-practice-pause").disabled = !running;
-  $("btn-practice-pause").textContent = st.state === "paused" ? "Resume" : "Pause";
-  $("btn-practice-stop").disabled = !running;
-
-  const r = st.result;
-  $("btn-practice-log").disabled = !(r && r.trades_closed > 0);
-
-  if (st.state === "failed") {
-    $("practice-status").textContent = "";
-    $("practice-body").innerHTML =
-      `<div class="banner crit" style="margin:12px 14px">${esc(st.error)}</div>`;
-    return;
-  }
-  if (!r) return;
-
-  $("practice-meta").textContent =
-    `${r.trading_day} · ${r.symbols.join(", ")}`;
-  $("practice-meter").firstElementChild.style.width = `${r.progress_pct}%`;
-
-  const clock = st.clock ? st.clock.slice(11, 16) : "--:--";
-  $("practice-status").innerHTML = st.state === "finished"
-    ? "Session complete."
-    : `<span class="practice-clock">${esc(clock)}</span> · bar ${r.bars_done}/${r.bars_total}`;
-
-  const rows = (r.closed || []).map((t) => `
-    <tr>
-      <td>${esc((t.entry_ts || "").slice(11, 16))}</td>
-      <td>${esc(t.symbol)}</td>
-      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
-      <td class="num">${fmt(t.entry)}</td>
-      <td class="num">${fmt(t.exit)}</td>
-      <td>${esc(t.outcome)}</td>
-      <td class="num ${signClass(t.r_multiple)}"><b>${t.r_multiple >= 0 ? "+" : ""}${fmt(t.r_multiple, 2)}R</b></td>
-      <td class="num">${money(Math.round(t.pnl))}</td>
-      <td class="num">${fmtInt(t.bars_held)}</td>
-    </tr>`).join("");
-
-  const why = (r.top_rejections || []).map((x) =>
-    `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
-
-  // Replay cannot rebuild every input. Say which analysts sat out and why,
-  // so their silence is not misread as a verdict on the market.
-  const sittingOut = (r.unavailable_analysts || []).map((x) =>
-    `<li><b>${esc(AGENT_LABELS[x.agent] || x.agent)}</b> — ${esc(x.reason)}</li>`).join("");
-
-  $("practice-body").innerHTML = `
-    <div class="calc-out">
-      <div><div class="k">Progress</div><div class="v">${fmt(r.progress_pct, 0)}%</div></div>
-      <div><div class="k">Signals taken</div><div class="v">${fmtInt(r.signals)}</div></div>
-      <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div></div>
-      <div><div class="k">Win rate</div><div class="v">${fmt(r.win_rate, 0)}%</div></div>
-      <div><div class="k">Total R</div>
-           <div class="v ${signClass(r.total_r)}">${r.total_r >= 0 ? "+" : ""}${fmt(r.total_r, 2)}R</div></div>
-      <div><div class="k">P&amp;L</div>
-           <div class="v ${signClass(r.pnl)}">${money(Math.round(r.pnl))}</div></div>
-    </div>
-
-    ${rows ? `
-      <table style="margin-top:2px">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
-        <th class="num">Exit</th><th>Outcome</th><th class="num">R</th>
-        <th class="num">P&amp;L</th><th class="num">Bars</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>` : ""}
-
-    ${why ? `
-      <div class="practice-why">
-        <div class="k">Why the desk stayed out (${fmtInt(r.rejected)} passes)</div>
-        <ul>${why}</ul>
-        <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
-          A day with few trades is normal — most bars contain no valid setup.
-          This is what the desk was waiting for.</p>
-      </div>` : ""}
-
-    ${sittingOut ? `
-      <div class="practice-why">
-        <div class="k">Analysts that could not vote in this replay</div>
-        <ul>${sittingOut}</ul>
-        <p style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0">
-          A replay can rebuild price and macro honestly; headlines and option
-          chains cannot be reconstructed after the fact. Fewer voices means the
-          two-confirmation rule is harder to meet here than it is live, so a
-          quiet replay is not proof of a quiet market.</p>
-      </div>` : ""}`;
-}
-
-async function startPractice() {
-  const body = {
-    trading_day: $("p-date").value || null,
-    speed: Number($("p-speed").value),
-  };
-  $("practice-status").textContent = "Loading the day's bars…";
-
-  const res = await fetch("/api/practice/start", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const d = await res.json();
-  if (!res.ok) {
-    $("practice-body").innerHTML =
-      `<div class="banner crit" style="margin:12px 14px">${esc(d.detail || "Could not start.")}</div>`;
-    $("practice-status").textContent = "";
-    return;
-  }
-  loadPracticeStatus();
-}
-
-async function loadPracticeStatus() {
-  const res = await fetch("/api/practice/status");
-  if (res.ok) renderPractice(await res.json());
-}
-
-async function logPracticeToJournal() {
-  const btn = $("btn-practice-log");
-  btn.disabled = true;
-  btn.textContent = "Grading…";
-  try {
-    const res = await fetch("/api/practice/log", { method: "POST" });
-    const d = await res.json();
-    $("practice-status").textContent =
-      `${d.logged} trade(s) graded and written to journal/cards/.`;
-    await Promise.all([loadJournalStats(), loadJournalLog()]);
-  } finally {
-    btn.textContent = "Log to journal";
-    btn.disabled = false;
-  }
 }
 
 /* ====================================================================== */
@@ -1633,23 +1843,10 @@ function bind() {
     renderTradingDay(await (await fetch("/api/trading-day/stop", { method: "POST" })).json());
   };
   $("btn-td-report").onclick = showDayReport;
-  $("btn-practice").onclick = startPractice;
-  $("btn-practice-pause").onclick = async () => {
-    renderPractice(await (await fetch("/api/practice/pause", { method: "POST" })).json());
-  };
-  $("btn-practice-stop").onclick = async () => {
-    renderPractice(await (await fetch("/api/practice/stop", { method: "POST" })).json());
-  };
-  $("btn-practice-log").onclick = logPracticeToJournal;
   $("btn-weekly").onclick = buildWeekly;
   $("btn-weekly-md").onclick = () => downloadWeekly("md");
   $("btn-weekly-json").onclick = () => downloadWeekly("json");
   $("btn-weekly-save").onclick = saveWeekly;
-  $("p-speed").onchange = () => {
-    if (state.practice && state.practice.state === "running") {
-      fetch(`/api/practice/speed?value=${$("p-speed").value}`, { method: "POST" });
-    }
-  };
   $("journal-form").onsubmit = submitTrade;
   $("btn-journal-export").onclick = exportJournal;
   $("btn-scan").onclick = () => loadOpportunities(true);
@@ -1683,7 +1880,7 @@ function bind() {
   await loadWatchlist();
   await Promise.all([loadHistory(), loadChart(), loadPositions(), loadScorecard(),
                      runCalc(), loadJournalStats(), loadJournalLog(),
-                     loadPracticeStatus(), loadTradingDay()]);
+                     loadTradingDay()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);

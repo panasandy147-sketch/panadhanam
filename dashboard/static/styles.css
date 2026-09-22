@@ -899,26 +899,19 @@ button.primary {
 
 
 /* ==========================================================================
-   Practice day
+   Callouts — the boxed explanations under a report or a rejection tally.
    ========================================================================== */
-.practice-clock {
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--market-accent, var(--series-1));
-  font-variant-numeric: tabular-nums;
-}
-.practice-why {
+.callout {
   padding: 12px 14px;
   border-top: 1px solid var(--border);
 }
-.practice-why .k {
+.callout .k {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
   color: var(--text-muted); margin-bottom: 7px;
 }
-.practice-why ul { margin: 0; padding-left: 18px; font-size: 12px;
+.callout ul { margin: 0; padding-left: 18px; font-size: 12px;
                    color: var(--text-secondary); line-height: 1.7; }
-.practice-why b { color: var(--warning); font-family: var(--mono); }
+.callout b { color: var(--warning); font-family: var(--mono); }
 
 /* --- Weekly review: one collapsible block per trade ---------------------- */
 .weekly-trade {

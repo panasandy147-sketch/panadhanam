@@ -5,8 +5,6 @@ and returns either a Series or a float. Deliberately boring and testable.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
 
@@ -19,35 +17,6 @@ def candles_to_df(candles: list[Candle]) -> pd.DataFrame:
     df = pd.DataFrame([c.model_dump() for c in candles])
     df["ts"] = pd.to_datetime(df["ts"])
     return df.set_index("ts").sort_index()
-
-
-def resample(candles: list[Candle], minutes: int) -> list[Candle]:
-    """Roll a fine series up into a coarser one (5m bars -> 15m bars).
-
-    Used by Practice Day: the higher timeframe has to be built from the bars
-    already seen, never fetched separately, or the replay would be looking at
-    a 15m bar that has not finished printing yet.
-
-    The final bucket is kept even when it is still forming — that mirrors live
-    trading, where you read the developing 15m candle rather than wait for it.
-    """
-    if not candles or minutes <= 0:
-        return []
-    step = timedelta(minutes=minutes)
-    out: list[Candle] = []
-    bucket_start: datetime | None = None
-    for c in sorted(candles, key=lambda x: x.ts):
-        if bucket_start is None or c.ts - bucket_start >= step:
-            bucket_start = c.ts
-            out.append(Candle(ts=c.ts, open=c.open, high=c.high,
-                              low=c.low, close=c.close, volume=c.volume))
-            continue
-        cur = out[-1]
-        cur.high = max(cur.high, c.high)
-        cur.low = min(cur.low, c.low)
-        cur.close = c.close
-        cur.volume += c.volume
-    return out
 
 
 def ema(series: pd.Series, period: int) -> pd.Series:
