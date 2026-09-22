@@ -130,3 +130,62 @@ def test_nothing_on_the_dashboard_can_place_or_close_a_trade(client, path, metho
     res = getattr(client, method)(path)
     assert res.status_code in (404, 405), \
         f"{method.upper()} {path} must not exist — the rules engine decides, not a button"
+
+
+# --------------------------------------------------------------------------- #
+# The feed tracks whether it is connected, so --check does not have to open a
+# second client to find out — which printed every failure twice.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_feed_reports_whether_it_connected(monkeypatch):
+    import httpx
+
+    from panaoptions.data.feed import YahooFeed
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {"chart": {"result": [{"meta": {}}]}}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def get(self, *a, **k):
+            return _Response()
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    feed = YahooFeed()
+    assert feed.connected is False
+    await feed.connect()
+    assert feed.connected is True
+    await feed.close()
+    assert feed.connected is False, "a closed feed must not read as connected"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_connection_does_not_read_as_connected(monkeypatch):
+    import httpx
+
+    from panaoptions.data.feed import YahooFeed
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def get(self, *a, **k):
+            raise OSError("network is unreachable")
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    feed = YahooFeed()
+    assert await feed.connect() is False
+    assert feed.connected is False

@@ -100,8 +100,10 @@ async def _check() -> bool:
     from panaoptions.data.feed import YahooFeed
     cfg = get_config()
     print("\n=== DATA FEED ===")
+    # The context manager connects on entry; calling connect() again here
+    # would open a second client and print every failure twice.
     async with YahooFeed() as feed:
-        ok = await feed.connect()
+        ok = feed.connected
         if not ok:
             print("  Yahoo Finance UNREACHABLE — check your connection, a VPN, "
                   "or a corporate proxy.")

@@ -39,6 +39,7 @@ class YahooFeed:
     def __init__(self, timeout: float = 15.0) -> None:
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
+        self.connected = False
 
     async def __aenter__(self) -> YahooFeed:
         await self.connect()
@@ -57,6 +58,7 @@ class YahooFeed:
                 log.error("Yahoo unreachable (HTTP %s) — check your connection, "
                           "a VPN, or a corporate proxy", r.status_code)
                 return False
+            self.connected = True
             return True
         except Exception as exc:
             log.error("Yahoo connect failed: %s", exc)
@@ -66,6 +68,7 @@ class YahooFeed:
         if self._client:
             await self._client.aclose()
             self._client = None
+        self.connected = False
 
     # ------------------------------------------------------------------ #
     async def _get(self, url: str, **params: Any) -> dict[str, Any] | None:
