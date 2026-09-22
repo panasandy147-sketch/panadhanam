@@ -65,6 +65,9 @@ options-test:
 options-lint:
 	cd panaoptions && $(PY) -m ruff check panaoptions tests run.py
 
+options-config:
+	cd panaoptions && $(PY) run.py --check-config
+
 options-contracts:
 	cd panaoptions && $(PY) run.py --explain-contracts
 

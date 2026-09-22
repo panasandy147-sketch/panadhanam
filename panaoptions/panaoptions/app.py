@@ -55,6 +55,11 @@ class OptionsDesk:
                       "see prices must not pretend to trade.")
             return
 
+        # Say up front if the rules cannot all hold. Discovering it by watching
+        # the desk take nothing for a fortnight is the expensive way.
+        from panaoptions import preflight
+        preflight.report(self.cfg)
+
         self._load_predictor()
         self.running = True
         log.info("panaoptions desk started — paper only, capital $%.2f, "

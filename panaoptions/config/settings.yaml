@@ -21,7 +21,16 @@ session:
   force_exit_at: "15:45"
 
 universe:
+  # The brief's universe. At-the-money contracts here cost $320-$1,800, so a
+  # $500 account cannot buy one — see `python run.py --check-config`.
   symbols: ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD", "MSFT", "AMZN"]
+
+  # Liquid names whose at-the-money contracts land roughly $15-$100, so a small
+  # account can actually take the trade rather than watch it. Swap this list
+  # into `symbols` above if you want to keep the account at $500 and still
+  # trade at the money.
+  small_account_alternative:
+    ["IWM", "PLTR", "INTC", "SOFI", "HOOD", "F", "XLF", "GDX"]
 
 premarket:
   min_rvol: 1.5          # relative volume vs the 20-day average at this time
@@ -37,34 +46,31 @@ technical:
   volume_multiplier: 1.0   # candle volume must beat this x the average
 
 contracts:
-  # --------------------------------------------------------------------
-  # READ THIS BEFORE CHANGING THE BUDGET.
-  #
-  # delta 0.45-0.60 means "at the money". An at-the-money option 7-14 days
-  # out on SPY, NVDA or AAPL costs roughly $350-$650 per contract, because
-  # one contract is 100 shares. A $60-$100 budget buys roughly 0.10-0.20
-  # delta — well out of the money.
-  #
-  # So max_contract_price and the delta band below are in direct conflict
-  # for this universe, and the filter will correctly return NOTHING. That
-  # is the arithmetic being honest, not a bug. `run.py --explain-contracts`
-  # prints what each symbol actually costs right now.
-  #
-  # Your three options, in order of how much we would recommend them:
-  #   1. Keep paper-trading the ATM rule and raise max_contract_price to
-  #      what ATM actually costs. You learn the strategy; the account size
-  #      is the thing that is wrong, not the rule.
-  #   2. Trade cheaper underlyings where ATM fits $100 (see docs).
-  #   3. Drop min_delta to ~0.15 and accept OTM lottery tickets. Theta and
-  #      the spread will eat most of the edge. We do not recommend it.
-  # --------------------------------------------------------------------
   min_dte: 7
   max_dte: 14
   min_delta: 0.45
   max_delta: 0.60
   max_spread_pct_of_mid: 5.0
-  min_contract_price: 0.60      # per share, so $60 per contract
-  max_contract_price: 1.00      # per share, so $100 per contract
+
+  # --------------------------------------------------------------------
+  # These two are a SANITY CEILING, not position sizing.
+  #
+  # They used to be $0.60-$1.00, which combined with the 0.45-0.60 delta
+  # band above described an empty set: that delta means at the money, one
+  # contract is 100 shares, and at-the-money 7-14 days out costs $320 on
+  # AAPL and $1,800 on TSLA. The filter correctly returned nothing, for
+  # ever.
+  #
+  # The cap is now high enough that every name in the universe can pass it.
+  # How much you actually buy is decided by risk.max_capital_deployed_pct
+  # below, which is where position sizing belongs — a price cap doing risk
+  # management is a rule in the wrong place, and it fails silently.
+  #
+  # `python run.py --check-config` re-checks that every rule here can hold
+  # at once, and says what to change when they cannot.
+  # --------------------------------------------------------------------
+  min_contract_price: 0.10      # $10 a contract — below this it is a lottery ticket
+  max_contract_price: 20.00     # $2,000 a contract — a ceiling, not a target
   contract_multiplier: 100
 
 risk:

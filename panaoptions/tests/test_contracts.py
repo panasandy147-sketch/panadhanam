@@ -17,9 +17,18 @@ def _chain(symbol="AAPL", dte=10, rows=None):
             for k, d, mid in rows]
 
 
+def _budget_of_one_hundred(cfg):
+    """The original brief's cap. The shipped config no longer uses it, but the
+    filter must still explain itself when somebody sets it back."""
+    cfg.data["contracts"]["min_contract_price"] = 0.60
+    cfg.data["contracts"]["max_contract_price"] = 1.00
+    return cfg
+
+
 def test_an_at_the_money_contract_cannot_fit_a_hundred_dollar_budget(cfg):
-    # This is the headline problem with the shipped configuration, and the
-    # filter must fail LOUDLY rather than return an empty list in silence.
+    # The headline problem with the original brief: the filter must fail
+    # LOUDLY rather than return an empty list in silence.
+    cfg = _budget_of_one_hundred(cfg)
     result = choose("AAPL", _chain(), Direction.LONG, cfg)
 
     assert result.chosen is None
@@ -29,6 +38,7 @@ def test_an_at_the_money_contract_cannot_fit_a_hundred_dollar_budget(cfg):
 
 
 def test_the_rejection_reasons_are_counted_not_discarded(cfg):
+    cfg = _budget_of_one_hundred(cfg)
     result = choose("AAPL", _chain(), Direction.LONG, cfg)
 
     assert result.examined == 5

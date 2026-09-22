@@ -147,6 +147,43 @@ async def _explain_contracts() -> None:
         print("       most of the edge. Not recommended.\n")
 
 
+def _check_config() -> int:
+    """Can every rule hold at once? Run this after changing any of them."""
+    from panaoptions import preflight
+
+    cfg = get_config()
+    findings = preflight.report(cfg, log_it=False)
+    multiplier = cfg.multiplier
+    budget = cfg.capital * float(cfg.get("risk.max_capital_deployed_pct", 20)) / 100
+
+    print("\n=== CONFIGURATION CHECK ===")
+    print(f"  Capital           ${cfg.capital:,.2f}")
+    print(f"  Deployed per trade ${budget:,.2f} "
+          f"({cfg.get('risk.max_capital_deployed_pct')}%)")
+    print(f"  At risk per trade  ${budget * float(cfg.get('risk.stop_loss_pct', 20)) / 100:,.2f} "
+          f"(that budget behind a {cfg.get('risk.stop_loss_pct')}% stop)")
+    print(f"  Contract price cap ${float(cfg.get('contracts.max_contract_price', 0)) * multiplier:,.0f}")
+    print(f"  Delta band         {cfg.get('contracts.min_delta')}-{cfg.get('contracts.max_delta')}")
+    print(f"  Universe           {', '.join(cfg.symbols)}\n")
+
+    if not findings:
+        print("  Every rule can hold at once. Nothing here will stop a trade.\n")
+        return 0
+
+    for finding in findings:
+        print(finding.render())
+        print()
+
+    blockers = [f for f in findings if f.level == "blocker"]
+    if blockers:
+        print(f"  {len(blockers)} blocker(s). The desk will scan and take nothing\n"
+              "  until these are resolved — which looks exactly like a quiet\n"
+              "  market, so fix them before you judge the strategy.\n")
+        return 1
+    print("  Warnings only — the desk will trade.\n")
+    return 0
+
+
 async def _screen() -> None:
     from panaoptions.data.feed import YahooFeed
     from panaoptions.data.premarket import screen
@@ -270,10 +307,14 @@ def main() -> None:
     parser.add_argument("--train", nargs="*", metavar="SYMBOL",
                         help="train the optional ML filter")
     parser.add_argument("--check", action="store_true", help="verify the data feed")
+    parser.add_argument("--check-config", action="store_true",
+                        help="can all the rules hold at once?")
     parser.add_argument("--interval", type=int, default=60,
                         help="seconds between cycles (default 60)")
     args = parser.parse_args()
 
+    if args.check_config:
+        raise SystemExit(_check_config())
     if args.check:
         raise SystemExit(0 if asyncio.run(_check()) else 1)
     if args.explain_contracts:

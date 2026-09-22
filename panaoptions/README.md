@@ -19,41 +19,58 @@ Risk Management & Paper Execution        $500 rules, circuit breaker, ledger
 
 ---
 
-## Read this first: the budget and the delta band cannot both hold
+## Read this first: what a $500 account can actually buy
 
-The specification asks for contracts at **0.45–0.60 delta** costing
-**$60–$100**. Those two rules describe an empty set, and no amount of waiting
-will produce a trade.
+The price cap is now a sanity ceiling ($2,000 a contract), not position
+sizing — sizing belongs in the risk manager, and a price cap doing risk
+management is a rule in the wrong place that fails silently.
 
-0.45–0.60 delta means *at the money*. One contract is **100 shares**. So an
-at-the-money option 7–14 days out costs roughly:
+But raising the cap does not by itself make the mega-cap universe tradeable.
+0.45–0.60 delta means *at the money*, one contract is **100 shares**, and:
 
 | Symbol | Spot | ATM contract, ~10 DTE |
 |---|---|---|
-| SPY | ~570 | **~$530** |
-| AAPL | ~230 | **~$380** |
-| AMD | ~160 | **~$480** |
-| NVDA | ~180 | **~$600** |
-| TSLA | ~420 | **~$1,500** |
+| AAPL | ~230 | ~$380 |
+| AMZN | ~225 | ~$450 |
+| AMD | ~160 | ~$480 |
+| SPY | ~570 | ~$530 |
+| NVDA | ~180 | ~$600 |
+| MSFT | ~425 | ~$620 |
+| TSLA | ~420 | ~$1,530 |
 
-A $100 budget buys roughly **0.10–0.20 delta** — well out of the money.
+At 20% deployment, $500 gives a **$100 budget**. So the refusal simply moves
+from the contract filter to the risk manager. Two ways to resolve it:
 
-The filter is implemented exactly as specified and will correctly return
-nothing. What it will *not* do is return nothing silently: every rejection is
-counted by cause, and the reason names the real price.
+**A. Raise the capital.** About **$2,000** puts every name in reach at the
+20% rule; $1,600 reaches the cheapest.
 
 ```bash
-python run.py --explain-contracts     # live prices, per symbol, right now
+PANAOPTIONS_CAPITAL=2000 python run.py      # or edit account.starting_capital
 ```
 
-Your three options, in the order we would recommend them:
+**B. Keep $500 and trade names it can afford.** Swap
+`universe.small_account_alternative` into `universe.symbols` — liquid tickers
+whose ATM contracts run $15–$100:
 
-1. **Raise `contracts.max_contract_price`** to what ATM actually costs and
-   paper-trade the strategy as designed. You are learning the rules; the
-   account size is the constraint, not the rules.
-2. **Trade cheaper underlyings** where ATM fits $100.
-3. **Lower `contracts.min_delta`** to ~0.15 and accept OTM lottery tickets.
-   Theta and the spread will take most of the edge. Not recommended.
+```yaml
+universe:
+  symbols: ["IWM", "PLTR", "INTC", "SOFI", "HOOD", "F", "XLF", "GDX"]
+```
+
+Either way, check before the open:
+
+```bash
+python run.py --check-config       # can every rule hold at once?
+python run.py --explain-contracts  # live chains, per symbol
+```
+
+`--check-config` is the guard against this whole class of problem. Every
+setting here is individually sensible; the failures come from *combinations* —
+a delta band implying a price the budget forbids, a stop so tight the daily
+limit trips on the first loser. Each one produces the same symptom, a desk that
+scans all morning and takes nothing, which is indistinguishable from a quiet
+market. So the arithmetic runs at startup and on demand, and every finding
+names the setting, the number, and the fix.
 
 ## The other number worth being precise about
 
@@ -75,6 +92,7 @@ hidden one: both numbers print on every signal and in `--status`.
 ```bash
 cd panaoptions
 pip install -r requirements.txt
+python run.py --check-config   # can every rule hold at once?   <- start here
 python run.py --check          # is the data feed reachable?
 python run.py --screen         # what passes the pre-market filter?
 python run.py --explain-contracts
@@ -160,6 +178,7 @@ panaoptions/
   config/settings.yaml    every rule
   panaoptions/
     clock.py              session windows, in New York time
+    preflight.py          can every rule hold at once?
     data/    feed.py premarket.py greeks.py
     engine/  indicators.py patterns.py setups.py contracts.py
     risk/    guardrails.py
