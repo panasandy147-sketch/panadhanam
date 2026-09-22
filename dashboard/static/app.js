@@ -107,7 +107,7 @@ function handle(event) {
     case "news.item":           addNews(data); break;
     case "macro.update":        renderMacro(data); break;
     case "learning.update":     loadScorecard(); break;
-    case "market.switched":     applyMarket(data.market); break;
+    case "market.switched":     adoptMarket(data.market); break;
     case "trading_day.state":  renderTradingDay(data); break;
     case "trading_day.summary": renderDaySummary(data); break;
     case "position.update":     loadPositions(); break;
@@ -160,6 +160,32 @@ async function loadMarkets() {
   applyMarket(d.profile);
 }
 
+/* Rebuild the page around a new active market.
+   Shared by the switch button and by the desk following the session clock —
+   an automatic switch happens while nobody is watching, so leaving stale
+   Indian signals under a US header is exactly the confusion to avoid. */
+async function adoptMarket(profile) {
+  applyMarket(profile);
+
+  state.agents = {};
+  state.signals = [];
+  state.news = [];
+  $("agents").innerHTML = `<div class="empty">Waiting for the first ${esc(profile.name)} cycle…</div>`;
+  $("signals").innerHTML = `<div class="empty">No signals yet for ${esc(profile.name)}.</div>`;
+  $("news").innerHTML = `<div class="empty">No headlines yet.</div>`;
+  $("opp-tiers").innerHTML =
+    `<div class="empty" style="grid-column:1/-1">Hit <b>Scan watchlist</b> to rank ${esc(profile.name)} symbols.</div>`;
+  $("replay-body").innerHTML = `<div class="empty">Run a replay for ${esc(profile.name)}.</div>`;
+  $("macro").innerHTML = `<div class="empty">Macro feed not yet loaded.</div>`;
+  // The previous market's end-of-day panel is not this market's day.
+  $("s-day-summary").hidden = true;
+
+  await loadWatchlist();
+  initChart();
+  await Promise.all([loadChart(), loadPositions(), loadScorecard(),
+                     loadStatus(), loadTradingDay(), runCalc()]);
+}
+
 async function switchMarket(code) {
   if (state.switching || code === state.market?.code) return;
   state.switching = true;
@@ -178,25 +204,7 @@ async function switchMarket(code) {
       return;
     }
 
-    applyMarket(d.profile);
-
-    // Everything on screen belonged to the old market — clear it, don't let
-    // stale Indian signals sit under a US header.
-    state.agents = {};
-    state.signals = [];
-    state.news = [];
-    $("agents").innerHTML = `<div class="empty">Waiting for the first ${esc(d.profile.name)} cycle…</div>`;
-    $("signals").innerHTML = `<div class="empty">No signals yet for ${esc(d.profile.name)}.</div>`;
-    $("news").innerHTML = `<div class="empty">No headlines yet.</div>`;
-    $("opp-tiers").innerHTML =
-      `<div class="empty" style="grid-column:1/-1">Hit <b>Scan watchlist</b> to rank ${esc(d.profile.name)} symbols.</div>`;
-    $("replay-body").innerHTML = `<div class="empty">Run a replay for ${esc(d.profile.name)}.</div>`;
-    $("macro").innerHTML = `<div class="empty">Macro feed not yet loaded.</div>`;
-
-    await loadWatchlist();
-    initChart();
-    await Promise.all([loadChart(), loadPositions(), loadScorecard(),
-                       loadStatus(), runCalc()]);
+    await adoptMarket(d.profile);
   } finally {
     state.switching = false;
     buttons.forEach((b) => (b.disabled = false));

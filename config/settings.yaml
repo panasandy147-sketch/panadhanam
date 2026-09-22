@@ -247,6 +247,26 @@ opportunities:
   min_conviction: 0.15
 
 # --------------------------------------------------------------------------
+# MARKETS
+# --------------------------------------------------------------------------
+markets:
+  # Follow whichever market is trading, so one app covers both.
+  #
+  # India runs 03:45-10:00 UTC and the US 13:30-20:00 UTC, so the two sessions
+  # never overlap and a single desk can serve both by following the clock.
+  # This is NOT parallel trading: exactly one market is active at any moment,
+  # which is the only arrangement where a single capital base and a single
+  # daily loss limit mean anything.
+  #
+  # It will never interrupt a market that is still in session, and never
+  # switches while a position is open — the new market's broker cannot manage
+  # the old market's positions.
+  #
+  # To trade both at once you need two instances with two capital bases. See
+  # docs/MARKETS.md.
+  auto_follow_session: true
+
+# --------------------------------------------------------------------------
 # TRADING DAY — arming order placement
 # --------------------------------------------------------------------------
 trading_day:

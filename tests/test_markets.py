@@ -252,3 +252,107 @@ def test_us_index_etfs_are_ordinary_shares(cfg):
     sig = rm.evaluate(_ctx("SPY", 585.0), Bias.BULLISH, [], 0.6, ["a", "b"])
     assert sig.quantity > 0
     assert not any("index" in r.lower() for r in sig.rejection_reasons)
+
+
+# --------------------------------------------------------------------------- #
+# Following the session: one app, both markets, never at the same time.
+# --------------------------------------------------------------------------- #
+def _pin_sessions(monkeypatch, config, **open_markets):
+    """Pin which markets are trading, without moving the clock."""
+    from app.core.markets import MarketProfile
+
+    monkeypatch.setattr(
+        MarketProfile, "is_in_session",
+        lambda self: open_markets.get(self.code, False))
+    return config
+
+
+@pytest.fixture
+def following(cfg):
+    cfg.settings.setdefault("markets", {})["auto_follow_session"] = True
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_the_desk_moves_to_whichever_market_has_opened(
+        engine, following, monkeypatch):
+    _pin_sessions(monkeypatch, following, IN=False, US=True)
+
+    assert await engine.maybe_follow_session() == "US"
+    assert following.active_market == "US"
+
+
+@pytest.mark.asyncio
+async def test_a_market_still_trading_is_never_interrupted(
+        engine, following, monkeypatch):
+    _pin_sessions(monkeypatch, following, IN=True, US=True)
+
+    assert await engine.maybe_follow_session() is None
+    assert following.active_market == "IN", \
+        "leaving a live session mid-flight would strand the day's state"
+
+
+@pytest.mark.asyncio
+async def test_nothing_moves_while_a_position_is_open(
+        engine, following, monkeypatch):
+    # Switching rebuilds the broker, and the new one cannot manage the old
+    # market's positions.
+    _pin_sessions(monkeypatch, following, IN=False, US=True)
+    engine.risk.state.open_positions = 1
+
+    assert await engine.maybe_follow_session() is None
+    assert following.active_market == "IN"
+
+
+@pytest.mark.asyncio
+async def test_nothing_moves_when_every_market_is_shut(
+        engine, following, monkeypatch):
+    _pin_sessions(monkeypatch, following, IN=False, US=False)
+
+    assert await engine.maybe_follow_session() is None
+    assert following.active_market == "IN"
+
+
+@pytest.mark.asyncio
+async def test_following_can_be_switched_off(engine, following, monkeypatch):
+    following.settings["markets"]["auto_follow_session"] = False
+    _pin_sessions(monkeypatch, following, IN=False, US=True)
+
+    assert await engine.maybe_follow_session() is None
+    assert following.active_market == "IN"
+
+
+@pytest.mark.asyncio
+async def test_the_desk_stays_put_when_its_own_market_is_the_open_one(
+        engine, following, monkeypatch):
+    await engine.switch_market("US")
+    _pin_sessions(monkeypatch, following, IN=False, US=True)
+
+    assert await engine.maybe_follow_session() is None
+    assert following.active_market == "US"
+
+
+def test_the_two_sessions_never_overlap(cfg):
+    """The premise the whole feature rests on.
+
+    India trades 03:45-10:00 UTC and the US 13:30-20:00 UTC. If that ever
+    stopped being true, one desk could not serve both, and this test should
+    fail rather than the behaviour quietly degrading.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    def utc_window(profile):
+        session = profile.session
+        day = datetime(2026, 9, 23, tzinfo=ZoneInfo(profile.timezone))
+        edges = []
+        for key in ("market_open", "market_close"):
+            hour, _, minute = str(session[key]).partition(":")
+            stamp = day.replace(hour=int(hour), minute=int(minute or 0)) \
+                       .astimezone(ZoneInfo("UTC"))
+            edges.append(stamp.hour * 60 + stamp.minute)
+        return tuple(edges)
+
+    india, us = utc_window(cfg.profiles["IN"]), utc_window(cfg.profiles["US"])
+    assert india[1] <= us[0] or us[1] <= india[0], \
+        f"sessions overlap: India {india} vs US {us} (minutes UTC)"

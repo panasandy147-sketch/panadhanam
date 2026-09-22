@@ -106,3 +106,48 @@ broker section.
 
 The agents, risk manager, scanner and learning loop are market-agnostic: they
 read conventions through the profile and never learn which market they're on.
+
+
+---
+
+## One app, both markets
+
+The two sessions never overlap:
+
+| Market | Local hours | In UTC |
+|---|---|---|
+| India | 09:15–15:30 IST | 03:45–10:00 |
+| US | 09:30–16:00 ET | 13:30–20:00 |
+
+So `markets.auto_follow_session: true` (the default) lets a single desk serve
+both: each cycle it checks whether another configured market has opened and
+moves to it. Leave the app running and it trades India in the morning and the
+US in the evening, arming itself at each open.
+
+**This is not parallel trading.** Exactly one market is active at any moment,
+which is the only arrangement where a single capital base and a single daily
+loss limit mean anything. Three conditions must all hold before it moves:
+
+1. the active market is **not** in session — a live one is never interrupted;
+2. another configured market **is**;
+3. **nothing is open** — switching rebuilds the broker, and the new one cannot
+   manage the old market's positions.
+
+The dashboard follows over the WebSocket and clears the previous market's
+signals, agents, news and day summary, so you never read Indian signals under
+a US header.
+
+### To trade both at once
+
+You need two instances, each with its own capital base and its own database:
+
+```bash
+# terminal 1 — India
+BROKER=paper MARKET=IN PORT=8000 python run.py
+
+# terminal 2 — US
+BROKER=alpaca MARKET=US PORT=8001 python run.py
+```
+
+Set `markets.auto_follow_session: false` in that arrangement, or each instance
+will wander into the other's market.

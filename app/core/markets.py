@@ -107,6 +107,37 @@ class MarketProfile:
     def default_broker(self) -> str:
         return str(self.data.get("brokers", {}).get("default", "paper"))
 
+    # ---------------- session ----------------
+    @property
+    def session(self) -> dict[str, Any]:
+        return self.data.get("session", {}) or {}
+
+    def is_in_session(self) -> bool:
+        """Is THIS market trading right now?
+
+        Answered from the profile alone, without activating it — the engine has
+        to ask about a market it is not currently running in order to decide
+        whether to follow it.
+        """
+        from app.core import clock
+
+        session = self.session
+        if not clock.is_trading_day(self.timezone,
+                                    session.get("trading_days", [0, 1, 2, 3, 4])):
+            return False
+        return clock.is_open(self.timezone,
+                             str(session.get("market_open", "09:15")),
+                             str(session.get("market_close", "15:30")))
+
+    def minutes_until_close(self) -> int:
+        """How much session is left, in minutes. Negative once it has shut."""
+        from app.core import clock
+
+        now = clock.market_now(self.timezone)
+        close = clock.parse_time(str(self.session.get("market_close", "15:30")),
+                                 __import__("datetime").time(15, 30))
+        return (close.hour * 60 + close.minute) - (now.hour * 60 + now.minute)
+
     # ---------------- overlay ----------------
     def apply_to(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of `settings` with this market's values merged in."""

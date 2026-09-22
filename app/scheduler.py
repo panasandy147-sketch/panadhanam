@@ -293,6 +293,10 @@ class TradingEngine:
 
         while self.running:
             try:
+                # Follow whichever market is trading before reading the
+                # phase, or the first cycle after a session opens is wasted.
+                await self.maybe_follow_session()
+
                 phase = self.session_phase()
                 today = clock.market_now(self.timezone).date().isoformat()
 
@@ -324,6 +328,41 @@ class TradingEngine:
 
             sleep_for = interval if self.session_phase() == "open" else max(interval, 120)
             await asyncio.sleep(sleep_for)
+
+    async def maybe_follow_session(self) -> str | None:
+        """Move to whichever market is trading, so one app covers both.
+
+        India runs 03:45-10:00 UTC and the US 13:30-20:00 UTC, so the two
+        sessions never overlap and a single desk can serve both by following
+        the clock. It is not parallel trading: at any moment exactly one
+        market is active, which is the only arrangement where a single risk
+        budget and a single daily loss limit mean anything.
+
+        Three conditions, all required:
+          * the active market is NOT in session (never interrupt a live one);
+          * some other configured market IS;
+          * nothing is open (switching rebuilds the broker, and the new one
+            cannot manage the old market's positions).
+
+        Returns the code switched to, or None.
+        """
+        if not bool(self.cfg.get("markets.auto_follow_session", False)):
+            return None
+        if self.cfg.market.is_in_session():
+            return None
+        if self.risk.state.open_positions:
+            log.debug("not following the session: %d position(s) still open",
+                      self.risk.state.open_positions)
+            return None
+
+        for profile in self.cfg.profiles.values():
+            if profile.code == self.cfg.active_market or not profile.is_in_session():
+                continue
+            log.info("following the session: %s has opened, switching from %s",
+                     profile.code, self.cfg.active_market)
+            result = await self.switch_market(profile.code)
+            return profile.code if result.get("switched") else None
+        return None
 
     async def _maybe_publish_day_summary(self) -> None:
         """Put the day's result on screen once the session is over.
