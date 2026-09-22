@@ -57,7 +57,7 @@ fmt:
 
 # --- panaoptions: the separate US options app in ./panaoptions -------------
 options:
-	cd panaoptions && $(PY) run.py
+	cd panaoptions && $(PY) run.py            # desk + dashboard on :8100
 
 options-test:
 	cd panaoptions && $(PY) -m pytest -q

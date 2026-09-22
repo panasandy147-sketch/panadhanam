@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>panaoptions</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Inline so there is no second request to 404 on. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230d1117'/><path d='M3 11L6 6l3 3 4-6' stroke='%23d29922' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+
+<header>
+  <h1>panaoptions</h1>
+  <span class="badge paper" id="b-paper">paper only</span>
+  <span class="badge" id="b-phase">—</span>
+  <span class="badge" id="b-clock">—</span>
+  <span class="spacer"></span>
+  <span class="badge" id="b-capital">—</span>
+  <span class="badge" id="b-halt" hidden>halted</span>
+</header>
+
+<main>
+
+  <!-- The panel that has to be impossible to miss. A desk taking nothing
+       looks exactly like a quiet market until this says otherwise. -->
+  <section class="wide" id="s-config">
+    <h2>Can the rules all hold at once?</h2>
+    <div class="body" id="config-body"><div class="empty">Checking…</div></div>
+  </section>
+
+  <section class="wide">
+    <h2>Account</h2>
+    <div class="tiles" id="account-tiles"></div>
+  </section>
+
+  <section>
+    <h2>Pre-market screen</h2>
+    <div id="screen-body"><div class="empty">Runs once a day, before the entry window.</div></div>
+  </section>
+
+  <section>
+    <h2>What your budget buys</h2>
+    <div id="contracts-body"><div class="empty">—</div></div>
+  </section>
+
+  <section class="wide">
+    <h2>Open position</h2>
+    <div id="open-body"><div class="empty">Flat.</div></div>
+  </section>
+
+  <section class="wide">
+    <h2>Paper record</h2>
+    <div class="tiles" id="ledger-tiles"></div>
+    <div id="trades-body"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Why no trade</h2>
+    <div id="rejections-body"><div class="empty">Nothing passed over yet.</div></div>
+  </section>
+
+</main>
+
+<footer>
+  Paper trading only — there is no broker adapter in this application.
+  Nothing on this page can place an order.
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

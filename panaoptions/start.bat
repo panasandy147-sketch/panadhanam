@@ -42,9 +42,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if "%PANAOPTIONS_PORT%"=="" set PANAOPTIONS_PORT=8100
+
 echo.
-echo Starting the desk. Leave this window OPEN — closing it stops the desk.
+echo Dashboard  ^<-  http://127.0.0.1:%PANAOPTIONS_PORT%
+echo Leave this window OPEN — closing it stops the desk.
 echo Press Ctrl+C to stop.
 echo.
 
-"%PY%" run.py %*
+start "" /b cmd /c "timeout /t 4 /nobreak >nul & start http://127.0.0.1:%PANAOPTIONS_PORT%"
+
+"%PY%" run.py --port %PANAOPTIONS_PORT% %*

@@ -106,8 +106,15 @@ start.bat                      # cmd, PowerShell, or double-click
 ```
 
 Either one finds the right Python, checks the configuration, verifies the data
-feed, and starts the desk — refusing to start if a rule makes trading
-impossible, rather than running all morning and taking nothing.
+feed, starts the desk and opens the dashboard at **http://127.0.0.1:8100** —
+refusing to start if a rule makes trading impossible, rather than running all
+morning and taking nothing.
+
+Port 8100, not 8000: panadhanam's dashboard already owns 8000, and the two can
+run side by side. The skin is amber rather than blue on purpose — two desks
+that look alike is how you read an options position as an equities one.
+
+`run.py --no-web` runs the desk with terminal output only.
 
 **Use the virtual environment, not a bare `python`.** panadhanam's `.venv` one
 level up already carries every package panaoptions needs; a bare `python` on
@@ -159,6 +166,22 @@ the desk would quietly become one-trade-a-day.
 
 **Session** — entries 09:35–10:30 ET only. Stops tighten to breakeven at
 10:45. Everything is squared off by 15:45.
+
+## The dashboard
+
+Read-only, on purpose. There is no endpoint that opens or closes a position —
+a trading decision belongs to the rules engine, not to whoever last clicked a
+button. That is a tested property, not an omission.
+
+| Panel | Answers |
+|---|---|
+| **Can the rules all hold at once?** | The one that comes first. A desk scanning and taking nothing is indistinguishable from a quiet market; this says which it is, with the command that fixes it. |
+| **Account** | Capital, deployed per trade, **at risk** per trade, day P&L, room before the halt. |
+| **Pre-market screen** | Gap and RVOL per symbol, and which passed. |
+| **What your budget buys** | The at-the-money cost of each name against your budget, and whether it fits. |
+| **Open position** | The live contract with its stop and both targets. |
+| **Paper record** | Win rate, expectancy, and the last 25 closed trades. |
+| **Why no trade** | Setups passed over, counted by reason. If one dominates, that is the rule to look at. |
 
 ## What gets recorded
 
@@ -215,6 +238,7 @@ panaoptions/
   panaoptions/
     clock.py              session windows, in New York time
     preflight.py          can every rule hold at once?
+    web/     server.py static/    the dashboard (read-only)
     data/    feed.py premarket.py greeks.py
     engine/  indicators.py patterns.py setups.py contracts.py
     risk/    guardrails.py

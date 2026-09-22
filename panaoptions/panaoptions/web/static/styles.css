@@ -1,0 +1,151 @@
+/* panaoptions — deliberately a different skin from panadhanam's dashboard.
+   Two apps on one machine that look alike is how you place an options order
+   thinking you are on the equities desk. */
+:root {
+  --bg: #0d1117;
+  --panel: #151b23;
+  --panel-2: #1c242e;
+  --border: #283039;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #d29922;          /* amber — options, not the equity desk's blue */
+  --pos: #3fb950;
+  --neg: #f85149;
+  --warn: #d29922;
+  --crit: #f85149;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 2px solid var(--accent);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  color: var(--accent);
+}
+header .spacer { flex: 1; }
+
+.badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.paper { border-color: var(--accent); color: var(--accent); }
+.badge.live  { border-color: var(--pos); color: var(--pos); }
+.badge.halt  { border-color: var(--crit); color: var(--crit); }
+
+/* Two columns, explicitly. auto-fit with a small minimum gives four columns
+   on a wide screen and strands the last two empty, because there are only
+   ever a couple of half-width panels. */
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 14px 18px 40px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+section.wide { grid-column: 1 / -1; }
+section > h2 {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+section > .body { padding: 12px 14px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.tile { padding: 11px 14px; border-right: 1px solid var(--border); }
+.tile:last-child { border-right: none; }
+.tile .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.tile .v { font-family: var(--mono); font-size: 19px; margin-top: 3px; }
+.tile .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+.dim { color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { padding: 6px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 500; }
+td.num, th.num { text-align: right; font-family: var(--mono); }
+tbody tr:last-child td { border-bottom: none; }
+
+.note {
+  border-left: 3px solid var(--border);
+  padding: 9px 12px;
+  margin: 0 0 10px;
+  background: var(--panel-2);
+  font-size: 12.5px;
+  border-radius: 0 4px 4px 0;
+}
+.note.crit { border-left-color: var(--crit); }
+.note.warn { border-left-color: var(--warn); }
+.note b { display: block; margin-bottom: 3px; }
+.note .fix { color: var(--muted); margin-top: 5px; }
+.note pre {
+  margin: 7px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow-x: auto;
+  color: var(--accent);
+}
+
+.empty { padding: 18px 14px; color: var(--muted); font-size: 12.5px; }
+.pill { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); }
+.pill.pass { color: var(--pos); border-color: var(--pos); }
+.pill.skip { color: var(--muted); }
+
+footer { padding: 14px 18px 30px; color: var(--muted); font-size: 11.5px; text-align: center; }
+
+@media (max-width: 640px) {
+  main { padding: 12px; }
+  header { padding: 10px 12px; }
+  .tile { border-right: none; border-bottom: 1px solid var(--border); }
+  table { font-size: 12px; }
+  th, td { padding: 6px 10px; }
+}

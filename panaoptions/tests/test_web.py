@@ -1,0 +1,132 @@
+"""The dashboard. Read-only by design: no endpoint opens or closes a position.
+
+A trading decision belongs to the rules engine, not to whoever last clicked a
+button, so the absence of those endpoints is a tested property rather than an
+omission.
+"""
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from panaoptions.app import OptionsDesk
+
+
+class _SilentFeed:
+    async def connect(self):
+        return True
+
+    async def close(self):
+        return None
+
+    async def quote(self, symbol):
+        return None
+
+    async def candles(self, symbol, interval="5m", include_prepost=False):
+        return []
+
+    async def expiries(self, symbol):
+        return []
+
+    async def chain_for_window(self, symbol, spot, min_dte, max_dte):
+        return []
+
+
+@pytest.fixture
+def client(cfg, monkeypatch, tmp_path):
+    from panaoptions.ledger import store
+    from panaoptions.web import server
+
+    monkeypatch.setattr(store, "_conn", None)
+    monkeypatch.setattr(store, "db_path", lambda: tmp_path / "web.db")
+    monkeypatch.setattr(server, "get_config", lambda: cfg)
+
+    desk = OptionsDesk(cfg=cfg, feed=_SilentFeed())
+    # The app starts the desk loop on startup; the TestClient context manager
+    # would run it for real, so keep it inert.
+    monkeypatch.setattr(desk, "start", lambda *a, **k: _noop())
+    app = server.create_app(desk)
+    with TestClient(app) as c:
+        c.desk = desk
+        yield c
+
+
+async def _noop():
+    return None
+
+
+# --------------------------------------------------------------------------- #
+def test_the_page_loads(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    assert "panaoptions" in res.text
+    assert "paper only" in res.text.lower()
+
+
+def test_the_footer_says_no_order_can_be_placed(client):
+    assert "no broker adapter" in client.get("/").text
+
+
+@pytest.mark.parametrize("path", [
+    "/api/status", "/api/config-check", "/api/screen",
+    "/api/trades", "/api/contracts",
+])
+def test_every_endpoint_answers(client, path):
+    assert client.get(path).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+def test_status_carries_the_configuration_verdict(client):
+    body = client.get("/api/status").json()
+
+    assert body["paper_only"] is True
+    assert "config" in body
+    assert body["config"]["capital"] == 500.0
+    assert body["config"]["risk_per_trade_pct"] == 4.0
+
+
+def test_a_blocker_reaches_the_page_with_its_command(client):
+    # The whole reason the dashboard exists: a desk taking nothing looks like
+    # a quiet market, and this panel is what tells them apart.
+    body = client.get("/api/config-check").json()
+
+    assert body["blockers"], "the shipped $500 config cannot buy an ATM contract"
+    blocker = body["blockers"][0]
+    assert blocker["setting"] and blocker["problem"] and blocker["fix"]
+    assert "PANAOPTIONS_CAPITAL" in blocker["command"]
+
+
+def test_a_workable_configuration_reports_no_blockers(client, cfg):
+    cfg.data["account"]["starting_capital"] = 2000.0
+    assert client.get("/api/config-check").json()["blockers"] == []
+
+
+def test_the_contracts_panel_says_which_names_are_affordable(client):
+    body = client.get("/api/contracts").json()
+
+    assert body["budget"] == 100.0             # 20% of $500
+    assert body["rows"]
+    assert not any(r["affordable"] for r in body["rows"]), \
+        "nothing in this universe fits a $100 budget at the money"
+
+    tsla = next(r for r in body["rows"] if r["symbol"] == "TSLA")
+    assert tsla["atm_cost"] > 1000
+
+
+def test_the_trades_panel_includes_why_setups_were_passed_over(client):
+    body = client.get("/api/trades?days=7").json()
+    assert body["days"] == 7
+    assert "rejections" in body, \
+        "on a desk taking nothing, this is the panel that explains it"
+    assert "stats" in body
+
+
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("path,method", [
+    ("/api/order", "post"), ("/api/trade", "post"), ("/api/close", "post"),
+    ("/api/status", "post"),
+])
+def test_nothing_on_the_dashboard_can_place_or_close_a_trade(client, path, method):
+    res = getattr(client, method)(path)
+    assert res.status_code in (404, 405), \
+        f"{method.upper()} {path} must not exist — the rules engine decides, not a button"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """panaoptions — intraday US options paper trading on a small account.
 
-    python run.py                     start the desk (paper only)
+    python run.py                     start the desk + dashboard (paper only)
+    python run.py --no-web            the desk alone, terminal output only
     python run.py --once              run one cycle and exit
     python run.py --status            print the current state and exit
     python run.py --screen            run the pre-market screen and exit
@@ -405,6 +406,12 @@ def main() -> None:
                         help="write settings into .env; repeatable")
     parser.add_argument("--interval", type=int, default=60,
                         help="seconds between cycles (default 60)")
+    parser.add_argument("--no-web", action="store_true",
+                        help="run the desk without the dashboard")
+    parser.add_argument("--host", default="127.0.0.1")
+    # 8100, not 8000: panadhanam's dashboard already owns 8000, and two desks
+    # fighting over a port is a confusing way to find that out.
+    parser.add_argument("--port", type=int, default=8100)
     args = parser.parse_args()
 
     if args.set_env:
@@ -437,8 +444,36 @@ def main() -> None:
         store.init()
         asyncio.run(_run_once(desk))
         return
+
+    if args.no_web:
+        try:
+            asyncio.run(desk.start(cycle_seconds=args.interval))
+        except KeyboardInterrupt:
+            print("\nStopped.")
+        return
+
+    _serve(desk, args.host, args.port, args.interval)
+
+
+def _serve(desk, host: str, port: int, interval: int) -> None:
+    """Run the desk with the dashboard in front of it."""
     try:
-        asyncio.run(desk.start(cycle_seconds=args.interval))
+        import uvicorn
+    except ImportError:
+        print("\n  The dashboard needs fastapi and uvicorn:\n"
+              f"\n      {_interpreter_with_dependencies() or 'python'} "
+              "-m pip install fastapi uvicorn\n"
+              "\n  Or run the desk without it:  run.py --no-web\n")
+        raise SystemExit(1) from None
+
+    from panaoptions.web.server import create_app
+
+    app = create_app(desk, cycle_seconds=interval)
+    app.state.port = port
+    print(f"  Dashboard  →  http://{host}:{port}")
+    print("  Leave this window open; closing it stops the desk.\n")
+    try:
+        uvicorn.run(app, host=host, port=port, log_config=None)
     except KeyboardInterrupt:
         print("\nStopped.")
 
