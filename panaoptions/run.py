@@ -21,7 +21,57 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+
+def _interpreter_with_dependencies() -> str:
+    """A Python on this machine that probably has the packages installed.
+
+    panaoptions sits beside panadhanam in the same repository, and that
+    project's virtual environment already carries every package this one
+    needs. Naming the exact interpreter beats telling somebody their
+    environment is wrong and leaving them to work out which of the three
+    Pythons on a Windows box was meant.
+    """
+    windows = sys.platform.startswith("win")
+    folder, exe = ("Scripts", "python.exe") if windows else ("bin", "python")
+    sep = "\\" if windows else "/"
+    for base, label in ((HERE, "."), (HERE.parent, "..")):
+        if (base / ".venv" / folder / exe).exists():
+            return f"{label}{sep}.venv{sep}{folder}{sep}{exe}"
+    return ""
+
+
+def _require_dependencies() -> None:
+    """Turn a bare ImportError into the command that fixes it."""
+    try:
+        import httpx  # noqa: F401
+        import pandas  # noqa: F401
+        import pydantic  # noqa: F401
+        import yaml  # noqa: F401
+        return
+    except ImportError as exc:
+        missing = getattr(exc, "name", None) or "a required package"
+
+    hint = _interpreter_with_dependencies()
+    running = Path(sys.executable).name
+    args = " ".join(sys.argv[1:])
+    print(f"\n  '{missing}' is not installed for the Python you just used "
+          f"({running}).\n")
+    if hint:
+        print("  The virtual environment beside this project already has every\n"
+              "  package panaoptions needs:\n"
+              f"\n      {hint} run.py {args}\n")
+        print("  On Windows a bare `python` finds the Microsoft Store build,\n"
+              "  which carries none of this project's packages.\n")
+    else:
+        print(f"  Install them with:\n\n      {running} -m pip install -r "
+              f"requirements.txt\n")
+    raise SystemExit(1)
+
+
+_require_dependencies()
 
 from panaoptions import clock  # noqa: E402
 from panaoptions.config import get_config  # noqa: E402

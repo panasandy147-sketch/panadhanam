@@ -45,7 +45,7 @@ from the contract filter to the risk manager. Two ways to resolve it:
 20% rule; $1,600 reaches the cheapest.
 
 ```bash
-python run.py --set PANAOPTIONS_CAPITAL=2000
+../.venv/Scripts/python.exe run.py --set PANAOPTIONS_CAPITAL=2000
 ```
 
 That writes `.env`, which is untracked and survives a restart. An environment
@@ -101,13 +101,32 @@ hidden one: both numbers print on every signal and in `--status`.
 
 ```bash
 cd panaoptions
-pip install -r requirements.txt
-python run.py --check-config   # can every rule hold at once?   <- start here
-python run.py --set PANAOPTIONS_CAPITAL=2000   # per-machine, survives a restart
-python run.py --check          # is the data feed reachable?
-python run.py --screen         # what passes the pre-market filter?
-python run.py --explain-contracts
-python run.py                  # start the desk
+./start.sh                     # Git Bash / macOS / Linux
+start.bat                      # cmd, PowerShell, or double-click
+```
+
+Either one finds the right Python, checks the configuration, verifies the data
+feed, and starts the desk — refusing to start if a rule makes trading
+impossible, rather than running all morning and taking nothing.
+
+**Use the virtual environment, not a bare `python`.** panadhanam's `.venv` one
+level up already carries every package panaoptions needs; a bare `python` on
+Windows finds the Microsoft Store build, which carries none of them. `run.py`
+says so by name if you forget.
+
+```bash
+../.venv/Scripts/python.exe run.py --check-config    # Windows
+../.venv/bin/python run.py --check-config            # macOS / Linux
+```
+
+The other commands, all through that same interpreter:
+
+```bash
+run.py --set PANAOPTIONS_CAPITAL=2000   # per-machine, survives a restart
+run.py --check                          # is the data feed reachable?
+run.py --screen                         # what passes the pre-market filter?
+run.py --explain-contracts              # what your budget buys, live
+run.py --report 30                      # the paper-trading record
 ```
 
 No API key. Market data comes from Yahoo's public endpoints over plain
