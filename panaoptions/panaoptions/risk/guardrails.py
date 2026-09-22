@@ -46,6 +46,19 @@ class RiskManager:
         self.capital = cfg.capital
         self.state = DayState()
 
+    @property
+    def daily_limit(self) -> float:
+        """The day's loss budget, as a positive number.
+
+        A percentage of capital by default so it scales with the account; an
+        absolute `daily_loss_limit` overrides it when one is set.
+        """
+        absolute = self.cfg.get("risk.daily_loss_limit")
+        if absolute not in (None, "", 0, 0.0):
+            return abs(float(absolute))
+        pct = float(self.cfg.get("risk.daily_loss_limit_pct", 10.0))
+        return round(self.capital * pct / 100.0, 2)
+
     # ------------------------------------------------------------------ #
     def roll_day(self, today: str) -> None:
         """A new session clears yesterday's counters, including the halt."""
@@ -65,18 +78,18 @@ class RiskManager:
         elif amount < 0:
             self.state.losses += 1
 
-        limit = float(self.cfg.get("risk.daily_loss_limit", 50.0))
-        if not self.state.halted and self.state.realised_pnl <= -abs(limit):
+        limit = self.daily_limit
+        if not self.state.halted and self.state.realised_pnl <= -limit:
             self.state.halted = True
             self.state.halt_reason = (
                 f"daily loss limit hit: {self.state.realised_pnl:+.2f} against a "
-                f"-{abs(limit):.2f} limit. No more entries today.")
+                f"-{limit:.2f} limit. No more entries today.")
             log.warning("CIRCUIT BREAKER — %s", self.state.halt_reason)
 
     @property
     def remaining_loss_budget(self) -> float:
-        limit = abs(float(self.cfg.get("risk.daily_loss_limit", 50.0)))
-        return round(max(limit + min(self.state.realised_pnl, 0.0), 0.0), 2)
+        return round(max(self.daily_limit + min(self.state.realised_pnl, 0.0),
+                         0.0), 2)
 
     def _reject(self, reason: str) -> tuple[None, str]:
         key = reason.split(":")[0].split("—")[0].strip()[:60]
@@ -161,7 +174,7 @@ class RiskManager:
             # The number that actually matters, spelled out.
             "risk_per_trade_pct": round(deployed_pct * stop_pct / 100, 2),
             "risk_per_trade": round(capital * deployed_pct * stop_pct / 10000, 2),
-            "daily_loss_limit": float(self.cfg.get("risk.daily_loss_limit", 50.0)),
+            "daily_loss_limit": self.daily_limit,
             "remaining_loss_budget": self.remaining_loss_budget,
             "realised_pnl": round(self.state.realised_pnl, 2),
             "trades_taken": self.state.trades_taken,

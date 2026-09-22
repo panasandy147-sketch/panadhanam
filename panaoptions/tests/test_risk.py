@@ -116,3 +116,47 @@ def test_every_refusal_is_counted_so_a_dead_rule_shows_up(risk, setup):
     for _ in range(3):
         _size(risk, setup)
     assert sum(risk.state.rejections.values()) == 3
+
+
+# --------------------------------------------------------------------------- #
+# The daily limit scales with the account. Pinning it to a dollar figure means
+# raising capital leaves a limit smaller than one stop-out.
+# --------------------------------------------------------------------------- #
+def test_the_daily_limit_is_a_percentage_of_capital_by_default(cfg):
+    assert RiskManager(cfg).daily_limit == 50.0          # 10% of $500
+
+    cfg.data["account"]["starting_capital"] = 2000.0
+    assert RiskManager(cfg).daily_limit == 200.0, \
+        "$50 was the instance at $500, not the rule"
+
+
+def test_an_absolute_limit_still_overrides_the_percentage(cfg):
+    cfg.data["risk"]["daily_loss_limit"] = 35.0
+    assert RiskManager(cfg).daily_limit == 35.0
+
+
+def test_raising_capital_no_longer_leaves_a_one_trade_day(cfg):
+    from panaoptions.preflight import check
+
+    cfg.data["account"]["starting_capital"] = 2000.0
+    risk = RiskManager(cfg)
+
+    one_stop = (cfg.capital * float(cfg.get("risk.max_capital_deployed_pct"))
+                / 100 * float(cfg.get("risk.stop_loss_pct")) / 100)
+    assert risk.daily_limit > one_stop, \
+        "the breaker must not trip on the first loser"
+    assert not [f for f in check(cfg) if f.level == "blocker"]
+
+
+def test_the_breaker_still_latches_at_the_scaled_limit(cfg):
+    cfg.data["account"]["starting_capital"] = 2000.0
+    risk = RiskManager(cfg)
+
+    risk.record_pnl(-150.0)
+    assert not risk.state.halted
+    assert risk.remaining_loss_budget == 50.0
+
+    risk.record_pnl(-60.0)
+    assert risk.state.halted
+    assert "-210.00" in risk.state.halt_reason
+    assert "-200.00 limit" in risk.state.halt_reason

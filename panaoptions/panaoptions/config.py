@@ -7,9 +7,16 @@ from typing import Any
 
 import yaml
 
+from panaoptions import envfile
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "settings.yaml"
 DATA_DIR = ROOT / "data"
+ENV_PATH = ROOT / ".env"
+
+# Load .env before anything reads an environment variable. A value exported in
+# a shell lasts only for that shell; the file is what survives a restart.
+envfile.load(ENV_PATH)
 
 
 def _env_float(key: str) -> float | None:
@@ -29,6 +36,7 @@ class Config:
         self.reload()
 
     def reload(self) -> None:
+        envfile.load(ENV_PATH)
         with open(self.path, encoding="utf-8") as fh:
             self.data = yaml.safe_load(fh) or {}
         self._apply_env()

@@ -140,7 +140,9 @@ def check(cfg) -> list[Finding]:
 
     # 4. Would a single stop-out blow more than the whole day's budget?
     stop_pct = float(cfg.get("risk.stop_loss_pct", 20.0))
-    daily_limit = abs(float(cfg.get("risk.daily_loss_limit", 50.0)))
+    absolute = cfg.get("risk.daily_loss_limit")
+    daily_limit = (abs(float(absolute)) if absolute not in (None, "", 0, 0.0)
+                   else capital * float(cfg.get("risk.daily_loss_limit_pct", 10.0)) / 100.0)
     risk_per_trade = budget * stop_pct / 100.0
     if risk_per_trade > daily_limit:
         findings.append(Finding(
@@ -150,6 +152,28 @@ def check(cfg) -> list[Finding]:
             f"first loser, so the limit is really a one-trade-a-day rule.",
             f"Raise risk.daily_loss_limit above ${risk_per_trade:,.2f} to allow "
             f"more than one attempt, or cut risk.max_capital_deployed_pct."))
+
+    # 4b. Can the scale-out rule ever run? Half of one contract is not a
+    #     thing, so a budget that only ever funds a single contract makes the
+    #     "exit 50% at +40%, trail the rest" rule quietly inert — the position
+    #     closes whole at the first target and the runner never exists.
+    if min_delta >= 0.40:
+        costs = [c for c in (_atm_cost(sym, int(cfg.get("contracts.min_dte", 7)),
+                                       multiplier) for sym in cfg.symbols)
+                 if c is not None and c <= budget]
+        if costs and budget / min(costs) < 2:
+            cheapest = min(costs)
+            findings.append(Finding(
+                "warning", "risk.take_profit_1_size_pct",
+                f"A ${budget:,.0f} budget buys one contract at "
+                f"${cheapest:,.0f}, and half a contract does not exist. The "
+                f"scale-out closes the whole position at the first target, so "
+                f"the +{cfg.get('risk.take_profit_2_pct', 70)}% target and the "
+                f"EMA trail never come into play.",
+                f"About ${cheapest * 2 / (deployed_pct / 100.0):,.0f} of "
+                f"capital funds two contracts on the cheapest name, which is "
+                f"what the scale-out rule needs. Until then the trade is "
+                f"all-or-nothing at +{cfg.get('risk.take_profit_1_pct', 40)}%."))
 
     # 5. Is the risk per trade far outside what the stated rules imply?
     real_risk_pct = deployed_pct * stop_pct / 100.0

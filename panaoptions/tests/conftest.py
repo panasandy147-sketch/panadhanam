@@ -9,10 +9,21 @@ sys.path.insert(0, str(ROOT))
 
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
+    """The shipped config, isolated from this machine.
+
+    A real .env in the working copy must not reach the tests. If it does, the
+    suite passes or fails according to a file that is not in the repository —
+    so it would pass here and fail in CI, or worse, pass in CI and hide a
+    break that only shows up on the developer's machine.
+    """
     from panaoptions import config as config_mod
+
     monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path / "data")
-    c = config_mod.Config()
-    return c
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    for key in ("PANAOPTIONS_CAPITAL", "DISCORD_WEBHOOK_URL",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(key, raising=False)
+    return config_mod.Config()
 
 
 @pytest.fixture

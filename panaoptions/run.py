@@ -147,6 +147,39 @@ async def _explain_contracts() -> None:
         print("       most of the edge. Not recommended.\n")
 
 
+def _set_env(assignments: list[str]) -> int:
+    """Write settings into .env, which survives a restart.
+
+    An environment variable exported in a shell lasts until that shell closes.
+    Setting capital that way works once and then silently reverts, taking the
+    desk back to refusing every trade with no visible change in config.
+    """
+    from panaoptions.config import ENV_PATH, ROOT
+    from panaoptions.envfile import mask, parse_assignment, write
+
+    try:
+        updates = dict(parse_assignment(a) for a in assignments)
+    except ValueError as exc:
+        print(f"\n  {exc}\n\n  Expected: --set KEY=VALUE\n")
+        return 2
+
+    existed = ENV_PATH.exists()
+    if not existed and (ROOT / ".env.example").exists():
+        ENV_PATH.write_text((ROOT / ".env.example").read_text(encoding="utf-8"),
+                            encoding="utf-8")
+
+    outcome = write(ENV_PATH, updates)
+    print(f"\n=== {ENV_PATH} ===")
+    if not existed:
+        print("  created from .env.example")
+    for key, value in updates.items():
+        print(f"  {key:<24} {mask(key, value):<20} ({outcome[key]})")
+
+    print("\n  Re-checking whether every rule can hold...\n")
+    get_config().reload()
+    return _check_config()
+
+
 def _check_config() -> int:
     """Can every rule hold at once? Run this after changing any of them."""
     from panaoptions import preflight
@@ -309,10 +342,17 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="verify the data feed")
     parser.add_argument("--check-config", action="store_true",
                         help="can all the rules hold at once?")
+    # action="extend" matters: with a plain nargs="+" argparse keeps only the
+    # LAST --set on the line and silently drops the rest.
+    parser.add_argument("--set", nargs="+", action="extend", metavar="KEY=VALUE",
+                        dest="set_env",
+                        help="write settings into .env; repeatable")
     parser.add_argument("--interval", type=int, default=60,
                         help="seconds between cycles (default 60)")
     args = parser.parse_args()
 
+    if args.set_env:
+        raise SystemExit(_set_env(args.set_env))
     if args.check_config:
         raise SystemExit(_check_config())
     if args.check:

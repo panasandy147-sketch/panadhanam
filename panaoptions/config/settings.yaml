@@ -88,7 +88,16 @@ risk:
   trail_on_ema: true
   breakeven_after_tp1: true
   # Halt for the rest of the day at this cumulative loss.
-  daily_loss_limit: 50.0
+  #
+  # Expressed as a PERCENTAGE so it tracks the account. The brief states the
+  # rule as "-$50, which is 10% of total capital" — $50 was the instance at
+  # $500, not the rule. Pinning the dollar figure means that raising capital
+  # to $2,000 leaves a limit smaller than a single stop-out, so the breaker
+  # trips on the first loser and the desk is really a one-trade-a-day rule
+  # without ever saying so.
+  daily_loss_limit_pct: 10.0
+  # Set this to a number to override the percentage with a fixed amount.
+  daily_loss_limit: null
   # Simulated fill cost per contract, per side.
   slippage_per_contract: 0.02
 

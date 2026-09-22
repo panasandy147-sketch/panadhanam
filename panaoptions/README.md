@@ -45,8 +45,18 @@ from the contract filter to the risk manager. Two ways to resolve it:
 20% rule; $1,600 reaches the cheapest.
 
 ```bash
-PANAOPTIONS_CAPITAL=2000 python run.py      # or edit account.starting_capital
+python run.py --set PANAOPTIONS_CAPITAL=2000
 ```
+
+That writes `.env`, which is untracked and survives a restart. An environment
+variable exported in a shell lasts only until that shell closes — set it that
+way and it reverts on the next launch, taking the desk back to refusing every
+trade with no visible change in configuration.
+
+At $2,000 the desk trades, with one thing to know: a $400 budget buys **one**
+AAPL contract, and half a contract does not exist — so the position closes
+whole at +40% and the scale-out never engages. `--check-config` says so, and
+names the capital (~$3,200) that funds two.
 
 **B. Keep $500 and trade names it can afford.** Swap
 `universe.small_account_alternative` into `universe.symbols` — liquid tickers
@@ -93,6 +103,7 @@ hidden one: both numbers print on every signal and in `--status`.
 cd panaoptions
 pip install -r requirements.txt
 python run.py --check-config   # can every rule hold at once?   <- start here
+python run.py --set PANAOPTIONS_CAPITAL=2000   # per-machine, survives a restart
 python run.py --check          # is the data feed reachable?
 python run.py --screen         # what passes the pre-market filter?
 python run.py --explain-contracts
@@ -118,8 +129,14 @@ because Yahoo does not serve greeks.
 
 **Risk** — one trade at a time; 20% hard stop on the contract; scale 50% out at
 +40% and move the stop to breakeven; +70% or a 9-EMA trail for the rest; a
-−$50 daily circuit breaker that **latches** (winning it back is exactly the
-impulse it exists to stop).
+daily circuit breaker at **10% of capital** that **latches** (winning it back
+is exactly the impulse it exists to stop).
+
+The breaker is a percentage, not a dollar figure. The brief states the rule as
+"−$50, which is 10% of total capital" — $50 was the instance at $500, not the
+rule. Pinned to dollars, raising capital to $2,000 would leave a limit smaller
+than a single $80 stop-out, so the breaker would trip on the first loser and
+the desk would quietly become one-trade-a-day.
 
 **Session** — entries 09:35–10:30 ET only. Stops tighten to breakeven at
 10:45. Everything is squared off by 15:45.

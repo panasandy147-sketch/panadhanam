@@ -126,3 +126,21 @@ def test_every_finding_carries_a_fix_not_just_a_complaint(cfg):
         assert finding.fix and len(finding.fix) > 20
         assert finding.setting
         assert "[BLOCKER]" in finding.render() or "[warning]" in finding.render()
+
+
+def test_a_single_contract_budget_flags_the_scale_out_as_inert(cfg):
+    # Half of one contract does not exist, so "exit 50% at +40%" closes the
+    # whole position and the runner never exists. A rule that silently does
+    # nothing is the same failure as a rule that never fires.
+    _settings(cfg, account__starting_capital=2000.0)
+    warnings = [f for f in check(cfg) if f.level == "warning"]
+
+    caught = next(f for f in warnings if "take_profit_1_size_pct" in f.setting)
+    assert "half a contract does not exist" in caught.problem
+    assert "funds two contracts" in caught.fix
+
+
+def test_a_budget_that_funds_two_contracts_does_not_flag_it(cfg):
+    _settings(cfg, account__starting_capital=6000.0)
+    warnings = [f for f in check(cfg) if f.level == "warning"]
+    assert not any("take_profit_1_size_pct" in f.setting for f in warnings)
