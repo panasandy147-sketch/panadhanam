@@ -221,10 +221,23 @@ function applyStatus(s) {
   state.status = s;
   if (s.market && s.market.code !== state.market?.code) applyMarket(s.market);
   renderMarketClock();
+  // Three states, not two. A paper broker with auto_place_orders on really
+  // does place orders — simulated ones — and calling that "alert-only" told
+  // people nothing would be sent while the desk was filling positions.
   const live = s.live_orders && s.auto_place_orders;
+  const simulating = !live && s.auto_place_orders;
   const modeBadge = $("mode-badge");
-  modeBadge.textContent = live ? "LIVE ORDERS" : "PAPER / ALERT-ONLY";
-  modeBadge.className = "badge " + (live ? "live" : "paper");
+  modeBadge.textContent = live ? "LIVE ORDERS"
+    : simulating ? "PAPER ORDERS ON"
+    : "ALERT ONLY (no orders)";
+  modeBadge.className = "badge " + (live ? "live" : simulating ? "ok" : "paper");
+  modeBadge.title = live
+    ? "Approved signals become REAL orders. Real money is at risk."
+    : simulating
+      ? "Approved signals become simulated orders on the paper broker — but "
+        + "only on a day you have armed with Start trading day."
+      : "The desk analyses and alerts. Nothing is sent to any broker. "
+        + "Set AUTO_PLACE_ORDERS=true in .env to change that.";
 
   $("phase-badge").textContent = s.phase;
   $("phase-badge").className = "badge " + (s.phase === "open" ? "ok" : "");

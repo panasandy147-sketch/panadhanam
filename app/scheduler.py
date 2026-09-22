@@ -397,4 +397,9 @@ class TradingEngine:
             "trading_mode": self.cfg.trading_mode,
             "live_orders": self.cfg.live_orders_enabled,
             "auto_place_orders": self.cfg.get("execution.auto_place_orders", False),
+            # A paper broker with auto_place_orders on DOES place orders — they
+            # are simulated. Without this the dashboard cannot tell that state
+            # from true alert-only, and both read as "nothing will be sent".
+            "is_paper_account": getattr(self.broker, "is_paper_account", True),
+            "armed": self.trading_day.armed if self.trading_day else False,
         }

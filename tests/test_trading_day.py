@@ -169,3 +169,27 @@ def test_yaml_still_decides_when_env_says_nothing(cfg, monkeypatch):
     cfg.reload()
     assert cfg.get("execution.auto_place_orders") is False, \
         "the shipped default must stay alert-only"
+
+
+# --------------------------------------------------------------------------- #
+# The header badge has three states to describe, not two.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_status_distinguishes_simulated_orders_from_alert_only(engine, cfg):
+    # auto_place_orders on + a paper broker means orders ARE placed, simulated.
+    # Reporting that as alert-only told people nothing would be sent while the
+    # desk was filling positions.
+    cfg.settings["execution"]["auto_place_orders"] = True
+    status = engine.status()
+
+    assert status["auto_place_orders"] is True
+    assert status["live_orders"] is False, "no real-money switches are set"
+    assert status["is_paper_account"] is True, \
+        "the dashboard needs this to tell simulated orders from no orders"
+
+
+@pytest.mark.asyncio
+async def test_status_reports_whether_today_is_armed(engine):
+    assert engine.status()["armed"] is False
+    await engine.trading_day.start()
+    assert engine.status()["armed"] is True
