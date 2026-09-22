@@ -262,6 +262,12 @@ def _check_config() -> int:
         print(f"  {len(blockers)} blocker(s). The desk will scan and take nothing\n"
               "  until these are resolved — which looks exactly like a quiet\n"
               "  market, so fix them before you judge the strategy.\n")
+        commands = [f.command for f in blockers if f.command]
+        if commands:
+            print("  The short version:\n")
+            for command in commands:
+                print(f"      {command}")
+            print()
         return 1
     print("  Warnings only — the desk will trade.\n")
     return 0

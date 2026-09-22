@@ -26,10 +26,12 @@ fi
 
 echo "- Using $PY"
 echo
+# --check-config prints the command that resolves each blocker, so there is
+# nothing to add here beyond saying why nothing started.
 "$PY" run.py --check-config || {
   echo
-  echo "[!] The configuration has a blocker. The desk would scan and take"
-  echo "    nothing, so it is not being started. Fix the above, then re-run."
+  echo "[!] Not starting: the desk would scan all morning and take nothing."
+  echo "    Run the command above, then ./start.sh again."
   exit 1
 }
 

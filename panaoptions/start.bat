@@ -29,8 +29,8 @@ echo.
 "%PY%" run.py --check-config
 if errorlevel 1 (
   echo.
-  echo [!] The configuration has a blocker. The desk would scan and take
-  echo     nothing, so it is not being started. Fix the above, then re-run.
+  echo [!] Not starting: the desk would scan all morning and take nothing.
+  echo     Run the command shown above, then start.bat again.
   echo.
   pause
   exit /b 1

@@ -13,7 +13,9 @@ setting, the number that makes it impossible, and what would fix it.
 from __future__ import annotations
 
 import math
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from panaoptions.data.greeks import atm_premium_estimate
 from panaoptions.logging import get_logger
@@ -41,12 +43,36 @@ class Finding:
     setting: str
     problem: str
     fix: str
+    # A literal command that resolves this, when one exists. Describing a fix
+    # in prose still leaves somebody working out what to type, and "set
+    # PANAOPTIONS_CAPITAL in the environment" is not a command you can paste.
+    command: str = ""
 
     def render(self) -> str:
         mark = "BLOCKER" if self.level == "blocker" else "warning"
-        return (f"  [{mark}] {self.setting}\n"
-                f"      {self.problem}\n"
-                f"      Fix: {self.fix}")
+        out = (f"  [{mark}] {self.setting}\n"
+               f"      {self.problem}\n"
+               f"      Fix: {self.fix}")
+        if self.command:
+            out += f"\n\n      Run this:\n          {self.command}"
+        return out
+
+
+def _python() -> str:
+    """How to invoke this project's Python, written the way it must be typed.
+
+    A bare `python` on Windows is the Microsoft Store build and has none of
+    the packages, so a suggested command that starts with `python` sends
+    people straight back to a ModuleNotFoundError.
+    """
+    here = Path(__file__).resolve().parent.parent
+    windows = sys.platform.startswith("win")
+    folder, exe = ("Scripts", "python.exe") if windows else ("bin", "python")
+    sep = "\\" if windows else "/"
+    for base, label in ((here, "."), (here.parent, "..")):
+        if (base / ".venv" / folder / exe).exists():
+            return f"{label}{sep}.venv{sep}{folder}{sep}{exe}"
+    return "python"
 
 
 def _atm_cost(symbol: str, dte: int, multiplier: int) -> float | None:
@@ -121,22 +147,25 @@ def check(cfg) -> list[Finding]:
             fits = [s for s in alternative
                     if (_atm_cost(s, int(cfg.get("contracts.min_dte", 7)),
                                   multiplier) or 1e9) <= budget]
-            fix = (f"Either raise account.starting_capital to about "
-                   f"${cheapest / (deployed_pct / 100.0):,.0f} (or set "
-                   f"PANAOPTIONS_CAPITAL in the environment)")
+            # Round up to a tidy figure — nobody sets capital to $1,593.
+            needed = cheapest / (deployed_pct / 100.0)
+            suggested = int(math.ceil(needed / 500.0) * 500)
+
+            fix = (f"Either raise capital to about ${needed:,.0f}, or keep "
+                   f"${capital:,.0f} and change universe.symbols")
             if fits:
-                fix += (f", or keep ${capital:,.0f} and change universe.symbols "
-                        f"to names this account can actually buy at the money: "
+                fix += (f" to names this account can actually buy at the money: "
                         f"{', '.join(fits)}.")
             else:
-                fix += "."
+                fix += " to cheaper underlyings."
             findings.append(Finding(
                 "blocker", "account.starting_capital",
                 f"The cheapest at-the-money contract in this universe costs "
                 f"about ${cheapest:,.0f}, and {deployed_pct:.0f}% of "
                 f"${capital:,.0f} is ${budget:,.0f}. No symbol on the "
                 f"watchlist is tradeable at this account size.",
-                fix))
+                fix,
+                command=f"{_python()} run.py --set PANAOPTIONS_CAPITAL={suggested}"))
 
     # 4. Would a single stop-out blow more than the whole day's budget?
     stop_pct = float(cfg.get("risk.stop_loss_pct", 20.0))

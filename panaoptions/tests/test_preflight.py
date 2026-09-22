@@ -32,7 +32,7 @@ def test_the_message_names_the_capital_actually_needed(cfg):
     blocker = next(f for f in _blockers(cfg) if "capital" in f.setting)
     # 20% of X must cover the ~$319 cheapest ATM contract.
     assert "$1,59" in blocker.fix or "$1,6" in blocker.fix
-    assert "PANAOPTIONS_CAPITAL" in blocker.fix
+    assert "PANAOPTIONS_CAPITAL" in blocker.command
 
 
 def test_the_message_offers_the_cheaper_universe_as_the_other_way_out(cfg):
@@ -144,3 +144,37 @@ def test_a_budget_that_funds_two_contracts_does_not_flag_it(cfg):
     _settings(cfg, account__starting_capital=6000.0)
     warnings = [f for f in check(cfg) if f.level == "warning"]
     assert not any("take_profit_1_size_pct" in f.setting for f in warnings)
+
+
+def test_a_blocker_carries_a_command_you_can_actually_paste(cfg):
+    # "set PANAOPTIONS_CAPITAL in the environment" is not something you can
+    # type. Twice now the fix was understood and the command still had to be
+    # worked out, so the finding carries one.
+    blocker = next(f for f in _blockers(cfg) if "capital" in f.setting)
+
+    assert blocker.command
+    assert "run.py --set PANAOPTIONS_CAPITAL=" in blocker.command
+    assert "Run this:" in blocker.render()
+
+
+def test_the_suggested_command_names_a_real_interpreter_not_bare_python(cfg):
+    # A bare `python` on Windows is the Microsoft Store build with none of the
+    # packages, so suggesting it sends people back to ModuleNotFoundError.
+    blocker = next(f for f in _blockers(cfg) if "capital" in f.setting)
+    assert ".venv" in blocker.command or blocker.command.startswith("python ")
+
+
+def test_the_suggested_capital_is_a_round_number(cfg):
+    # Nobody sets their account size to $1,593.
+    blocker = next(f for f in _blockers(cfg) if "capital" in f.setting)
+    amount = int(blocker.command.rsplit("=", 1)[1])
+
+    assert amount % 500 == 0
+    assert amount >= 1593, "rounding must go up, or it still will not fit"
+
+
+def test_a_warning_needs_no_command(cfg):
+    _settings(cfg, account__starting_capital=2000.0)
+    for finding in check(cfg):
+        if finding.level == "warning":
+            assert not finding.command
