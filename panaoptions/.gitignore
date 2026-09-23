@@ -3,6 +3,8 @@ data/*.db-wal
 data/*.db-shm
 data/*.csv
 data/models/
+# Whoever is running the desk picked these; they are not the project's.
+data/watchlist.json
 __pycache__/
 *.pyc
 .env

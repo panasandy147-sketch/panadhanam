@@ -233,6 +233,13 @@ risk:
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.
   max_capital_deployed_pct: 20.0
+
+  # The ceiling on ALL open positions together. With max_open_trades at 1
+  # this is the same rule as the line above; the moment a watchlist makes
+  # several symbols live at once it is not, because three trades at 20% each
+  # satisfy the per-trade cap every time and deploy 60% of the account.
+  # Unset, it falls back to the per-trade budget rather than to "no limit".
+  max_total_deployed_pct: 20.0
   # Hard stop on the contract price itself.
   stop_loss_pct: 20.0
   # So the real risk per trade is 20% of 20% = 4% of the account. The app

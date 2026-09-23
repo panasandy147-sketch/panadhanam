@@ -34,6 +34,26 @@
     <div class="tiles" id="account-tiles"></div>
   </section>
 
+  <!-- What to scan. The only control on this page that changes the desk,
+       and it chooses what to LOOK at — never what to buy. -->
+  <section class="wide">
+    <h2>Watchlist <span class="count" id="watch-meta"></span></h2>
+    <div class="toolbar">
+      <input type="text" id="watch-input" spellcheck="false"
+             placeholder="QQQ, SPY, AAPL, NVDA"
+             aria-label="Tickers to scan, separated by commas">
+      <button id="btn-watch">Scan these</button>
+      <button id="btn-watch-reset" class="ghost">Reset to config</button>
+      <span id="watch-status"></span>
+    </div>
+    <div class="empty">
+      Every enabled strategy runs against every symbol here, each cycle, and
+      takes paper trades when the rules agree. Changing this changes what the
+      desk looks at — it cannot open or close a position, and anything already
+      open keeps its own exit rules.
+    </div>
+  </section>
+
   <!-- The live candidate: what the desk is on, and why it would buy it. -->
   <section class="wide" id="s-candidate">
     <h2>Live candidate <span class="count" id="cand-meta"></span></h2>

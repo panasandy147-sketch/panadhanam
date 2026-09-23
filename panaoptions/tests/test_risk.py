@@ -28,6 +28,15 @@ def _contract(mid=0.80):
                           delta=0.18)
 
 
+TS = datetime(2026, 9, 22, 9, 40)
+
+
+def _a_setup():
+    return Setup(symbol="AAPL", ts=TS, direction=Direction.LONG,
+                 pattern="Hammer", indicators=Indicators(close=230.0),
+                 underlying_support=229.0)
+
+
 def _size(risk, setup, mid=0.80):
     return risk.size(setup, _contract(mid), "S1", datetime(2026, 9, 22, 9, 40))
 
@@ -183,3 +192,76 @@ def test_the_breaker_still_latches_at_the_scaled_limit(cfg):
     assert risk.state.halted
     assert "-210.00" in risk.state.halt_reason
     assert "-200.00 limit" in risk.state.halt_reason
+
+
+# --------------------------------------------------------------------------- #
+# Total exposure, once more than one position can be open
+# --------------------------------------------------------------------------- #
+def test_the_per_trade_cap_is_not_the_whole_rule(cfg):
+    """Three trades at 20% each is 60% deployed, and the per-trade cap is
+    satisfied every single time.
+
+    With one position allowed the two rules are the same rule. The moment a
+    watchlist makes several symbols live at once, they are not.
+    """
+    cfg.data["account"]["starting_capital"] = 10_000.0
+    cfg.data["risk"]["max_open_trades"] = 5
+    cfg.data["risk"]["max_capital_deployed_pct"] = 20.0
+    cfg.data["risk"]["max_total_deployed_pct"] = 40.0
+    risk = RiskManager(cfg)
+
+    contract = _contract(mid=2.00)
+    first, _ = risk.size(_a_setup(), contract, "S1", TS)
+    assert first is not None
+    risk.state.open_trades = 1
+    risk.state.deployed = first.cost(cfg.multiplier)
+
+    second, _ = risk.size(_a_setup(), contract, "S2", TS)
+    assert second is not None
+    risk.state.open_trades = 2
+    risk.state.deployed += second.cost(cfg.multiplier)
+
+    # Two at 20% is the 40% ceiling. The third is refused even though it
+    # passes the per-trade rule on its own.
+    third, refusal = risk.size(_a_setup(), contract, "S3", TS)
+    assert third is None
+    assert "already at work" in refusal
+    assert "40%" in refusal
+
+
+def test_the_ceiling_defaults_to_the_per_trade_budget(cfg):
+    """Unset, the total cap must not be looser than the per-trade one.
+
+    A missing key defaulting to "no limit" would silently remove the ceiling
+    for anyone who upgrades without editing their config.
+    """
+    cfg.data["account"]["starting_capital"] = 10_000.0
+    cfg.data["risk"]["max_open_trades"] = 5
+    cfg.data["risk"]["max_capital_deployed_pct"] = 20.0
+    cfg.data["risk"].pop("max_total_deployed_pct", None)
+    risk = RiskManager(cfg)
+
+    first, _ = risk.size(_a_setup(), _contract(mid=2.00), "S1", TS)
+    assert first is not None
+    risk.state.open_trades = 1
+    risk.state.deployed = first.cost(cfg.multiplier)
+
+    second, refusal = risk.size(_a_setup(), _contract(mid=2.00), "S2", TS)
+    assert second is None and "already at work" in refusal
+
+
+def test_a_partial_position_still_fits_under_the_ceiling(cfg):
+    """Room for two contracts but not four should buy two, not refuse."""
+    cfg.data["account"]["starting_capital"] = 10_000.0
+    cfg.data["risk"]["max_open_trades"] = 5
+    cfg.data["risk"]["max_capital_deployed_pct"] = 20.0
+    cfg.data["risk"]["max_total_deployed_pct"] = 30.0
+    risk = RiskManager(cfg)
+    risk.state.open_trades = 1
+    risk.state.deployed = 2_000.0          # 20% already at work
+
+    signal, refusal = risk.size(_a_setup(), _contract(mid=2.00), "S2", TS)
+    assert signal is not None, refusal
+    # $1,000 of room left, $200 a contract → five, not the ten the per-trade
+    # budget alone would have allowed.
+    assert signal.cost(cfg.multiplier) <= 1_000.0

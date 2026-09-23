@@ -19,6 +19,65 @@ async function getJSON(url) {
   return res.json();
 }
 
+/* The server's refusals are written for a person to read, so show the
+   message it sent rather than a status code. */
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {}),
+  });
+  let payload = null;
+  try { payload = await res.json(); } catch { /* no body */ }
+  if (!res.ok) throw new Error(payload?.detail || `${url} → ${res.status}`);
+  return payload;
+}
+
+/* ------------------------------------------------------------------ */
+/* The watchlist: what the desk looks at. Never what it buys. */
+function renderWatchlist(d) {
+  const symbols = d.symbols || [];
+  $("watch-meta").textContent =
+    `${symbols.length} symbol${symbols.length === 1 ? "" : "s"}` +
+    (d.source === "custom" ? " · yours" : " · from settings.yaml");
+  const box = $("watch-input");
+  /* Do not overwrite what somebody is part-way through typing. */
+  if (document.activeElement !== box) box.value = symbols.join(", ");
+}
+
+function watchStatus(text, level) {
+  const el = $("watch-status");
+  el.textContent = text;
+  el.className = level || "";
+}
+
+async function saveWatchlist() {
+  const btn = $("btn-watch");
+  btn.disabled = true;
+  watchStatus("Saving…");
+  try {
+    const d = await postJSON("/api/watchlist", {symbols: $("watch-input").value});
+    renderWatchlist(d);
+    watchStatus(`Scanning ${d.symbols.length} from the next cycle.`, "good");
+    refreshActivity();
+  } catch (e) {
+    watchStatus(e.message, "bad");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resetWatchlist() {
+  watchStatus("Resetting…");
+  try {
+    renderWatchlist(await postJSON("/api/watchlist/reset", {}));
+    watchStatus("Back to the universe in settings.yaml.", "good");
+    refreshActivity();
+  } catch (e) {
+    watchStatus(e.message, "bad");
+  }
+}
+
 /* ------------------------------------------------------------------ */
 function renderConfig(c) {
   const blockers = c.blockers || [];
@@ -615,6 +674,14 @@ $("btn-daily").onclick = () => buildReview("day");
 $("btn-daily-md").onclick = () => {
   window.location.href = "/api/daily/download?format=md";
 };
+
+$("btn-watch").onclick = saveWatchlist;
+$("btn-watch-reset").onclick = resetWatchlist;
+$("watch-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveWatchlist();
+});
+
+getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
 
 refresh();
 refreshActivity();

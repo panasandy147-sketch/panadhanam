@@ -442,3 +442,73 @@ def test_a_decision_is_still_reachable_from_the_merged_stream(client):
         log.add("setup.pass", f"QQQ no setup {i}")
     kinds = [e["kind"] for e in client.get("/api/activity?limit=120").json()["events"]]
     assert "trade.open" in kinds
+
+
+# --------------------------------------------------------------------------- #
+# The watchlist endpoint
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def _watch_elsewhere(tmp_path, monkeypatch):
+    from panaoptions import watchlist as wl
+
+    monkeypatch.setattr(wl, "STORE", tmp_path / "watchlist.json")
+    return wl
+
+
+def test_the_watchlist_says_where_the_symbols_came_from(client,
+                                                        _watch_elsewhere):
+    body = client.get("/api/watchlist").json()
+    assert body["source"] == "config"
+    assert body["symbols"] == client.desk.cfg.symbols
+
+    client.post("/api/watchlist", json={"symbols": "QQQ, SPY"})
+    after = client.get("/api/watchlist").json()
+    assert after["source"] == "custom" and after["symbols"] == ["QQQ", "SPY"]
+
+
+def test_a_bad_list_comes_back_as_a_message_not_a_stack_trace(client,
+                                                              _watch_elsewhere):
+    res = client.post("/api/watchlist", json={"symbols": "QQQ, ticker!"})
+    assert res.status_code == 400
+    assert "TICKER!" in res.json()["detail"]
+    # And nothing changed.
+    assert client.get("/api/watchlist").json()["source"] == "config"
+
+
+def test_setting_the_watchlist_cannot_open_a_position(client, _watch_elsewhere):
+    """The line this feature must not cross.
+
+    Choosing what to look at is not choosing what to buy. Every rule still
+    has to agree, and the dashboard has no way to make one.
+    """
+    before = dict(client.desk.ledger.open_trades)
+    client.post("/api/watchlist", json={"symbols": "QQQ, SPY, AAPL"})
+    assert client.desk.ledger.open_trades == before
+
+
+def test_a_watchlist_change_does_not_touch_an_open_position(client,
+                                                            _watch_elsewhere):
+    """Dropping a symbol stops NEW trades in it. It does not liquidate.
+
+    The open trade was taken under rules that still apply and its exit is
+    already defined; closing it because somebody edited a text box would be a
+    trading decision made by the dashboard.
+    """
+    client.post("/api/watchlist", json={"symbols": "QQQ"})
+    desk = client.desk
+    desk.ledger.open_trades["PT-X"] = object()
+    client.post("/api/watchlist", json={"symbols": "SPY"})
+    assert "PT-X" in desk.ledger.open_trades
+
+
+def test_the_reset_button_goes_back_to_the_config(client, _watch_elsewhere):
+    client.post("/api/watchlist", json={"symbols": "QQQ"})
+    body = client.post("/api/watchlist/reset").json()
+    assert body["source"] == "config"
+    assert client.get("/api/watchlist").json()["source"] == "config"
+
+
+def test_the_box_is_on_the_page(client):
+    page = client.get("/").text
+    assert 'id="watch-input"' in page
+    assert "cannot open or close a position" in page

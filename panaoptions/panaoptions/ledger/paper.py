@@ -58,6 +58,7 @@ class PaperLedger:
 
         self.open_trades[trade.id] = trade
         self.risk.state.open_trades = len(self.open_trades)
+        self.risk.state.deployed = self._deployed()
         self.risk.state.trades_taken += 1
         log.info("OPEN %s x%d @ %.2f (stop %.2f, TP1 %.2f, TP2 %.2f)",
                  trade.contract_label, trade.quantity, fill_price,
@@ -211,6 +212,16 @@ class PaperLedger:
         return out
 
     # ------------------------------------------------------------------ #
+    def _deployed(self) -> float:
+        """Capital at work right now, at entry cost.
+
+        Entry cost rather than mark: the ceiling is about how much was
+        committed, and a position marking up should not unlock room to take
+        another one on the strength of a gain that has not been realised.
+        """
+        return round(sum(t.entry_price * t.remaining * self.cfg.multiplier
+                         for t in self.open_trades.values()), 2)
+
     def _reduce(self, trade: PaperTrade, quantity: int, price: float,
                 ts: datetime, reason: str) -> Fill:
         fill_price = round(price - self.slippage, 4)
@@ -218,6 +229,8 @@ class PaperLedger:
                     * self.cfg.multiplier, 2)
         trade.remaining -= quantity
         trade.realised_pnl = round(trade.realised_pnl + pnl, 2)
+        # Scaling out releases capital, so the ceiling must see it go back.
+        self.risk.state.deployed = self._deployed()
         trade.fills.append(Fill(ts=ts, quantity=-quantity, price=fill_price,
                                 reason=reason))
         self.risk.record_pnl(pnl)
@@ -231,6 +244,7 @@ class PaperLedger:
         self.open_trades.pop(trade.id, None)
         self.closed.append(trade)
         self.risk.state.open_trades = len(self.open_trades)
+        self.risk.state.deployed = self._deployed()
         log.info("CLOSE %s @ %.2f (%s) — trade P&L %+.2f",
                  trade.contract_label, fill.price, reason.value,
                  trade.realised_pnl)

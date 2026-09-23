@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from panaoptions import clock
+from panaoptions import clock, watchlist
 from panaoptions.activity import ActivityLog
 from panaoptions.config import Config, get_config
 from panaoptions.data.feed import YahooFeed
@@ -61,6 +61,54 @@ class OptionsDesk:
         self.scanning: str = ""
         self.candidate: dict[str, Any] | None = None
         self._predictor: Any = None
+        # A watchlist saved from the dashboard wins over the config universe.
+        # Applied at construction so a restart keeps scanning what was asked
+        # for rather than quietly reverting to the shipped list.
+        saved = watchlist.load()
+        if saved:
+            self.cfg.data.setdefault("universe", {})["symbols"] = list(saved)
+            log.info("watchlist in force: %s", ", ".join(saved))
+
+    # ------------------------------------------------------------------ #
+    def set_universe(self, symbols: list[str]) -> list[str]:
+        """Change what the desk scans, now, without a restart.
+
+        Open positions are left alone on purpose: they were opened under rules
+        that still apply, and their exits are already defined. Dropping a
+        symbol stops the desk looking for NEW trades in it — it does not
+        liquidate what is already on, because a watchlist edit is not a
+        trading decision and must not become one by accident.
+        """
+        self.cfg.data.setdefault("universe", {})["symbols"] = list(symbols)
+        watchlist.save(symbols)
+        # Force a re-screen on the next cycle rather than waiting for
+        # tomorrow: the point of typing a symbol is to have it looked at.
+        self._screened_on = ""
+        self._screened_at = None
+        self.screened = []
+        self._levels = {}
+        self._levels_on = ""
+        self.activity.add(
+            "watchlist",
+            f"now scanning {len(symbols)}: {', '.join(symbols)}"
+            + (f" — {len(self.ledger.open_trades)} open position(s) left "
+               f"to their own exit rules" if self.ledger.open_trades else ""),
+            level="good")
+        log.info("watchlist set: %s", ", ".join(symbols))
+        return symbols
+
+    def reset_universe(self) -> list[str]:
+        """Back to `universe.symbols` from the config file."""
+        watchlist.clear()
+        self.cfg.reload()
+        symbols = self.cfg.symbols
+        self._screened_on = ""
+        self._screened_at = None
+        self.screened = []
+        self.activity.add("watchlist",
+                          f"back to the config universe: {', '.join(symbols)}",
+                          level="info")
+        return symbols
 
     # ------------------------------------------------------------------ #
     async def start(self, cycle_seconds: int = 60) -> None:

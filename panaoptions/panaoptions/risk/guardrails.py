@@ -35,6 +35,10 @@ class DayState:
     wins: int = 0
     losses: int = 0
     open_trades: int = 0
+    # Capital currently at work across every open position. Held here rather
+    # than recomputed, because the sizing rule has to see the total before it
+    # agrees to add to it.
+    deployed: float = 0.0
     halted: bool = False
     halt_reason: str = ""
     rejections: dict[str, int] = field(default_factory=dict)
@@ -120,6 +124,24 @@ class RiskManager:
 
         deployed_pct = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
         budget = self.capital * deployed_pct / 100.0
+
+        # The per-trade budget is not the whole rule once more than one
+        # position can be open. Three trades at 20% each is 60% of the account
+        # deployed with nothing having said so — the per-trade cap is satisfied
+        # every time. This is the cap on the total.
+        total_pct = float(self.cfg.get("risk.max_total_deployed_pct",
+                                       deployed_pct))
+        room = self.capital * total_pct / 100.0 - self.state.deployed
+        if room < cost_per_contract:
+            return self._reject(
+                f"${self.state.deployed:,.2f} is already at work across "
+                f"{self.state.open_trades} position(s), and the ceiling is "
+                f"{total_pct:.0f}% of ${self.capital:,.2f} "
+                f"(${self.capital * total_pct / 100:,.2f}). One "
+                f"{contract.label} costs ${cost_per_contract:,.2f} and there "
+                f"is ${max(room, 0):,.2f} of room.")
+        budget = min(budget, room)
+
         quantity = int(budget // cost_per_contract)
         if quantity < 1:
             return self._reject(
@@ -200,6 +222,10 @@ class RiskManager:
             "wins": self.state.wins,
             "losses": self.state.losses,
             "open_trades": self.state.open_trades,
+            "deployed": round(self.state.deployed, 2),
+            "max_total_deployed_pct": float(self.cfg.get(
+                "risk.max_total_deployed_pct",
+                self.cfg.get("risk.max_capital_deployed_pct", 20.0))),
             "halted": self.state.halted,
             "halt_reason": self.state.halt_reason,
         }

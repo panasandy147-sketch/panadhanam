@@ -169,6 +169,43 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
             "phase": clock.session_phase(cfg, clock.now(cfg.timezone)),
         }
 
+    # ---------------------------------------------------------------- #
+    # The watchlist. This is the ONE thing on the dashboard that changes what
+    # the desk does, and the line it does not cross matters: it chooses what
+    # to LOOK at. It cannot open, size or close a position — every rule still
+    # has to agree before anything is bought, and there is a test that the
+    # dashboard has no endpoint which can trade.
+    @app.get("/api/watchlist")
+    async def get_watchlist() -> dict[str, Any]:
+        from panaoptions import watchlist as wl
+
+        saved = wl.load()
+        return {
+            "symbols": cfg.symbols,
+            "source": "custom" if saved else "config",
+            "config_symbols": list(
+                (cfg.get("universe", {}) or {}).get("symbols", [])),
+            "max": wl.MAX_SYMBOLS,
+        }
+
+    @app.post("/api/watchlist")
+    async def set_watchlist(body: dict[str, Any]) -> dict[str, Any]:
+        from panaoptions import watchlist as wl
+
+        try:
+            symbols = wl.parse(str(body.get("symbols", "")))
+        except wl.WatchlistError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        desk.set_universe(symbols)
+        return {"symbols": symbols, "source": "custom",
+                "note": "Scanning starts on the next cycle. Open positions "
+                        "keep their own exit rules."}
+
+    @app.post("/api/watchlist/reset")
+    async def reset_watchlist() -> dict[str, Any]:
+        symbols = desk.reset_universe()
+        return {"symbols": symbols, "source": "config"}
+
     @app.get("/api/activity")
     async def activity(limit: int = 60, decisions: bool = False
                        ) -> dict[str, Any]:

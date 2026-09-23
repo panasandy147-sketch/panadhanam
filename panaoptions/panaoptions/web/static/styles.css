@@ -202,6 +202,20 @@ footer { padding: 14px 18px 30px; color: var(--muted); font-size: 11.5px; text-a
   .log-row .d { grid-column: 1 / -1; padding-left: 62px; }
 }
 
+.toolbar input[type="text"] {
+  flex: 1 1 260px; min-width: 0; padding: 7px 10px;
+  font-family: var(--mono); font-size: 13px; letter-spacing: .03em;
+  color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.toolbar input[type="text"]:focus {
+  outline: none; border-color: var(--accent);
+}
+button.ghost { background: transparent; color: var(--muted); }
+button.ghost:hover { color: var(--text); }
+#watch-status.bad { color: var(--neg); }
+#watch-status.good { color: var(--pos); }
+
 /* A published figure sits next to a measured one and must not read as
    equally authoritative. */
 .muted { color: var(--muted); }

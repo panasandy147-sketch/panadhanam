@@ -80,9 +80,12 @@ contracts:
   max_contract_price: 5.00
 
 risk:
-  max_open_trades: 1
   # A scalp risks less per trade because it takes many more of them.
   max_capital_deployed_pct: 10.0
+  # Room for three names at once — a watchlist is pointless with one — while
+  # keeping total exposure to a third of the account.
+  max_open_trades: 3
+  max_total_deployed_pct: 30.0
   stop_mode: underlying
   # Tighter than the default 45%: a 0-DTE contract that has halved usually
   # does not come back inside the session.
