@@ -29,6 +29,17 @@ def _env_float(key: str) -> float | None:
         return None
 
 
+def _hhmm(value: str, default: int | None = 0) -> int | None:
+    """"HH:MM" as minutes past midnight, so times compare as numbers."""
+    hour, sep, minute = value.partition(":")
+    if not sep and not hour.strip():
+        return default
+    try:
+        return int(hour) * 60 + int(minute or 0)
+    except ValueError:
+        return default
+
+
 class Config:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or CONFIG_PATH
@@ -83,6 +94,32 @@ class Config:
     @property
     def multiplier(self) -> int:
         return int(self.get("contracts.contract_multiplier", 100))
+
+    @property
+    def last_entry_hhmm(self) -> str:
+        """The last moment of the day the desk may open a trade.
+
+        `session.entry_close` is the floor, not the answer. Every strategy also
+        carries its own window, and a strategy whose window runs past the
+        desk-wide close is dead config: enabled, in window by its own
+        reckoning, and never once asked. That is how a pullback strategy
+        configured 10:00-13:30 ends up with thirty live minutes.
+
+        So the desk hunts until the last enabled strategy shuts — and never
+        past the force-exit time, because a trade opened then has nowhere to
+        go but straight back out.
+        """
+        floor = _hhmm(str(self.get("session.entry_close", "10:30")))
+        latest = floor
+        for block in (self.get("strategies", {}) or {}).values():
+            if not isinstance(block, dict) or not block.get("enabled", True):
+                continue
+            end = _hhmm(str(block.get("to", "") or ""), default=None)
+            if end is not None and end > latest:
+                latest = end
+        ceiling = _hhmm(str(self.get("session.force_exit_at", "15:45")))
+        latest = min(latest, ceiling)
+        return f"{latest // 60:02d}:{latest % 60:02d}"
 
 
 _config: Config | None = None

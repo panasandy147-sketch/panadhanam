@@ -34,6 +34,31 @@
     <div class="tiles" id="account-tiles"></div>
   </section>
 
+  <!-- The live candidate: what the desk is on, and why it would buy it. -->
+  <section class="wide" id="s-candidate">
+    <h2>Live candidate <span class="count" id="cand-meta"></span></h2>
+    <div class="candidate">
+      <div class="candidate-chart">
+        <div class="chart-head">
+          <span id="cand-symbol">—</span>
+          <span id="cand-freshness"></span>
+        </div>
+        <div id="cand-chart"></div>
+        <div class="legend">
+          <span><i style="background:#4c8dff"></i>EMA 9</span>
+          <span><i style="background:#c77dff"></i>EMA 21</span>
+          <span><i style="background:#8b949e"></i>EMA 50</span>
+          <span><i style="background:#d29922"></i>VWAP</span>
+        </div>
+      </div>
+      <div class="candidate-why" id="cand-why">
+        <div class="empty">Nothing set up yet. When a strategy fires, the case
+          for the trade appears here — the pattern, the level it formed at, the
+          trigger, and what would kill it.</div>
+      </div>
+    </div>
+  </section>
+
   <section class="wide">
     <h2>Strategies <span class="count" id="strat-meta"></span></h2>
     <div id="strategies-body"><div class="empty">—</div></div>
@@ -100,7 +125,7 @@
     </div>
     <div id="weekly-body">
       <div class="empty">
-        The week&#39;s trades, which of the three strategies actually paid, what
+        The week&#39;s trades, which of the strategies actually paid, what
         indiscipline cost, and a coach&#39;s read. Best after Friday&#39;s close.
       </div>
     </div>
@@ -118,6 +143,7 @@
   Nothing on this page can place an order.
 </footer>
 
+<script src="/static/vendor-lightweight-charts.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

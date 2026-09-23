@@ -1,17 +1,17 @@
-"""The three entry strategies, each with its own session window and its own
+"""The four entry strategies, each with its own session window and its own
 invalidation level on the UNDERLYING.
 
-Why three rather than one general rule: a breakout and a pullback are not the
-same trade, they work at different times of day, and lumping them together
-makes the journal unable to answer "which of these actually pays". Every setup
-is tagged with the strategy that produced it.
+Why four rather than one general rule: a breakout, a pullback and a reversal
+at a level are not the same trade, they work at different times of day, and
+lumping them together makes the journal unable to answer "which of these
+actually pays". Every setup is tagged with the strategy that produced it.
 
 Why each carries an underlying invalidation rather than a premium percentage:
 a fixed -20% on the contract is at the mercy of an implied-volatility shift or
 a wide spread, and says nothing about whether the trade was wrong. The level
 below says exactly what "wrong" means for that entry.
 
-All three avoid the 09:30-09:45 opening chop, where spreads are widest and the
+They all avoid the 09:30-09:45 opening chop, where spreads are widest and the
 first prints are noise.
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from panaoptions.engine import indicators as ta
+from panaoptions.engine import levels as levels_mod
 from panaoptions.engine import patterns
 from panaoptions.logging import get_logger
 from panaoptions.models import Candle, Direction, SessionLevels, Setup, SetupType
@@ -355,3 +356,180 @@ def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
         if winner is None and setup.triggered:
             winner = setup
     return winner, attempts
+
+
+# --------------------------------------------------------------------------- #
+class CandlestickAtLevel(Strategy):
+    """Strategy 4 — a reversal candle, but only where one can mean something.
+
+    Seven patterns: Hammer, Bullish Engulfing, Morning Star, Tweezer Bottom
+    for calls; Shooting Star, Bearish Engulfing, Evening Star, Tweezer Top for
+    puts.
+
+    The pattern is the smaller half of the rule. The larger half is WHERE:
+    a hammer in the middle of a range is a bar with a wick, and trading it is
+    how people conclude candlesticks do not work. It must print at a level the
+    market has already turned at — a swing high or low, the pre-market extreme,
+    the opening range boundary, yesterday's close, VWAP or a moving average —
+    and `nearest_level` measures that in ATR so "at the level" means the same
+    on a quiet stock and a volatile one.
+
+    The pattern is also not the entry. Price must take out the trigger (the
+    high of a hammer, the low of a shooting star) before anything is bought,
+    and the stop is the structure that would prove it wrong.
+
+    Each pattern asks for its own contract. A hammer wants delta near the
+    money because it is a sharp reversal off a level; a morning star is a
+    slower structural turn and tolerates less. Those bands come from the
+    config, per pattern.
+    """
+
+    name = SetupType.CANDLESTICK_AT_LEVEL
+    window = ("09:45", "15:00")
+
+    # (min delta, max delta) per pattern, and how confident the structure is.
+    _DEFAULT_DELTA = {
+        "Hammer": (0.50, 0.65),
+        "Bullish Engulfing": (0.55, 0.70),
+        "Morning Star": (0.45, 0.55),
+        "Tweezer Bottom": (0.50, 0.65),
+        "Shooting Star": (0.50, 0.60),
+        "Bearish Engulfing": (0.55, 0.65),
+        "Evening Star": (0.45, 0.55),
+        "Tweezer Top": (0.50, 0.65),
+    }
+
+    def delta_band(self, pattern: str) -> tuple[float, float]:
+        configured = self.cfg.get(
+            f"strategies.candlestick_at_level.delta.{pattern.lower().replace(' ', '_')}")
+        if isinstance(configured, list | tuple) and len(configured) == 2:
+            return float(configured[0]), float(configured[1])
+        return self._DEFAULT_DELTA.get(pattern, (0.45, 0.60))
+
+    def evaluate(self, symbol, df5, df15, levels) -> Setup:
+        setup = _base(symbol, df5, self.name)
+        timeframe = str(self.cfg.get(
+            "strategies.candlestick_at_level.timeframe", "15m"))
+        # Patterns pay on the higher timeframes. A 5m hammer is mostly noise,
+        # which is why the default reads the 15m chart and enters on the 5m.
+        frame = df15 if timeframe == "15m" and df15 is not None and len(df15) >= 20 else df5
+        if len(frame) < 20:
+            setup.blockers.append(
+                f"only {len(frame)} {timeframe} bars — not enough to place a level")
+            return setup
+
+        # The entry is a break of the pattern's trigger, which happens on a
+        # LATER candle — so the pattern is allowed to be a bar or two back.
+        lookback = int(self.cfg.get(
+            "strategies.candlestick_at_level.trigger_within_bars", 2))
+        recent = patterns.detect_recent(frame, within=lookback)
+        if recent is None:
+            setup.blockers.append(
+                f"no reversal pattern on the last {lookback + 1} "
+                f"{timeframe} closes")
+            return setup
+        found, bars_ago = recent
+
+        snapshot = ta.compute(df5, self.cfg)
+        setup.indicators = snapshot
+
+        # --- the location gate ------------------------------------------- #
+        moving_averages = {"20 EMA": float(ta.ema(frame["close"], 20).iloc[-1]),
+                           "50 EMA": float(ta.ema(frame["close"], 50).iloc[-1])
+                           if len(frame) >= 50 else 0.0}
+        candidates = levels_mod.key_levels(frame, levels, snapshot.vwap,
+                                           moving_averages)
+        tolerance = float(self.cfg.get(
+            "strategies.candlestick_at_level.level_tolerance_atr", 0.5))
+        # Measure the level against the PATTERN's own extreme, not the latest
+        # bar's — the pattern is what formed at the level.
+        pattern_bar = frame.iloc[len(frame) - 1 - bars_ago]
+        anchor = float(pattern_bar["low"] if found.bullish
+                       else pattern_bar["high"])
+        level = levels_mod.nearest_level(anchor, candidates, snapshot.atr,
+                                         tolerance)
+
+        if level is None:
+            setup.blockers.append(
+                f"{found.name} printed, but not at a level — a reversal candle "
+                f"in the middle of a range is a bar with a wick")
+            return setup
+
+        wanted = "support" if found.bullish else "resistance"
+        if level.kind != wanted:
+            setup.blockers.append(
+                f"{found.name} is at {level.source} ({level.price:.2f}), which "
+                f"is {level.kind}, not {wanted}")
+            return setup
+
+        # --- the entry trigger -------------------------------------------- #
+        last_price = snapshot.close
+        triggered = (last_price > found.trigger if found.bullish
+                     else last_price < found.trigger)
+        if not triggered:
+            setup.blockers.append(
+                f"{found.name} at {level.source} — waiting for price to "
+                f"{'break above' if found.bullish else 'break below'} "
+                f"{found.trigger:.2f} (now {last_price:.2f})")
+            return setup
+
+        # --- confirmed ----------------------------------------------------- #
+        band = self.delta_band(found.name)
+        setup.direction = Direction.LONG if found.bullish else Direction.SHORT
+        setup.pattern = found.name
+        setup.trend_aligned = True
+        setup.entry_trigger = found.trigger
+        setup.key_level = level.price
+        setup.key_level_source = level.source
+        setup.delta_band = band
+        setup.min_dte_override = int(self.cfg.get(
+            "strategies.candlestick_at_level.min_dte", 14))
+        setup.max_dte_override = int(self.cfg.get(
+            "strategies.candlestick_at_level.max_dte", 30))
+        setup.underlying_support = found.invalidation
+        setup.invalidation_note = (
+            f"a close back through {found.invalidation:.2f} "
+            f"({'below' if found.bullish else 'above'} the "
+            f"{found.name.lower()})")
+
+        right = "CALL" if found.bullish else "PUT"
+        setup.confirmations = [
+            f"{found.name} on the {timeframe} close"
+            + (f", {bars_ago} bar{'s' if bars_ago > 1 else ''} ago"
+               if bars_ago else ""),
+            f"at {level.source} ({level.price:.2f}) — {level.kind}",
+            f"price took out {found.trigger:.2f}",
+        ]
+        volume_multiple = float(self.cfg.get(
+            "strategies.candlestick_at_level.volume_multiple", 1.0))
+        if _volume_ok(snapshot, volume_multiple):
+            setup.confirmations.append(
+                f"volume {snapshot.rvol:.1f}x average — institutional "
+                f"commitment, not a thin wick")
+        elif volume_multiple > 1.0:
+            setup.blockers.append(
+                f"volume {snapshot.rvol:.1f}x is below {volume_multiple}x — "
+                f"a pattern without participation is a false break waiting "
+                f"to happen")
+
+        # The case for the trade, in the order somebody would read it.
+        setup.reasoning = [
+            f"**Buy a {right}** on {symbol}.",
+            f"**The pattern.** {found.name} completed on the {timeframe} "
+            f"chart. {found.note}",
+            f"**Why here.** It formed at {level.source} ({level.price:.2f}), a "
+            f"{level.kind} level the market has already turned at. The same "
+            f"candle mid-range would be ignored.",
+            f"**The trigger.** Price took out {found.trigger:.2f}, which is "
+            f"what turns a pattern into an entry.",
+            f"**What kills it.** A close back through "
+            f"{found.invalidation:.2f}. The option is sold on that, whatever "
+            f"the premium is doing.",
+            f"**The contract.** {band[0]:.2f}–{band[1]:.2f} delta, "
+            f"{setup.min_dte_override}–{setup.max_dte_override} days out, so "
+            f"theta does not eat the move before it happens.",
+        ]
+        return setup
+
+
+ALL.append(CandlestickAtLevel)

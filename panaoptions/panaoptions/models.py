@@ -56,6 +56,7 @@ class SetupType(str, Enum):
     ORB_VWAP = "ORB + VWAP"
     VWAP_EMA_PULLBACK = "VWAP / 9-EMA Pullback"
     LIQUIDITY_SWEEP = "Liquidity Sweep Reversal"
+    CANDLESTICK_AT_LEVEL = "Candlestick at a Key Level"
     OTHER = "Other"
 
 
@@ -96,6 +97,22 @@ class Setup(BaseModel):
     invalidation_note: str = ""
     # Where the move is expected to reach, when the strategy has a view.
     underlying_target: float = 0.0
+
+    # The price that confirms the pattern. A pattern is not an entry: price
+    # has to take out the trigger before the option is bought.
+    entry_trigger: float = 0.0
+    # The level the pattern formed at, and what makes it a level. A pattern in
+    # the middle of a range is noise, so this is never empty on a triggered
+    # candlestick setup.
+    key_level: float = 0.0
+    key_level_source: str = ""
+    # Delta band this pattern wants, overriding the global one. A hammer and a
+    # morning star are not the same bet and do not want the same contract.
+    delta_band: tuple[float, float] | None = None
+    min_dte_override: int = 0
+    max_dte_override: int = 0
+    # Plain-language case for the trade, for the dashboard to show.
+    reasoning: list[str] = Field(default_factory=list)
 
     @property
     def triggered(self) -> bool:
@@ -170,6 +187,9 @@ class Signal(BaseModel):
     underlying_target: float = 0.0
     strategy: SetupType = SetupType.OTHER
     invalidation_note: str = ""
+    key_level: float = 0.0
+    key_level_source: str = ""
+    reasoning: list[str] = Field(default_factory=list)
     pattern: str = ""
     confirmations: list[str] = Field(default_factory=list)
     ml_probability: float | None = None

@@ -242,12 +242,13 @@ def test_a_coach_that_is_on_but_down_reports_itself(client, cfg):
         llm.health.mark_up()
 
 
-def test_the_strategies_endpoint_lists_all_three_with_their_windows(client):
+def test_the_strategies_endpoint_lists_them_all_with_their_windows(client):
     body = client.get("/api/strategies").json()
     names = [s["name"] for s in body["strategies"]]
 
-    assert len(names) == 3
+    assert len(names) == 4
     assert "ORB + VWAP" in names
+    assert "Candlestick at a Key Level" in names
     for strategy in body["strategies"]:
         assert strategy["from"] < strategy["to"]
         assert strategy["from"] >= "09:45", \
@@ -284,3 +285,117 @@ def test_an_empty_log_is_not_an_error(client):
     body = client.get("/api/activity").json()
     assert body["events"] == []
     assert body["count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# The live candidate panel
+# --------------------------------------------------------------------------- #
+def test_the_candidate_endpoint_is_honest_about_having_nothing(client):
+    """An idle desk and a broken one must not look the same.
+
+    Returning an empty object here would render as a blank panel, which reads
+    exactly like a panel that failed to load.
+    """
+    body = client.get("/api/candidate").json()
+    assert body["candidate"] is None
+    assert body["scanning"] == ""
+    assert "phase" in body and body["watchlist"] == []
+
+
+def test_the_candidate_endpoint_carries_the_whole_case(client):
+    client.desk.scanning = "AAPL"
+    client.desk.candidate = {
+        "symbol": "AAPL", "right": "CALL", "direction": "LONG",
+        "pattern": "Hammer", "key_level": 97.9, "key_level_source": "swing low",
+        "entry_trigger": 99.0, "invalidation": 97.6,
+        "delta_band": [0.50, 0.65], "reasoning": ["**Buy a CALL** on AAPL."],
+        "confirmations": ["Hammer on the 15m close"], "taken": False,
+    }
+    body = client.get("/api/candidate").json()
+    assert body["scanning"] == "AAPL"
+    found = body["candidate"]
+    # The why, not just the what — the reasoning is the part you can learn from.
+    assert found["reasoning"] and found["right"] == "CALL"
+    assert found["key_level_source"] == "swing low"
+    assert found["entry_trigger"] == 99.0 and found["invalidation"] == 97.6
+
+
+def test_a_candidate_says_whether_the_desk_actually_took_it(client):
+    # "We saw this" and "we bought this" are different claims, and the panel
+    # must not blur them.
+    client.desk.candidate = {"symbol": "AAPL", "taken": False}
+    assert client.get("/api/candidate").json()["candidate"]["taken"] is False
+    client.desk.candidate = {"symbol": "AAPL", "taken": True,
+                             "trade_id": "PT-1", "quantity": 1}
+    body = client.get("/api/candidate").json()["candidate"]
+    assert body["taken"] is True and body["trade_id"] == "PT-1"
+
+
+def test_the_chart_endpoint_speaks_the_chart_library_dialect(client,
+                                                             monkeypatch):
+    from datetime import UTC, datetime
+
+    from panaoptions.models import Candle
+
+    bars = [Candle(ts=datetime(2026, 9, 23, 13, 30 + 5 * i, tzinfo=UTC),
+                   open=100 + i, high=101 + i, low=99 + i, close=100.5 + i,
+                   volume=1000.0) for i in range(4)]
+
+    async def _bars(symbol, interval="5m", include_prepost=False):
+        return bars
+
+    monkeypatch.setattr(client.desk.feed, "candles", _bars)
+    body = client.get("/api/candles/aapl").json()
+    assert body["symbol"] == "AAPL"
+    # Lightweight-charts wants epoch seconds, not an ISO string.
+    first = body["candles"][0]
+    assert isinstance(first["time"], int)
+    assert first["time"] == int(bars[0].ts.timestamp())
+    assert {"open", "high", "low", "close", "volume"} <= set(first)
+
+
+def test_the_chart_endpoint_returns_the_most_recent_bars(client, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from panaoptions.models import Candle
+
+    base = datetime(2026, 9, 23, 13, 30, tzinfo=UTC)
+    bars = [Candle(ts=base + timedelta(minutes=5 * i), open=100, high=101,
+                   low=99, close=100, volume=1.0) for i in range(300)]
+
+    async def _bars(symbol, interval="5m", include_prepost=False):
+        return bars
+
+    monkeypatch.setattr(client.desk.feed, "candles", _bars)
+    body = client.get("/api/candles/AAPL?count=50").json()
+    assert len(body["candles"]) == 50
+    assert body["candles"][-1]["time"] == int(bars[-1].ts.timestamp())
+
+
+def test_a_symbol_with_no_tape_is_an_empty_chart_not_an_error(client):
+    body = client.get("/api/candles/AAPL").json()
+    assert body["candles"] == []
+
+
+def test_the_panel_is_on_the_page_and_the_chart_library_is_local(client):
+    page = client.get("/").text
+    assert 's-candidate' in page
+    # The library is vendored: a dashboard that needs a CDN is a dashboard
+    # that goes blank on a train.
+    assert "vendor-lightweight-charts.js" in page
+    assert "cdn." not in page
+    assert client.get("/static/vendor-lightweight-charts.js").status_code == 200
+
+
+def test_every_asset_is_stamped_not_a_hand_kept_list(client):
+    """A vendored library upgraded in place must not stay cached for a year.
+
+    Stamping only the files somebody remembered to list is how a `git pull`
+    updates the code and leaves the browser running the old one.
+    """
+    import re
+
+    page = client.get("/").text
+    unstamped = re.findall(r'/static/([\w.-]+\.(?:js|css))(?!\?v=)', page)
+    assert not unstamped, f"not cache-busted: {unstamped}"
+    assert "vendor-lightweight-charts.js?v=" in page

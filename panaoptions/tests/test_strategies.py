@@ -1,4 +1,4 @@
-"""The three entry strategies, their windows, and their invalidation levels."""
+"""The four entry strategies, their windows, and their invalidation levels."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -8,6 +8,7 @@ import pytest
 from panaoptions.engine import indicators as ta
 from panaoptions.engine.levels import compute
 from panaoptions.engine.strategies import (
+    CandlestickAtLevel,
     LiquiditySweepReversal,
     OpeningRangeBreakout,
     VwapEmaPullback,
@@ -175,3 +176,102 @@ def test_every_attempt_is_reported_even_when_none_fire(cfg):
     assert winner is None
     assert attempts, "silence with no reason is indistinguishable from a bug"
     assert all(a.blockers for a in attempts)
+
+
+# --------------------------------------------------------------------------- #
+# Strategy 4 — a reversal candle, but only at a level
+# --------------------------------------------------------------------------- #
+def _hammer_session(*, trigger_taken=True, mid_range=False):
+    """A slide into a swing low, a hammer off it, then the break of its high.
+
+    The hammer has to land on a 15m boundary to survive the resample, so the
+    prices below are built in threes.
+    """
+    bars = [_bar(PREMARKET + timedelta(minutes=5 * i), 104 - i * 0.05, 400.0,
+                 high=104 - i * 0.05 + 0.2, low=104 - i * 0.05 - 0.2)
+            for i in range(18)]
+    slide = [104, 103.4, 102.8, 102.2, 101.6, 101.0, 100.4, 99.8, 99.2, 98.6,
+             98.2, 98.5, 99.0, 99.4, 99.9, 100.3, 99.8, 99.2, 98.6, 98.3]
+    if mid_range:
+        # Same shape, but drifting sideways — the hammer's low is nowhere near
+        # a level the market has turned at.
+        slide = [100.0 + (i % 3) * 0.05 for i in range(20)]
+    for i, price in enumerate(slide):
+        bars.append(_bar(BELL + timedelta(minutes=5 * i), price))
+
+    low = 97.6 if not mid_range else 99.7
+    top = 99.0 if not mid_range else 100.1
+    base = BELL + timedelta(minutes=5 * len(slide))
+    bars.append(Candle(ts=base, open=top - 0.1, high=top, low=low,
+                       close=top - 0.15, volume=5000.0))
+    if trigger_taken:
+        bars.append(Candle(ts=base + timedelta(minutes=5), open=top - 0.1,
+                           high=top + 0.6, low=top - 0.2, close=top + 0.5,
+                           volume=6000.0))
+    else:
+        # Deliberately a nothing bar: price stalls under the trigger without
+        # printing a fresher pattern that would supersede the hammer.
+        bars.append(Candle(ts=base + timedelta(minutes=5), open=top - 0.15,
+                           high=top - 0.05, low=top - 0.25, close=top - 0.20,
+                           volume=6000.0))
+    return bars
+
+
+def test_a_hammer_at_a_swing_low_becomes_a_call(cfg):
+    setup, attempts = evaluate_all("AAPL", _hammer_session(), compute([]), cfg)
+    assert setup is not None
+    assert setup.strategy is SetupType.CANDLESTICK_AT_LEVEL
+    assert setup.direction is Direction.LONG
+    assert setup.pattern == "Hammer"
+    # The location is the larger half of the rule, so it is always named.
+    assert setup.key_level and setup.key_level_source
+    # The stop belongs to the candle, not to a percentage of the premium.
+    assert setup.underlying_support == pytest.approx(97.6)
+    assert setup.entry_trigger == pytest.approx(99.0)
+
+
+def test_the_same_hammer_mid_range_is_refused(cfg):
+    """This is the whole point of the strategy.
+
+    Trading the pattern without the level is why people conclude candlesticks
+    do not work, so the refusal has to be visible rather than silent.
+    """
+    _setup, attempts = evaluate_all("AAPL", _hammer_session(mid_range=True),
+                                    compute([]), cfg)
+    candle = [a for a in attempts
+              if a.strategy is SetupType.CANDLESTICK_AT_LEVEL]
+    assert candle and not candle[0].triggered
+    assert any("not at a level" in b or "waiting for price" in b
+               or "not enough" in b or "no reversal pattern" in b
+               for b in candle[0].blockers)
+
+
+def test_a_pattern_without_its_trigger_is_not_an_entry(cfg):
+    _setup, attempts = evaluate_all("AAPL", _hammer_session(trigger_taken=False),
+                                    compute([]), cfg)
+    candle = [a for a in attempts
+              if a.strategy is SetupType.CANDLESTICK_AT_LEVEL][0]
+    assert not candle.triggered
+    assert any("waiting for price to break above" in b for b in candle.blockers)
+
+
+def test_each_pattern_asks_for_its_own_contract(cfg):
+    strategy = CandlestickAtLevel(cfg)
+    # A hammer is a sharp reversal off a level and wants delta near the money;
+    # a morning star is a slower structural turn and tolerates less.
+    assert strategy.delta_band("Hammer") == (0.50, 0.65)
+    assert strategy.delta_band("Bullish Engulfing") == (0.55, 0.70)
+    assert strategy.delta_band("Morning Star") == (0.45, 0.55)
+    # Longer-dated than the intraday rules, so theta does not eat the move.
+    assert int(cfg.get("strategies.candlestick_at_level.min_dte")) >= 14
+    assert int(cfg.get("strategies.candlestick_at_level.max_dte")) <= 30
+
+
+def test_a_triggered_setup_explains_itself_in_plain_language(cfg):
+    setup, _ = evaluate_all("AAPL", _hammer_session(), compute([]), cfg)
+    assert setup is not None
+    joined = " ".join(setup.reasoning)
+    assert "**Buy a CALL**" in joined
+    for heading in ("The pattern.", "Why here.", "The trigger.",
+                    "What kills it.", "The contract."):
+        assert heading in joined

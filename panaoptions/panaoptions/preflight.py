@@ -221,6 +221,27 @@ def check(cfg) -> list[Finding]:
             "This is a deliberate choice on a small paper account, not an "
             "error. Lower risk.max_capital_deployed_pct if you did not mean it."))
 
+    # 6. Can every enabled strategy actually be reached?
+    #
+    # The desk hunts until the last enabled strategy shuts, but never past the
+    # square-off — a trade opened at 15:44 is forced out a minute later. A
+    # window that runs past it is quietly clipped, and a strategy that is
+    # enabled, in window by its own reckoning and never once asked is the
+    # hardest kind of dead config to notice.
+    force_exit = str(cfg.get("session.force_exit_at", "15:45"))
+    for key, block in (cfg.get("strategies", {}) or {}).items():
+        if not isinstance(block, dict) or not block.get("enabled", True):
+            continue
+        closes = str(block.get("to", "") or "")
+        if closes and closes > force_exit:
+            findings.append(Finding(
+                "warning", f"strategies.{key}.to",
+                f"This strategy runs to {closes}, past the {force_exit} "
+                f"square-off. The desk stops hunting at {force_exit}, so the "
+                f"last {closes[:5]}-{force_exit} of the window never trades.",
+                f"Set strategies.{key}.to to {force_exit} or earlier, or move "
+                f"session.force_exit_at later if the window is what you meant."))
+
     if min_price > max_price:
         findings.append(Finding(
             "blocker", "contracts.min_contract_price",

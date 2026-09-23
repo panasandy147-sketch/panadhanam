@@ -30,7 +30,7 @@ from panaoptions.engine import strategies
 from panaoptions.ledger import store
 from panaoptions.ledger.paper import PaperLedger
 from panaoptions.logging import get_logger
-from panaoptions.models import ExitReason, PreMarketRead
+from panaoptions.models import Direction, ExitReason, PreMarketRead
 from panaoptions.notify.webhook import Notifier
 from panaoptions.risk.guardrails import RiskManager
 
@@ -56,6 +56,10 @@ class OptionsDesk:
         self._levels_on: str = ""
         self._weekly_written_for: str | None = None
         self._daily_written_for: str | None = None
+        # What the desk is judging right now, and the last case it made for a
+        # trade — so the dashboard can show the reasoning, not just the result.
+        self.scanning: str = ""
+        self.candidate: dict[str, Any] | None = None
         self._predictor: Any = None
 
     # ------------------------------------------------------------------ #
@@ -76,7 +80,7 @@ class OptionsDesk:
         log.info("panaoptions desk started — paper only, capital $%.2f, "
                  "entries %s-%s %s", self.risk.capital,
                  self.cfg.get("session.entry_open"),
-                 self.cfg.get("session.entry_close"), self.cfg.timezone)
+                 self.cfg.last_entry_hhmm, self.cfg.timezone)
 
         try:
             while self.running:
@@ -144,12 +148,16 @@ class OptionsDesk:
                 + (f" — {', '.join(passed)}" if passed else ""),
                 level="good" if passed else "info", ts=now)
 
-        # 3. New entries: only in the window, only when flat.
+        # 3. Tightening is a clock event, not a phase one. The entry window now
+        # runs to the last strategy's close, which is well past the tighten
+        # time — so gating this on the "managing" phase would mean a trade
+        # opened at 10:00 keeps its full stop until 13:30.
+        await self._maybe_tighten(now)
+
+        # 4. New entries: only in the window, only when flat.
         if phase == "entry_window":
             hunted = await self._hunt(now)
             result["actions"].extend(hunted)
-        elif phase == "managing":
-            await self._maybe_tighten(now)
 
         store.save_session(today, self.risk.state)
         return result
@@ -170,6 +178,7 @@ class OptionsDesk:
 
         actions: list[str] = []
         for symbol in candidates:
+            self.scanning = symbol
             candles = await self.feed.candles(symbol, self.cfg.get("technical.timeframe", "5m"))
             if not candles:
                 continue
@@ -215,6 +224,7 @@ class OptionsDesk:
                 "setup.fired",
                 f"{symbol} {setup.strategy.value} {setup.direction.value} — "
                 f"{setup.pattern}", level="good", ts=now)
+            self._remember_candidate(symbol, setup, now)
 
             search = await self._pick_contract(symbol, setup, now)
             if search.chosen is None:
@@ -240,6 +250,12 @@ class OptionsDesk:
                 continue
 
             trade = self.ledger.open(signal, now)
+            if self.candidate and self.candidate.get("symbol") == symbol:
+                self.candidate["taken"] = True
+                self.candidate["trade_id"] = trade.id
+                self.candidate["contract"] = signal.contract.label
+                self.candidate["entry"] = signal.entry_price
+                self.candidate["quantity"] = signal.quantity
             store.save_signal_seen(signal_id, now, symbol,
                                    setup.direction.value, True, "taken",
                                    {"trade_id": trade.id,
@@ -254,6 +270,32 @@ class OptionsDesk:
             break            # one trade at a time; stop hunting
 
         return actions
+
+    def _remember_candidate(self, symbol: str, setup, now: datetime) -> None:
+        """Keep the case for the newest setup, for the dashboard to show.
+
+        A signal on its own tells you what happened. This is the why — the
+        pattern, the level it formed at, the trigger, and what would kill it —
+        which is the only part you can actually learn from.
+        """
+        self.candidate = {
+            "symbol": symbol,
+            "ts": now.isoformat(),
+            "strategy": setup.strategy.value,
+            "direction": setup.direction.value,
+            "right": "CALL" if setup.direction is Direction.LONG else "PUT",
+            "pattern": setup.pattern,
+            "reasoning": list(setup.reasoning),
+            "confirmations": list(setup.confirmations),
+            "key_level": setup.key_level,
+            "key_level_source": setup.key_level_source,
+            "entry_trigger": setup.entry_trigger,
+            "invalidation": setup.underlying_support,
+            "invalidation_note": setup.invalidation_note,
+            "delta_band": list(setup.delta_band) if setup.delta_band else None,
+            "underlying": setup.indicators.close,
+            "taken": False,
+        }
 
     def _should_screen(self, phase: str, today: str, now: datetime) -> bool:
         """Is it worth running the pre-market screen right now?
@@ -315,9 +357,10 @@ class OptionsDesk:
         spot = setup.indicators.close
         chain = await self.feed.chain_for_window(
             symbol, spot,
-            int(self.cfg.get("contracts.min_dte", 7)),
-            int(self.cfg.get("contracts.max_dte", 14)))
-        return contract_filter.choose(symbol, chain, setup.direction, self.cfg)
+            setup.min_dte_override or int(self.cfg.get("contracts.min_dte", 7)),
+            setup.max_dte_override or int(self.cfg.get("contracts.max_dte", 14)))
+        return contract_filter.choose(symbol, chain, setup.direction, self.cfg,
+                                      setup=setup)
 
     # ------------------------------------------------------------------ #
     async def _manage(self, now: datetime) -> list[str]:
@@ -487,6 +530,8 @@ class OptionsDesk:
             "screened": [r.model_dump() for r in self.screened],
             "open_trades": [t.model_dump(mode="json")
                             for t in self.ledger.open_trades.values()],
+            "scanning": self.scanning,
+            "candidate": self.candidate,
             "ml_enabled": self._predictor is not None,
             "notifications": self.notifier.enabled,
             "paper_only": True,

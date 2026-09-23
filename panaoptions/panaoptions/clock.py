@@ -34,7 +34,13 @@ def within(tz: str, start: str, end: str, ts: datetime | None = None) -> bool:
 
 
 def session_phase(cfg, ts: datetime | None = None) -> str:
-    """One of: weekend, premarket, entry_window, managing, closed."""
+    """One of: weekend, premarket, entry_window, managing, closed.
+
+    The entry window shuts when the last enabled strategy shuts, not at
+    `session.entry_close` — see `Config.last_entry_hhmm`. Closing it earlier
+    than a strategy's own window makes that strategy unreachable without
+    anything saying so.
+    """
     tz = cfg.timezone
     ts = ts or now(tz)
     if ts.weekday() >= 5:
@@ -42,7 +48,8 @@ def session_phase(cfg, ts: datetime | None = None) -> str:
 
     current = ts.timetz().replace(tzinfo=None)
     entry_open = parse_hhmm(str(cfg.get("session.entry_open", "09:35")))
-    entry_close = parse_hhmm(str(cfg.get("session.entry_close", "10:30")))
+    entry_close = parse_hhmm(getattr(
+        cfg, "last_entry_hhmm", str(cfg.get("session.entry_close", "10:30"))))
     force_exit = parse_hhmm(str(cfg.get("session.force_exit_at", "15:45")))
 
     if current < entry_open:

@@ -145,12 +145,18 @@ run.py --report 30                      # the paper-trading record
 No API key. Market data comes from Yahoo's public endpoints over plain
 `httpx` — one less package to install than `yfinance`.
 
-## The three strategies
+## The four strategies
 
 Every entry is tagged with the strategy that produced it, so the journal can
-answer *which of these actually pays* rather than lumping them together. All
-three skip **09:30–09:45**, where spreads are widest and the first prints are
+answer *which of these actually pays* rather than lumping them together. They
+all skip **09:30–09:45**, where spreads are widest and the first prints are
 noise.
+
+The desk hunts from `session.entry_open` until **the last enabled strategy
+shuts** — not until `session.entry_close`, which is only the floor. Closing the
+window earlier than a strategy's own window would leave that strategy enabled,
+in window by its own reckoning, and never once asked. `--check-config` warns if
+a window runs past the square-off, where it would be clipped.
 
 ### 1. Opening Range Breakout + VWAP — 09:45 to 11:00
 
@@ -176,8 +182,65 @@ The trade is that the breakout buyers are trapped.
 
 *Invalidation:* a 5m close back through the sweep wick.
 
+### 4. Candlestick at a Key Level — 09:45 to 15:00
+
+Seven reversal patterns on the **15m** chart — Hammer, Bullish Engulfing,
+Morning Star and Tweezer Bottom for calls; Shooting Star, Bearish Engulfing,
+Evening Star and Tweezer Top for puts.
+
+The pattern is the smaller half of the rule. Three gates have to clear:
+
+1. **Location.** It must print at a level the market has already turned at — a
+   swing high or low, the pre-market extreme, an opening-range boundary,
+   yesterday's close, VWAP or a moving average. A hammer in the middle of a
+   range is a bar with a wick, and trading it is how people conclude
+   candlesticks do not work. "At the level" is measured in **ATR**
+   (`level_tolerance_atr`, default 0.5) rather than percent, so it means the
+   same thing on a quiet stock and a volatile one. The panel names the level
+   it found; a pattern with no level is refused in writing.
+2. **The trigger.** A pattern is not an entry. Price has to take out the
+   pattern's trigger — the high of a hammer, the low of a shooting star —
+   before anything is bought. That break happens on a *later* candle, so the
+   pattern is allowed to be up to `trigger_within_bars` (2) back.
+3. **Participation.** Volume on the pattern, against the 20-bar average.
+
+*Invalidation:* a close back through the candle that made the signal — below
+the hammer's low, under the morning star's low, above the shooting star's
+high. The stop is that level on the **underlying**, not a percentage of the
+premium.
+
+*Contract:* each pattern asks for its own, because a sharp reversal off a level
+and a slow structural turn are not the same bet. Delta bands run **0.45–0.70**
+depending on the pattern, at **14–30 DTE** — longer-dated than the intraday
+rules so theta does not eat the move before it happens. The bands are in
+`config/settings.yaml` under `strategies.candlestick_at_level.delta`.
+
 Windows, volume multiples and enable flags are all in
 `config/settings.yaml` under `strategies:`.
+
+## The live candidate panel
+
+The dashboard's widest panel answers three questions the position list cannot:
+
+* **Which name is being judged right now** — the header reads
+  `LIVE CANDIDATE SCANNING <SYMBOL>`, so a working desk and a hung one look
+  different even on a day that takes nothing.
+* **Why this is a call or a put** — the case is written in plain language on
+  the right: the pattern, the level it formed at, the trigger price, what
+  would kill it, and the contract the pattern wants. That is the part you can
+  learn from; a P&L number on its own teaches nothing.
+* **What the chart actually looked like** — a live 5m candle chart of that
+  symbol on the left, with 9/21/50 EMAs and VWAP, refreshed while the page is
+  open and labelled with the age of the last bar.
+
+A new signal **flashes the panel for 15 seconds** — green for a call, red for
+a put — then settles back rather than leaving a tinted card behind. Anyone with
+`prefers-reduced-motion` set gets one steady tint instead of a pulse.
+
+The panel also says whether the desk **took** the trade or only saw it. "We saw
+this" and "we bought this" are different claims and the panel does not blur
+them. When it is taken, the fill is shown under the reasoning — entry, contract
+and size — and it is paper, always: there is no broker adapter in this app.
 
 ## What "wrong" means: the underlying, not the premium
 
@@ -255,7 +318,7 @@ day read as proof is how a fluke becomes a rule. That question belongs to:
 ### The weekend review
 
 **Weekly review → Build this week's review** gives you the week with the
-question that matters: *which of the three strategies is actually working.*
+question that matters: *which of the strategies is actually working.*
 Per-strategy win rate, P&L and average discipline, the money lost specifically
 to rule breaks (clean losses excluded — those are the cost of an edge), and a
 coach's read.
@@ -281,7 +344,7 @@ those stay deterministic, because a model that has read a profitable trade is
 very good at finding reasons it was fine.
 
 It writes itself to `journal/weekly/` once Friday's session closes, and
-compares the three strategies head to head — which is the comparison that
+compares the strategies head to head — which is the comparison that
 needs a sample rather than a session.
 
 Both panels have a **Build** button for looking before the close, and download
@@ -329,11 +392,12 @@ panaoptions/
   panaoptions/
     clock.py              session windows, in New York time
     preflight.py          can every rule hold at once?
-    engine/  strategies.py levels.py   the three entry rules
+    engine/  strategies.py levels.py   the four entry rules
+    engine/  patterns.py                the seven reversal patterns
     journal/ grade.py weekly.py        the learning loop
     web/     server.py static/    the dashboard (read-only)
     data/    feed.py premarket.py greeks.py
-    engine/  indicators.py patterns.py contracts.py
+    engine/  indicators.py contracts.py
     risk/    guardrails.py
     ledger/  paper.py store.py
     notify/  webhook.py

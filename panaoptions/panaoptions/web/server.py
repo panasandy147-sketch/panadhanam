@@ -12,6 +12,7 @@ in this whole system.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,9 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         out["universe"] = cfg.symbols
         out["session"] = {
             "entry_open": cfg.get("session.entry_open"),
-            "entry_close": cfg.get("session.entry_close"),
+            # What the desk actually honours, which is the last strategy's
+            # close — showing the configured 10:30 would be a lie on screen.
+            "entry_close": cfg.last_entry_hhmm,
             "tighten_stops_at": cfg.get("session.tighten_stops_at"),
             "force_exit_at": cfg.get("session.force_exit_at"),
             "timezone": cfg.timezone,
@@ -137,6 +140,31 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
         return {"days": days, "entries": rows, "stats": analyse(rows),
                 "cards": cards(limit=10), "coach": coach}
+
+    @app.get("/api/candles/{symbol}")
+    async def candles(symbol: str, timeframe: str = "5m",
+                      count: int = 180) -> dict[str, Any]:
+        """OHLCV for the chart. Lightweight-charts wants seconds, not ISO."""
+        bars = await desk.feed.candles(symbol.upper(), timeframe)
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "candles": [
+                {"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
+                 "low": c.low, "close": c.close, "volume": c.volume}
+                for c in bars[-count:]
+            ],
+        }
+
+    @app.get("/api/candidate")
+    async def candidate() -> dict[str, Any]:
+        """What the desk is looking at, and the case for the newest setup."""
+        return {
+            "scanning": desk.scanning,
+            "candidate": desk.candidate,
+            "watchlist": [r.symbol for r in desk.screened if r.passed],
+            "phase": clock.session_phase(cfg, clock.now(cfg.timezone)),
+        }
 
     @app.get("/api/activity")
     async def activity(limit: int = 60) -> dict[str, Any]:
@@ -222,7 +250,7 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
     @app.get("/api/strategies")
     async def strategies() -> dict[str, Any]:
-        """The three strategies, their windows, and whether each is live now."""
+        """Every strategy, its window, and whether it is live now."""
         from panaoptions.engine.strategies import ALL
 
         now = clock.now(cfg.timezone).time()
@@ -251,9 +279,13 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         update looks like it never happened.
         """
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        for asset in ("app.js", "styles.css"):
-            html = html.replace(f"/static/{asset}",
-                                f"/static/{asset}?v={_asset_version(asset)}")
+        # Every script and stylesheet the page references, not a hand-kept
+        # list — a vendored library upgraded in place would otherwise stay
+        # cached for a year behind a URL that never changed.
+        html = re.sub(
+            r'/static/([\w.-]+\.(?:js|css))',
+            lambda m: f"/static/{m.group(1)}?v={_asset_version(m.group(1))}",
+            html)
         return HTMLResponse(html, headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",

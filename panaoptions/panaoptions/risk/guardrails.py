@@ -161,6 +161,9 @@ class RiskManager:
             underlying_target=setup.underlying_target,
             strategy=setup.strategy,
             invalidation_note=setup.invalidation_note,
+            key_level=setup.key_level,
+            key_level_source=setup.key_level_source,
+            reasoning=list(setup.reasoning),
             pattern=setup.pattern, confirmations=list(setup.confirmations),
             ml_probability=ml_probability,
         )

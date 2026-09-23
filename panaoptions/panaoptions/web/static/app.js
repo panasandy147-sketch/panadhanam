@@ -194,6 +194,155 @@ function renderRejections(d) {
       a selective rule and an impossible one look the same from the outside.</div>`;
 }
 
+/* ====================================================================== */
+/* Live candidate: the chart, and the case for the trade                  */
+/* ====================================================================== */
+let candChart = null;
+let candSeries = {};
+let lastFlashed = null;
+
+function ema(values, period) {
+  const k = 2 / (period + 1);
+  let prev = values[0];
+  return values.map((v, i) => (prev = i ? v * k + prev * (1 - k) : v));
+}
+
+function initCandChart() {
+  const el = $("cand-chart");
+  if (!el || candChart || typeof LightweightCharts === "undefined") return;
+  candChart = LightweightCharts.createChart(el, {
+    layout: { background: { color: "transparent" }, textColor: "#8b949e",
+              fontSize: 10 },
+    grid: { vertLines: { color: "#20272f" }, horzLines: { color: "#20272f" } },
+    rightPriceScale: { borderColor: "#283039" },
+    timeScale: { borderColor: "#283039", timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 },
+    height: 320,
+  });
+  candSeries.candles = candChart.addCandlestickSeries({
+    upColor: "#3fb950", downColor: "#f85149",
+    borderUpColor: "#3fb950", borderDownColor: "#f85149",
+    wickUpColor: "#3fb950", wickDownColor: "#f85149",
+  });
+  const line = (color, width) =>
+    candChart.addLineSeries({ color, lineWidth: width, priceLineVisible: false,
+                              lastValueVisible: false });
+  candSeries.ema9 = line("#4c8dff", 1);
+  candSeries.ema21 = line("#c77dff", 1);
+  candSeries.ema50 = line("#8b949e", 1);
+  candSeries.vwap = line("#d29922", 2);
+  new ResizeObserver(() => candChart.applyOptions({ width: el.clientWidth }))
+    .observe(el);
+}
+
+async function loadCandChart(symbol) {
+  if (!symbol) return;
+  initCandChart();
+  if (!candChart) return;
+
+  let d;
+  try {
+    d = await getJSON(`/api/candles/${encodeURIComponent(symbol)}?timeframe=5m`);
+  } catch { return; }
+
+  // Sorted and de-duplicated: the charting library silently blanks on a
+  // non-monotonic series, which looks like "no data" rather than bad data.
+  const seen = new Set();
+  const bars = (d.candles || [])
+    .filter((c) => (seen.has(c.time) ? false : seen.add(c.time)))
+    .sort((a, b) => a.time - b.time);
+  if (!bars.length) return;
+
+  candSeries.candles.setData(bars);
+  const closes = bars.map((c) => c.close);
+  const times = bars.map((c) => c.time);
+  const asLine = (arr) => times.map((t, i) => ({ time: t, value: arr[i] }));
+  candSeries.ema9.setData(asLine(ema(closes, 9)));
+  candSeries.ema21.setData(asLine(ema(closes, 21)));
+  candSeries.ema50.setData(asLine(ema(closes, 50)));
+
+  // Session VWAP, reset each day — the same line the strategies lean on.
+  let pv = 0, vol = 0, day = null;
+  candSeries.vwap.setData(bars.map((c) => {
+    const d2 = new Date(c.time * 1000).toDateString();
+    if (d2 !== day) { pv = 0; vol = 0; day = d2; }
+    const typical = (c.high + c.low + c.close) / 3;
+    const v = c.volume || 1;
+    pv += typical * v; vol += v;
+    return { time: c.time, value: pv / vol };
+  }));
+  candChart.timeScale().fitContent();
+
+  $("cand-symbol").textContent = `${d.symbol} · 5m`;
+  const age = Math.round((Date.now() - bars[bars.length - 1].time * 1000) / 60000);
+  const stamp = new Date(bars[bars.length - 1].time * 1000)
+    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("cand-freshness").textContent = age <= 6
+    ? `live · last bar ${stamp}` : `last bar ${stamp} (${age}m ago)`;
+}
+
+function renderCandidate(d) {
+  const c = d.candidate;
+  $("cand-meta").textContent = d.scanning
+    ? `scanning ${d.scanning}` : (d.watchlist || []).join(", ");
+
+  if (!c) {
+    $("cand-why").innerHTML = `<div class="empty">Nothing set up yet.
+      ${d.watchlist?.length
+        ? `Watching ${esc(d.watchlist.join(", "))}.`
+        : "Waiting for the pre-market screen."}</div>`;
+    if (d.scanning) loadCandChart(d.scanning);
+    return;
+  }
+
+  const call = c.right === "CALL";
+  $("cand-why").innerHTML = `
+    <div class="side ${call ? "call" : "put"}">
+      BUY ${esc(c.right)} · ${esc(c.symbol)}
+      ${c.taken ? `<span class="pill pass">taken</span>` : ""}
+    </div>
+    <div class="levels">
+      <div><div class="k">Trigger</div>${fmtPrice(c.entry_trigger)}</div>
+      <div><div class="k">${esc(c.key_level_source || "level")}</div>${fmtPrice(c.key_level)}</div>
+      <div><div class="k">Invalidation</div>${fmtPrice(c.invalidation)}</div>
+    </div>
+    ${(c.reasoning || []).map((line) => `<p>${bold(line)}</p>`).join("")}
+    ${c.delta_band ? `<p style="color:var(--muted)">Contract: delta
+      ${c.delta_band[0]} – ${c.delta_band[1]}.</p>` : ""}
+    ${c.taken && c.contract ? `<p style="color:var(--muted)">Filled:
+      <b>${esc(c.contract)}</b> x${c.quantity} at ${fmtPrice(c.entry)}.</p>`
+      : `<p style="color:var(--muted)">Not filled — see the activity log for
+         why.</p>`}`;
+
+  loadCandChart(c.symbol);
+  flashCandidate(c);
+}
+
+const fmtPrice = (n) => (n ? Number(n).toFixed(2) : "—");
+/* The reasoning arrives with **bold** markers; render those and escape the
+   rest, so a symbol or a note can never inject markup. */
+const bold = (line) => esc(line).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+function flashCandidate(c) {
+  const key = `${c.symbol}-${c.ts}`;
+  if (lastFlashed === key) return;      // flash a signal once, not every poll
+  lastFlashed = key;
+
+  const el = $("s-candidate");
+  el.classList.remove("flash-call", "flash-put");
+  void el.offsetWidth;                   // restart the animation
+  el.classList.add(c.right === "CALL" ? "flash-call" : "flash-put");
+  setTimeout(() => el.classList.remove("flash-call", "flash-put"), 15000);
+}
+
+async function refreshCandidate() {
+  try {
+    renderCandidate(await getJSON("/api/candidate"));
+  } catch {
+    /* the next tick retries */
+  }
+}
+
 /* ------------------------------------------------------------------ */
 function renderStrategies(d) {
   $("strat-meta").textContent = d.market_time || "";
@@ -208,7 +357,7 @@ function renderStrategies(d) {
             !s.enabled ? "off" : s.live ? "live now" : "outside window"}</span></td>
         </tr>`).join("")}</tbody>
     </table>
-    <div class="empty">Each runs only inside its own window. All three skip
+    <div class="empty">Each runs only inside its own window. They all skip
       09:30–09:45, where spreads are widest and the first prints are noise.</div>`;
 }
 
@@ -424,5 +573,8 @@ $("btn-daily-md").onclick = () => {
 
 refresh();
 refreshActivity();
+refreshCandidate();
 setInterval(refresh, 15000);
 setInterval(refreshActivity, 5000);
+// The candidate and its chart are what you actually watch, so they lead.
+setInterval(refreshCandidate, 5000);

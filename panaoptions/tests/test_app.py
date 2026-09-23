@@ -91,11 +91,43 @@ def _at(hh, mm):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("hh,mm,expected", [
     (8, 0, "premarket"), (9, 34, "premarket"), (9, 35, "entry_window"),
-    (10, 29, "entry_window"), (10, 30, "managing"), (15, 44, "managing"),
+    (10, 29, "entry_window"), (10, 30, "entry_window"),
+    (14, 59, "entry_window"), (15, 0, "managing"), (15, 44, "managing"),
     (15, 45, "closed"), (20, 0, "closed"),
 ])
 def test_the_session_phases_follow_the_clock(cfg, hh, mm, expected):
     assert clock.session_phase(cfg, _at(hh, mm)) == expected
+
+
+def test_the_entry_window_lasts_as_long_as_the_last_strategy(cfg):
+    """A strategy configured past `session.entry_close` must still be asked.
+
+    Otherwise the pullback strategy's 10:00-13:30 window gets thirty live
+    minutes, the candlestick strategy's 09:45-15:00 gets forty-five, and
+    nothing on screen says either is being cut off.
+    """
+    assert cfg.get("session.entry_close") == "10:30"
+    latest = max(str(b["to"]) for b in cfg.get("strategies", {}).values()
+                 if b.get("enabled", True))
+    assert cfg.last_entry_hhmm == latest
+    assert clock.session_phase(cfg, _at(13, 0)) == "entry_window"
+
+
+def test_the_entry_window_never_outlasts_the_force_exit(cfg):
+    # A trade opened after the square-off time has nowhere to go but out.
+    cfg.data["strategies"]["orb_vwap"]["to"] = "23:00"
+    try:
+        assert cfg.last_entry_hhmm == cfg.get("session.force_exit_at")
+    finally:
+        cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
+
+
+def test_a_disabled_strategy_does_not_hold_the_window_open(cfg):
+    cfg.data["strategies"]["candlestick_at_level"]["enabled"] = False
+    try:
+        assert cfg.last_entry_hhmm == "13:30"      # the pullback, next longest
+    finally:
+        cfg.data["strategies"]["candlestick_at_level"]["enabled"] = True
 
 
 def test_a_weekend_is_never_a_trading_session(cfg):
@@ -123,7 +155,8 @@ async def test_a_setup_inside_the_window_becomes_one_paper_trade(desk, monkeypat
 
 @pytest.mark.asyncio
 async def test_no_entries_outside_the_window(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(11, 0))
+    # 15:00 is the last strategy's close, so the desk is done hunting.
+    monkeypatch.setattr(clock, "now", lambda tz: _at(15, 10))
     await desk.cycle()
     assert not desk.ledger.open_trades
 

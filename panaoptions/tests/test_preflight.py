@@ -178,3 +178,27 @@ def test_a_warning_needs_no_command(cfg):
     for finding in check(cfg):
         if finding.level == "warning":
             assert not finding.command
+
+
+def test_a_strategy_window_past_the_square_off_is_called_out(cfg):
+    """Dead config is the hardest kind of bug to see.
+
+    The window is silently clipped at the square-off, so the strategy looks
+    enabled and in window while never being asked.
+    """
+    from panaoptions import preflight
+
+    cfg.data["strategies"]["orb_vwap"]["to"] = "16:30"
+    try:
+        found = [f for f in preflight.check(cfg)
+                 if f.setting == "strategies.orb_vwap.to"]
+        assert found and found[0].level == "warning"
+        assert "15:45" in found[0].problem
+    finally:
+        cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
+
+
+def test_windows_inside_the_session_raise_nothing(cfg):
+    from panaoptions import preflight
+
+    assert not [f for f in preflight.check(cfg) if f.setting.endswith(".to")]

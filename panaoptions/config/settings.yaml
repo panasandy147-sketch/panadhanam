@@ -102,6 +102,35 @@ strategies:
     to:   "12:00"
     volume_multiple: 1.5
 
+  # Seven reversal patterns, but only where one can mean something. A hammer
+  # in the middle of a range is a bar with a wick; the level is the larger
+  # half of the rule, and level_tolerance_atr is what "at the level" means.
+  candlestick_at_level:
+    enabled: true
+    from: "09:45"
+    to:   "15:00"
+    timeframe: "15m"          # patterns pay on the higher timeframes
+    level_tolerance_atr: 0.5  # how close to a level still counts as "at" it
+    # The entry is a break of the pattern's trigger, which happens on a LATER
+    # candle — so the pattern may be this many bars back and still count.
+    trigger_within_bars: 2
+    volume_multiple: 1.0
+    # Longer-dated than the intraday strategies: these are structural turns,
+    # and theta must not eat the move before it happens.
+    min_dte: 14
+    max_dte: 30
+    # Each pattern asks for its own contract — a sharp reversal off a level
+    # and a slow structural turn are not the same bet.
+    delta:
+      hammer:             [0.50, 0.65]
+      bullish_engulfing:  [0.55, 0.70]
+      morning_star:       [0.45, 0.55]
+      tweezer_bottom:     [0.50, 0.65]
+      shooting_star:      [0.50, 0.60]
+      bearish_engulfing:  [0.55, 0.65]
+      evening_star:       [0.45, 0.55]
+      tweezer_top:        [0.50, 0.65]
+
 risk:
   max_open_trades: 1
 

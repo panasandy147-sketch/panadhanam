@@ -1,7 +1,7 @@
 """Period reviews — one day or one week of trading, graded and read back.
 
 The question these exist to answer is the one a P&L number cannot: of the
-three strategies, which are actually working, and how much of the damage was
+strategies, which are actually working, and how much of the damage was
 self-inflicted.
 
 One module serves both periods because they differ only in their bounds and in
@@ -200,7 +200,7 @@ def _prompt(review: Review, cfg) -> str:
         lines += ["", "How well was this session executed? Comment on the "
                       "trades in front of you — not on which strategy is best."]
     else:
-        lines += ["", "Which of the three strategies is worth keeping, and "
+        lines += ["", "Which of the strategies is worth keeping, and "
                       "what should change? Say plainly if the sample is too "
                       "small."]
     return "\n".join(lines)

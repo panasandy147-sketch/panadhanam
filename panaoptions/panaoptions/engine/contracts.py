@@ -19,14 +19,23 @@ from panaoptions.models import ContractSearch, Direction, OptionContract, Option
 
 
 def choose(symbol: str, chain: list[OptionContract], direction: Direction,
-           cfg) -> ContractSearch:
-    """The cheapest qualifying contract, or a full account of why there is none."""
+           cfg, setup=None) -> ContractSearch:
+    """The cheapest qualifying contract, or a full account of why there is none.
+
+    A setup may ask for its own delta band and expiry window: a hammer off
+    support and a morning star are not the same bet, and a structural reversal
+    needs more time than an opening-range break. Its request wins over the
+    global default.
+    """
     want = OptionRight.CALL if direction is Direction.LONG else OptionRight.PUT
 
-    min_dte = int(cfg.get("contracts.min_dte", 7))
-    max_dte = int(cfg.get("contracts.max_dte", 14))
-    min_delta = float(cfg.get("contracts.min_delta", 0.45))
-    max_delta = float(cfg.get("contracts.max_delta", 0.60))
+    min_dte = int(getattr(setup, "min_dte_override", 0)
+                  or cfg.get("contracts.min_dte", 7))
+    max_dte = int(getattr(setup, "max_dte_override", 0)
+                  or cfg.get("contracts.max_dte", 14))
+    band = getattr(setup, "delta_band", None)
+    min_delta = float(band[0]) if band else float(cfg.get("contracts.min_delta", 0.45))
+    max_delta = float(band[1]) if band else float(cfg.get("contracts.max_delta", 0.60))
     max_spread = float(cfg.get("contracts.max_spread_pct_of_mid", 5.0))
     min_price = float(cfg.get("contracts.min_contract_price", 0.60))
     max_price = float(cfg.get("contracts.max_contract_price", 1.00))

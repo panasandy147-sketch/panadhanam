@@ -26,6 +26,22 @@ def cfg(tmp_path, monkeypatch):
     return config_mod.Config()
 
 
+@pytest.fixture(autouse=True)
+def _journal_elsewhere(tmp_path, monkeypatch):
+    """Never let a test write into the repository's journal.
+
+    `journal/` is committed on purpose — it is the learning history. A suite
+    that appends synthetic cards to it poisons exactly the record the weekly
+    review reads, and the damage looks like real trading rather than a test.
+    """
+    from panaoptions.journal import store as journal_store
+    from panaoptions.journal import weekly as journal_weekly
+
+    monkeypatch.setattr(journal_store, "JOURNAL_DIR", tmp_path / "journal")
+    monkeypatch.setattr(journal_weekly, "DAILY_DIR", tmp_path / "journal" / "daily")
+    monkeypatch.setattr(journal_weekly, "WEEKLY_DIR", tmp_path / "journal" / "weekly")
+
+
 @pytest.fixture
 def bars():
     """A clean 5-minute uptrend: 40 bars, steadily higher, even volume."""
