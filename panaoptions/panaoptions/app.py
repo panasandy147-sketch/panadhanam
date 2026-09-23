@@ -46,6 +46,7 @@ class OptionsDesk:
         self.running = False
         self.screened: list[PreMarketRead] = []
         self._screened_on: str = ""
+        self._screened_at: datetime | None = None
         # Opening range and pre-market extremes, per symbol, for today.
         self._levels: dict[str, Any] = {}
         self._levels_on: str = ""
@@ -122,10 +123,11 @@ class OptionsDesk:
             store.save_session(today, self.risk.state)
             return result
 
-        # 2. The pre-market screen runs once a day.
-        if phase in {"premarket", "entry_window"} and self._screened_on != today:
+        # 2. The pre-market screen.
+        if self._should_screen(phase, today, now):
             self.screened = await screen(self.feed, self.cfg, now)
             self._screened_on = today
+            self._screened_at = now
 
         # 3. New entries: only in the window, only when flat.
         if phase == "entry_window":
@@ -215,6 +217,37 @@ class OptionsDesk:
             break            # one trade at a time; stop hunting
 
         return actions
+
+    def _should_screen(self, phase: str, today: str, now: datetime) -> bool:
+        """Is it worth running the pre-market screen right now?
+
+        "Pre-market" covers everything from midnight to the entry window, so a
+        desk left running overnight would screen at 00:01 — when there is no
+        pre-market volume at all. RVOL comes back near zero, nothing passes,
+        the screen is marked done for the day, and NOTHING can trade. Leaving
+        the app on overnight would have been strictly worse than starting it
+        in the morning, which is the opposite of the point.
+
+        So: not before `premarket.screen_from`, and re-run while nothing has
+        qualified, because the pre-market tape thickens as the open nears.
+        """
+        if phase not in {"premarket", "entry_window"}:
+            return False
+
+        earliest = str(self.cfg.get("premarket.screen_from", "09:00"))
+        if not clock.at_or_after(self.cfg.timezone, earliest, now):
+            return False
+
+        if self._screened_on != today:
+            return True
+
+        # Already screened today. Only worth repeating while it found nothing.
+        if any(r.passed for r in self.screened):
+            return False
+        gap = int(self.cfg.get("premarket.rescreen_minutes", 5))
+        if self._screened_at is None:
+            return True
+        return (now - self._screened_at).total_seconds() >= gap * 60
 
     async def _levels_for(self, symbol: str, now: datetime):
         """Today's opening range and pre-market extremes, computed once.

@@ -36,6 +36,14 @@ premarket:
   min_rvol: 1.5          # relative volume vs the 20-day average at this time
   min_gap_pct: 1.0       # |open vs previous close|, in percent
 
+  # Earliest the screen may run, in exchange time. There is no pre-market
+  # volume at 04:00, so screening then returns RVOL near zero, nothing
+  # qualifies, and the day is written off before it starts.
+  screen_from: "09:00"
+  # While nothing has qualified, try again this often — the pre-market tape
+  # thickens as the open approaches. Once something passes, it stops.
+  rescreen_minutes: 5
+
 technical:
   timeframe: "5m"
   trend_timeframe: "15m"

@@ -241,3 +241,83 @@ async def test_the_screen_runs_once_a_day_not_every_cycle(desk, monkeypatch):
     await desk.cycle()
     await desk.cycle()
     assert len(calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Leaving the desk running overnight must not be worse than starting it in the
+# morning. "Pre-market" runs from midnight, and there is no volume at 00:01.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("hh,mm,expected", [
+    (0, 1, False),      # midnight — no pre-market tape exists yet
+    (4, 0, False),      # too early to mean anything
+    (8, 59, False),
+    (9, 0, True),       # premarket.screen_from
+    (9, 34, True),
+    (9, 50, True),      # inside the entry window
+])
+def test_the_screen_waits_until_the_premarket_tape_is_worth_reading(
+        desk, monkeypatch, hh, mm, expected):
+    now = _at(hh, mm)
+    phase = clock.session_phase(desk.cfg, now)
+    assert desk._should_screen(phase, now.date().isoformat(), now) is expected
+
+
+@pytest.mark.asyncio
+async def test_an_overnight_desk_does_not_write_off_the_day_at_midnight(desk, monkeypatch):
+    # The bug this guards: screening at 00:01 returns RVOL near zero, nothing
+    # qualifies, the screen is marked done, and nothing can trade all day.
+    calls = []
+
+    async def _screen(feed, cfg, now):
+        calls.append(now)
+        return []
+
+    monkeypatch.setattr("panaoptions.app.screen", _screen)
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(0, 1))
+    await desk.cycle()
+    assert calls == [], "nothing to screen at midnight"
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 10))
+    await desk.cycle()
+    assert len(calls) == 1, "and it still screens when the tape is real"
+
+
+@pytest.mark.asyncio
+async def test_the_screen_retries_while_nothing_qualifies(desk, monkeypatch):
+    # The pre-market tape thickens towards the open, so a 09:00 screen finding
+    # nothing does not mean the day is over.
+    calls = []
+
+    async def _screen(feed, cfg, now):
+        calls.append(now)
+        return [PreMarketRead(symbol="SPY", passed=False)]
+
+    monkeypatch.setattr("panaoptions.app.screen", _screen)
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 0))
+    await desk.cycle()
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 2))
+    await desk.cycle()
+    assert len(calls) == 1, "not every single cycle"
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 10))
+    await desk.cycle()
+    assert len(calls) == 2, "but again once the interval has passed"
+
+
+@pytest.mark.asyncio
+async def test_the_screen_stops_repeating_once_something_qualifies(desk, monkeypatch):
+    calls = []
+
+    async def _screen(feed, cfg, now):
+        calls.append(now)
+        return [PreMarketRead(symbol="SPY", passed=True)]
+
+    monkeypatch.setattr("panaoptions.app.screen", _screen)
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 0))
+    await desk.cycle()
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 30))
+    await desk.cycle()
+    assert len(calls) == 1, "a result that passed is not re-screened"
