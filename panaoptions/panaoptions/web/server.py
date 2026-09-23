@@ -54,7 +54,10 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         out = desk.status()
         out["config"] = _config_payload(cfg)
         out["universe"] = cfg.symbols
+        out["profile"] = cfg.profile_label
         out["session"] = {
+            "timeframe": cfg.get("technical.timeframe"),
+            "dte": f"{cfg.get('contracts.min_dte')}-{cfg.get('contracts.max_dte')}",
             "entry_open": cfg.get("session.entry_open"),
             # What the desk actually honours, which is the last strategy's
             # close — showing the configured 10:30 would be a lie on screen.

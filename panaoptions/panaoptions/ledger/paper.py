@@ -83,7 +83,27 @@ class PaperLedger:
                                     ExitReason.STOP))
             return fills
 
-        # 2. The underlying invalidating the reason for the trade. The option
+        # 2. Time. A thesis that has not paid inside its window is wrong even
+        #    though nothing has technically broken — and on a same-day
+        #    contract, "not yet wrong" still bleeds theta every minute. Left
+        #    off (null), a scalp desk enters once at 13:10, sits in it until
+        #    the level finally breaks at 15:02, and takes one trade a day
+        #    while calling itself a scalper.
+        #
+        #    Deliberately NOT applied to a trade that has already scaled out:
+        #    once the first target is banked the stop is at breakeven and the
+        #    runner is free, which is the one position worth giving time to.
+        limit = self.cfg.get("risk.max_hold_minutes")
+        if limit and not trade.breakeven_armed:
+            held = (ts - trade.opened_at).total_seconds() / 60.0
+            if held >= float(limit):
+                fills.append(self._exit(trade, contract_price, ts,
+                                        ExitReason.TIME_EXIT))
+                log.info("%s closed on time: %.0f minutes without reaching a "
+                         "target", trade.contract_label, held)
+                return fills
+
+        # 3. The underlying invalidating the reason for the trade. The option
         #    may not have hit its own stop yet, but the setup has gone.
         if underlying_price is not None and trade.underlying_support:
             broken = (underlying_price < trade.underlying_support
@@ -98,7 +118,7 @@ class PaperLedger:
             return fills + self._manage_trail(trade, contract_price,
                                               underlying_price, ts, ema_fast)
 
-        # 3. First target: scale out, then move the stop to breakeven.
+        # 4. First target: scale out, then move the stop to breakeven.
         if not trade.breakeven_armed and contract_price >= trade.target_1:
             share = float(self.cfg.get("risk.take_profit_1_size_pct", 50.0))
             half = max(1, int(round(trade.remaining * share / 100.0)))
@@ -110,7 +130,7 @@ class PaperLedger:
                 log.info("%s scaled out %d at TP1 — stop to breakeven %.2f",
                          trade.contract_label, half, trade.stop_price)
 
-        # 4. Second target, or the EMA trail once the runner is alone.
+        # 5. Second target, or the EMA trail once the runner is alone.
         if trade.is_open and contract_price >= trade.target_2:
             fills.append(self._exit(trade, trade.target_2, ts,
                                     ExitReason.TARGET_2))

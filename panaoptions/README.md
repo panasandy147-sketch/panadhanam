@@ -145,6 +145,83 @@ run.py --report 30                      # the paper-trading record
 No API key. Market data comes from Yahoo's public endpoints over plain
 `httpx` — one less package to install than `yfinance`.
 
+## Profiles: which desk are you running?
+
+```bash
+python run.py --profiles                        # what exists
+python run.py --profile scalp --check-config    # what it changes
+python run.py --profile scalp                   # run it
+```
+
+There are two desks in here, and they answer the same tape differently.
+
+| | **default** | **scalp** |
+|---|---|---|
+| Bars | 5m, patterns on 15m | 1m, patterns on 5m |
+| Expiries | 7–45 DTE | 0–1 DTE |
+| Screen | gap ≥ 1%, RVOL ≥ 1.5 | no catalyst filter |
+| Universe | 8 large caps | QQQ, SPY, IWM |
+| Entries | 09:35–15:00 | 09:40–15:30 |
+| Deployed per trade | 20% | 10% |
+| Disaster stop | 45% | 35% |
+| Max hold | no limit | 20 minutes |
+
+**They are different machines, not settings.** The default desk is looking for
+a catalyst — a 1% gap on real volume — and then holds a multi-week contract
+through intraday noise. On a quiet index ETF grinding through a $3 range it
+correctly does nothing, because the move it is built to trade is not there.
+
+The scalp profile trades exactly that tape. A $1.10 push on QQQ is noise to
+the first desk and the entire trade to the second.
+
+A profile is deep-merged over `config/settings.yaml`, so anything it does not
+mention keeps its default. An unknown profile name is an error rather than a
+silent fall back to the default — running one desk while believing you
+selected the other is the most expensive way this could fail — and the
+profile in force is printed by `--check-config` and shown on the dashboard.
+
+### If the desk took nothing today
+
+Work down the gates in order; each one is visible somewhere:
+
+1. **The pre-market screen.** Nothing that fails it is ever looked at again.
+   `python run.py --screen` shows every symbol with its gap, its RVOL and the
+   reason. A quiet index ETF fails the default screen on most days by design:
+   QQQ closing −0.89% is inside the ±1% threshold, so it is never scanned,
+   and no strategy rule downstream ever runs.
+2. **The bar size.** Patterns are read on 15m by default. A reversal on a
+   1-minute chart is not visible to it and never will be — that is the scalp
+   profile's job.
+3. **The entry window.** Shown on the dashboard and in `--check-config`. It
+   runs until the last enabled strategy shuts.
+4. **The contract.** `--check-config` says whether the budget can buy what
+   the rules ask for; `--explain-contracts` prices the live chain and lists
+   every rejection with its reason.
+5. **The activity log**, at the bottom of the dashboard. `hunt.skip`,
+   `setup.pass`, `contract.none` and `risk.refused` each say which gate
+   stopped the trade. A desk that is scanning and taking nothing and a desk
+   that is hung look identical from an empty position list; this is the
+   difference.
+
+### A note on 0-DTE
+
+The scalp profile buys same-day contracts, which changes three things the
+default profile's rules assume:
+
+* **Theta stops being a slow leak.** A same-day contract loses its whole
+  extrinsic value by the close whatever the underlying does, so a call that
+  is correct but takes forty minutes to be right can still expire worthless.
+  That is what `risk.max_hold_minutes` is for: a scalp that has not reached
+  its first target in twenty minutes is wrong even though nothing has broken.
+  It does not apply once the first target is banked, because the stop is at
+  breakeven by then and the runner is the one position worth room.
+* **Gamma runs the position.** The +120%-in-six-minutes moves are real. So is
+  −100% in the same six minutes from the same size. The profile deploys half
+  as much per trade and halts the day twice as early.
+* **Published win rates are even less transferable.** Those figures are from
+  daily bars. Applying them to a 1-minute chart on a 0-DTE contract is two
+  extrapolations stacked, which is why the journal measures them here.
+
 ## The four strategies
 
 Every entry is tagged with the strategy that produced it, so the journal can

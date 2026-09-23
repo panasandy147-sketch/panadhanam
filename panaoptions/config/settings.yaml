@@ -250,6 +250,12 @@ risk:
   # to $2,000 leaves a limit smaller than a single stop-out, so the breaker
   # trips on the first loser and the desk is really a one-trade-a-day rule
   # without ever saying so.
+  # Close a position that has not reached its first target within this many
+  # minutes. null means no time limit, which is right for a desk holding
+  # 7-45 day contracts: there, time is what you paid for. A same-day contract
+  # is the opposite — see the scalp profile.
+  max_hold_minutes: null
+
   daily_loss_limit_pct: 10.0
   # Set this to a number to override the percentage with a fixed amount.
   daily_loss_limit: null

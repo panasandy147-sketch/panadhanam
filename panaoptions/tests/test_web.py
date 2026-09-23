@@ -399,3 +399,12 @@ def test_every_asset_is_stamped_not_a_hand_kept_list(client):
     unstamped = re.findall(r'/static/([\w.-]+\.(?:js|css))(?!\?v=)', page)
     assert not unstamped, f"not cache-busted: {unstamped}"
     assert "vendor-lightweight-charts.js?v=" in page
+
+
+def test_the_dashboard_names_the_profile_it_is_running(client):
+    """Running the scalp desk while reading a screen that says nothing about
+    it is the kind of confusion that costs money."""
+    body = client.get("/api/status").json()
+    assert body["profile"] == "default"
+    assert body["session"]["timeframe"] == "5m"
+    assert body["session"]["dte"] == "7-14"

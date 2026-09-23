@@ -75,7 +75,7 @@ def _require_dependencies() -> None:
 _require_dependencies()
 
 from panaoptions import clock  # noqa: E402
-from panaoptions.config import get_config  # noqa: E402
+from panaoptions.config import Config, get_config  # noqa: E402
 from panaoptions.logging import get_logger  # noqa: E402
 
 log = get_logger("run")
@@ -285,6 +285,17 @@ def _check_config() -> int:
     budget = cfg.capital * float(cfg.get("risk.max_capital_deployed_pct", 20)) / 100
 
     print("\n=== CONFIGURATION CHECK ===")
+    print(f"  Profile           {cfg.profile_label}")
+    print(f"  Bars              {cfg.get('technical.timeframe')} "
+          f"(patterns on "
+          f"{cfg.get('strategies.candlestick_at_level.timeframe', '15m')})")
+    print(f"  Expiries          {cfg.get('contracts.min_dte')}-"
+          f"{cfg.get('contracts.max_dte')} DTE")
+    print(f"  Entries           {cfg.get('session.entry_open')}-"
+          f"{cfg.last_entry_hhmm}, square off "
+          f"{cfg.get('session.force_exit_at')}")
+    print(f"  Screen            gap >= |{cfg.get('premarket.min_gap_pct')}|%, "
+          f"RVOL >= {cfg.get('premarket.min_rvol')}")
     print(f"  Capital           ${cfg.capital:,.2f}")
     print(f"  Deployed per trade ${budget:,.2f} "
           f"({cfg.get('risk.max_capital_deployed_pct')}%)")
@@ -429,6 +440,29 @@ async def _train(symbols: list[str]) -> int:
         return 1
 
 
+def _list_profiles() -> int:
+    """What profiles exist, and what each one changes about the desk."""
+    from panaoptions.config import PROFILE_DIR, available_profiles
+
+    names = available_profiles()
+    print("=== PROFILES ===")
+    print("  default            5m/15m bars, 7-45 DTE contracts. The shipped desk.")
+    if not names:
+        print(f"  (no profiles installed in {PROFILE_DIR})")
+        return 0
+    for name in names:
+        cfg = Config(profile=name)
+        print(f"  {name:18} {cfg.get('technical.timeframe')} bars, "
+              f"{cfg.get('contracts.min_dte')}-{cfg.get('contracts.max_dte')} DTE, "
+              f"entries {cfg.get('session.entry_open')}-{cfg.last_entry_hhmm}, "
+              f"universe {', '.join(cfg.symbols)}")
+    print()
+    print("  Run one with:  python run.py --profile <name>")
+    print("  A profile is a DIFFERENT DESK, not a tuning — check what it")
+    print("  changes with:  python run.py --profile <name> --check-config")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="panaoptions — paper options desk")
     parser.add_argument("--once", action="store_true", help="one cycle, then exit")
@@ -450,6 +484,11 @@ def main() -> None:
     parser.add_argument("--set", nargs="+", action="extend", metavar="KEY=VALUE",
                         dest="set_env",
                         help="write settings into .env; repeatable")
+    parser.add_argument("--profile", metavar="NAME",
+                        help="config profile to layer over settings.yaml "
+                             "(e.g. scalp — a 1-minute, 0-DTE desk)")
+    parser.add_argument("--profiles", action="store_true",
+                        help="list the available profiles and exit")
     parser.add_argument("--interval", type=int, default=60,
                         help="seconds between cycles (default 60)")
     parser.add_argument("--no-web", action="store_true",
@@ -459,6 +498,18 @@ def main() -> None:
     # fighting over a port is a confusing way to find that out.
     parser.add_argument("--port", type=int, default=8100)
     args = parser.parse_args()
+
+    if args.profiles:
+        raise SystemExit(_list_profiles())
+
+    # Selected before anything reads the configuration, so every command below
+    # — including --check-config — reports the desk that will actually run.
+    if args.profile:
+        try:
+            get_config(args.profile)
+        except FileNotFoundError as exc:
+            print(exc)
+            raise SystemExit(2) from None
 
     if args.set_env:
         raise SystemExit(_set_env(args.set_env))

@@ -68,6 +68,8 @@ function renderAccount(s) {
       <div class="sub">limit ${money(r.daily_loss_limit)}</div></div>
     <div class="tile"><div class="k">Entry window</div>
       <div class="v" style="font-size:15px">${esc(s.session?.entry_open)}–${esc(s.session?.entry_close)}</div>
+      <div class="sub">${esc(s.profile || "default")} · ${
+        esc(s.session?.timeframe)} bars · ${esc(s.session?.dte)} DTE</div>
       <div class="sub">square off ${esc(s.session?.force_exit_at)}</div></div>`;
 }
 

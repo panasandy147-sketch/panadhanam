@@ -205,3 +205,77 @@ def test_profit_factor_is_none_rather_than_zero_with_no_losses(ledger, cfg):
         "0.0 would read as 'terrible' when it means 'nothing has gone wrong'"
     assert stats["win_rate"] == 100.0
     assert stats["by_exit"]["TARGET_2"]["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# The time exit
+# --------------------------------------------------------------------------- #
+def test_no_time_limit_by_default(cfg):
+    """A desk holding 7-45 day contracts paid for that time.
+
+    Closing it after twenty minutes would be throwing away the thing it
+    bought, so the default must be off — not a large number, off.
+    """
+    assert cfg.get("risk.max_hold_minutes") is None
+
+
+def test_a_scalp_that_has_not_worked_is_closed_on_time(cfg):
+    """Not yet wrong is not the same as right.
+
+    On a same-day contract every minute of "not yet wrong" is theta, and
+    without this rule the desk enters once and sits in it: on the QQQ
+    afternoon in test_profiles.py it held one position for nearly two hours
+    and took nothing else all day.
+    """
+
+    cfg.data["risk"]["max_hold_minutes"] = 20
+    ledger = PaperLedger(cfg, RiskManager(cfg))
+    signal, opened = _signal(), TS
+    trade = ledger.open(signal, opened)
+
+    # Nineteen minutes in, going nowhere: still the desk's trade to hold.
+    assert not ledger.mark(trade.id, signal.entry_price,
+                           ts=opened + timedelta(minutes=19))
+    assert trade.is_open
+
+    fills = ledger.mark(trade.id, signal.entry_price,
+                        ts=opened + timedelta(minutes=21))
+    assert fills and not trade.is_open
+    assert trade.exit_reason is ExitReason.TIME_EXIT
+
+
+def test_the_clock_does_not_touch_a_trade_that_has_already_paid(cfg):
+    """Once the first target is banked the stop is at breakeven.
+
+    That runner is the one position worth giving room to, so the time limit
+    must not be what takes it off.
+    """
+
+    cfg.data["risk"]["max_hold_minutes"] = 20
+    ledger = PaperLedger(cfg, RiskManager(cfg))
+    signal, opened = _signal(), TS
+    trade = ledger.open(signal, opened)
+
+    ledger.mark(trade.id, signal.target_1, ts=opened + timedelta(minutes=5))
+    assert trade.breakeven_armed
+
+    ledger.mark(trade.id, signal.entry_price * 1.05,
+                ts=opened + timedelta(minutes=45))
+    assert trade.is_open, "the runner was closed by the clock after scaling out"
+
+
+def test_the_stop_still_comes_before_the_clock(cfg):
+    """Ordering matters: a stopped-out trade must be recorded as stopped.
+
+    Logging it as a time exit would hide a rule-break from the journal, which
+    grades those two very differently.
+    """
+
+    cfg.data["risk"]["max_hold_minutes"] = 20
+    ledger = PaperLedger(cfg, RiskManager(cfg))
+    signal, opened = _signal(), TS
+    trade = ledger.open(signal, opened)
+
+    ledger.mark(trade.id, signal.stop_price - 0.05,
+                ts=opened + timedelta(minutes=30))
+    assert trade.exit_reason is ExitReason.STOP

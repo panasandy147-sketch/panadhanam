@@ -23,11 +23,15 @@ from panaoptions.logging import get_logger
 log = get_logger("preflight")
 
 # Rough spot and implied-vol levels for the default universe, used only to
-# estimate what an at-the-money contract costs when no live chain is in hand.
-# Wrong by 20% is still right about the conclusion.
+# estimate what a contract costs when no live chain is in hand. Wrong by 20%
+# is still right about the conclusion, which is all this is for — a stale
+# figure here changes a warning's dollar amount, never whether it fires.
+#
+# These drift. `python run.py --explain-contracts` prices the real chain and
+# is the answer whenever the exact number matters.
 _TYPICAL = {
     # The brief's universe — at the money costs $320-$1,800 a contract.
-    "SPY": (570, 0.14), "QQQ": (495, 0.18), "AAPL": (230, 0.25),
+    "SPY": (570, 0.14), "QQQ": (740, 0.18), "AAPL": (230, 0.25),
     "NVDA": (180, 0.50), "TSLA": (420, 0.55), "AMD": (160, 0.45),
     "MSFT": (425, 0.22), "AMZN": (225, 0.30),
     # Liquid names a small account can actually buy at the money.
@@ -240,7 +244,12 @@ def check(cfg) -> list[Finding]:
             if len(band) != 2 or len(window) != 2:
                 continue
             wanted_delta, wanted_dte = float(band[0]), int(window[0])
-            costs = [premium_estimate(spot, iv, wanted_dte, wanted_delta)
+            # A 0-DTE contract expires today, not in zero time: priced at zero
+            # days every same-day band would come back free and pass this
+            # check trivially, which is the opposite of useful. Roughly a
+            # third of a session is left when these actually get bought.
+            priced_dte = wanted_dte if wanted_dte > 0 else 0.3
+            costs = [premium_estimate(spot, iv, priced_dte, wanted_delta)
                      * multiplier
                      for spot, iv in (_TYPICAL.get(sym.upper()) or (0, 0)
                                       for sym in cfg.symbols)

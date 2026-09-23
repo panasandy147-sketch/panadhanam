@@ -1,0 +1,148 @@
+# ==========================================================================
+# profile: scalp — a 1-minute, 0-DTE intraday desk.
+#
+# This is a DIFFERENT MACHINE from the default profile, not a tuning of it.
+# The default reads 5m/15m bars and buys 7-45 day contracts, so a move worth
+# $1.10 on QQQ is noise it is built to sit through. This profile reads
+# 1-minute bars and buys same-day contracts, where that same $1.10 is the
+# whole trade.
+#
+# Switch with:   python run.py --profile scalp
+# Values here are merged over config/settings.yaml; anything not named below
+# keeps its default.
+#
+# READ THIS BEFORE USING IT
+# -------------------------
+# 0-DTE is not the default profile with shorter bars. Three things change:
+#
+#   * Theta is no longer a slow leak. A same-day contract loses its whole
+#     extrinsic value by the close whatever the underlying does, so a correct
+#     call that takes forty minutes to be right can still expire worthless.
+#   * Gamma runs the position, not delta. The +120% moves are real; so is
+#     -100% in the same six minutes, from the same size.
+#   * The scale-out and trail were designed for multi-hour holds. At this
+#     speed the first target is usually hit or the stop is, with nothing in
+#     between, so the second target rarely comes into play.
+#
+# The risk model here is unchanged and deliberately so: the stop is still the
+# level on the UNDERLYING, and the disaster backstop is tightened because a
+# 45% drawdown on a 0-DTE contract is often unrecoverable inside the session.
+# ==========================================================================
+
+session:
+  entry_open: "09:40"
+  # Entries run to 15:30. Past that a 0-DTE contract is mostly gamma and a
+  # spread, and the square-off is minutes away.
+  entry_close: "15:30"
+  tighten_stops_at: "15:00"
+  # Earlier than the default: a same-day contract held into the last minutes
+  # is a lottery ticket, not a position.
+  force_exit_at: "15:40"
+
+premarket:
+  # The default screen is looking for a catalyst: a 1% gap on real volume.
+  # That is the right filter for a swing entry and the wrong one here — an
+  # index ETF grinding sideways on ordinary volume is exactly the tape this
+  # profile trades, and a 1% gap requirement screens it out before anything
+  # is ever looked at. QQQ closing -0.89% on the day fails the default screen
+  # and is never scanned.
+  min_gap_pct: 0.0
+  # Relative volume is a catalyst filter, and there is no catalyst to find
+  # here. The universe below is three of the most liquid instruments that
+  # exist; their tradability is a property of the instrument, not of the day.
+  # Gating on RVOL would drop them on exactly the quiet afternoons this
+  # profile is built for — which is the failure it exists to fix.
+  min_rvol: 0.0
+  screen_from: "09:35"
+  rescreen_minutes: 15
+
+universe:
+  # Penny-wide spreads and the deepest 0-DTE chains there are. A scalp gives
+  # back its edge in the spread anywhere thinner than this.
+  symbols: ["QQQ", "SPY", "IWM"]
+
+technical:
+  timeframe: "1m"
+  trend_timeframe: "5m"
+  atr_period: 14
+  volume_lookback: 20
+
+contracts:
+  # Same-day and next-day only.
+  min_dte: 0
+  max_dte: 1
+  min_delta: 0.35
+  max_delta: 0.60
+  # 0-DTE spreads widen fast near the close; this is the cost of admission,
+  # not a target.
+  max_spread_pct_of_mid: 8.0
+  min_contract_price: 0.15
+  max_contract_price: 5.00
+
+risk:
+  max_open_trades: 1
+  # A scalp risks less per trade because it takes many more of them.
+  max_capital_deployed_pct: 10.0
+  stop_mode: underlying
+  # Tighter than the default 45%: a 0-DTE contract that has halved usually
+  # does not come back inside the session.
+  disaster_stop_pct: 35.0
+  take_profit_1_pct: 40.0
+  take_profit_2_pct: 80.0
+  # A scalp that has not worked in twenty minutes is wrong, whether or not
+  # the level has broken. Without this the desk enters once and sits there:
+  # on the QQQ afternoon in tests/test_profiles.py it held one position from
+  # 13:10 to 15:02 and took nothing else all day.
+  max_hold_minutes: 20
+
+  daily_loss_limit_pct: 6.0
+
+strategies:
+  orb_vwap:
+    enabled: true
+    from: "09:40"
+    to:   "11:00"
+    volume_multiple: 1.2
+  vwap_ema_pullback:
+    enabled: true
+    from: "09:45"
+    to:   "15:30"
+    volume_multiple: 0.9
+  liquidity_sweep:
+    enabled: true
+    from: "09:40"
+    to:   "15:30"
+    volume_multiple: 1.2
+  candlestick_at_level:
+    enabled: true
+    from: "09:40"
+    to:   "15:30"
+    # Patterns are read on 5m and entered on 1m. Reading them on 1m directly
+    # turns every second bar into a hammer.
+    timeframe: "5m"
+    # A 1m ATR on QQQ is a few cents, so half of one is a level tolerance of
+    # pennies. Widened so "at the level" survives normal tick noise.
+    level_tolerance_atr: 1.0
+    trigger_within_bars: 3
+    volume_multiple: 1.0
+    trend_lookback: 12
+    # Every pattern gets the same contract here, because at 0 DTE the choice
+    # is which strike, not which expiry — there is only one.
+    patterns:
+      hammer:                    {delta: [0.40, 0.55], dte: [0, 1]}
+      bullish_engulfing:         {delta: [0.40, 0.55], dte: [0, 1]}
+      morning_star:              {delta: [0.40, 0.55], dte: [0, 1]}
+      tweezer_bottom:            {delta: [0.40, 0.55], dte: [0, 1]}
+      shooting_star:             {delta: [0.40, 0.55], dte: [0, 1]}
+      bearish_engulfing:         {delta: [0.40, 0.55], dte: [0, 1]}
+      evening_star:              {delta: [0.40, 0.55], dte: [0, 1]}
+      tweezer_top:               {delta: [0.40, 0.55], dte: [0, 1]}
+      bullish_three_line_strike: {delta: [0.45, 0.60], dte: [0, 1], claimed_accuracy: 0.84}
+      bearish_three_line_strike: {delta: [0.45, 0.60], dte: [0, 1], claimed_accuracy: 0.84}
+      three_black_crows:         {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.78}
+      three_white_soldiers:      {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.75}
+      bullish_abandoned_baby:    {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.70}
+      bearish_abandoned_baby:    {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.70}
+      piercing_line:             {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.67}
+      dark_cloud_cover:          {delta: [0.40, 0.55], dte: [0, 1], claimed_accuracy: 0.67}
+      liquidity_sweep_rejection: {delta: [0.45, 0.60], dte: [0, 1], claimed_accuracy: 0.80}
