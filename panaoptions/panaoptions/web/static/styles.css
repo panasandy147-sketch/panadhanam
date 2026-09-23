@@ -176,3 +176,28 @@ footer { padding: 14px 18px 30px; color: var(--muted); font-size: 11.5px; text-a
 
 .strat-row { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; font-size: 12.5px; }
 .strat-row .win { color: var(--pos); }
+
+/* --- Activity log ------------------------------------------------------- */
+#activity-body { max-height: 420px; overflow-y: auto; }
+.log-row {
+  display: grid;
+  grid-template-columns: 74px 120px 1fr;
+  gap: 10px;
+  padding: 4px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.log-row:last-child { border-bottom: none; }
+.log-row .t { color: var(--muted); }
+.log-row .k { color: var(--accent); }
+.log-row .d { color: var(--text); overflow-wrap: anywhere; }
+.log-row.good .k { color: var(--pos); }
+.log-row.warn .k { color: var(--warn); }
+.log-row.bad  .k { color: var(--neg); }
+
+@media (max-width: 640px) {
+  .log-row { grid-template-columns: 62px 1fr; }
+  .log-row .d { grid-column: 1 / -1; padding-left: 62px; }
+}

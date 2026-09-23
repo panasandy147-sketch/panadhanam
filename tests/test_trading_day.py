@@ -167,8 +167,26 @@ def test_env_can_also_force_order_placement_off(cfg, monkeypatch):
 def test_yaml_still_decides_when_env_says_nothing(cfg, monkeypatch):
     monkeypatch.delenv("AUTO_PLACE_ORDERS", raising=False)
     cfg.reload()
-    assert cfg.get("execution.auto_place_orders") is False, \
-        "the shipped default must stay alert-only"
+    assert cfg.get("execution.auto_place_orders") is True, \
+        "the shipped default places orders — simulated ones, on the paper broker"
+
+
+def test_placing_orders_by_default_cannot_reach_real_money(cfg, monkeypatch):
+    """The default is 'trade', not 'trade with real money'.
+
+    auto_place_orders alone must never be enough for a real-money account:
+    that still needs TRADING_MODE=live AND ENABLE_LIVE_ORDERS, and an armed
+    day. This is the assertion that keeps a convenience default from becoming
+    a financial one.
+    """
+    monkeypatch.delenv("AUTO_PLACE_ORDERS", raising=False)
+    monkeypatch.delenv("ENABLE_LIVE_ORDERS", raising=False)
+    monkeypatch.delenv("TRADING_MODE", raising=False)
+    cfg.reload()
+
+    assert cfg.get("execution.auto_place_orders") is True
+    assert cfg.live_orders_enabled is False, \
+        "no amount of config may enable real orders without the .env switches"
 
 
 # --------------------------------------------------------------------------- #

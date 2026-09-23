@@ -293,7 +293,17 @@ execution:
   limit_slippage_pct: 0.1
   product: "MIS"                 # MIS (intraday) | NRML | CNC
   variety: "regular"
-  auto_place_orders: false       # false = dashboard alert only (recommended)
+  # true = approved signals become orders. On the paper broker (the default)
+  # those are SIMULATED fills, which is the whole point of paper trading.
+  #
+  # This does NOT put real money at risk. A real-money broker additionally
+  # requires TRADING_MODE=live AND ENABLE_LIVE_ORDERS=true in .env, and the
+  # trading day must be armed — three switches and a daily decision, none of
+  # which this flag touches. On a paper account it is simply the difference
+  # between a desk that alerts and a desk that trades.
+  #
+  # AUTO_PLACE_ORDERS in .env overrides this per machine.
+  auto_place_orders: true
   confirm_before_live: true
 
 # --------------------------------------------------------------------------

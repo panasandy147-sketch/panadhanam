@@ -252,3 +252,35 @@ def test_the_strategies_endpoint_lists_all_three_with_their_windows(client):
         assert strategy["from"] < strategy["to"]
         assert strategy["from"] >= "09:45", \
             "every strategy skips the opening chop"
+
+
+# --------------------------------------------------------------------------- #
+# The activity log: the difference between a working desk and a hung one.
+# --------------------------------------------------------------------------- #
+def test_the_activity_endpoint_returns_newest_first(client):
+    client.desk.activity.add("cycle.start", "open")
+    client.desk.activity.add("screen.done", "2/8 passed", level="good")
+
+    body = client.get("/api/activity").json()
+    assert body["count"] == 2
+    assert body["events"][0]["kind"] == "screen.done", "a log reads newest first"
+    assert body["events"][0]["level"] == "good"
+    assert "time" in body["events"][0]
+
+
+def test_the_log_is_bounded_so_a_long_session_cannot_grow_without_limit(client):
+    from panaoptions.activity import ActivityLog
+
+    log = ActivityLog(limit=5)
+    for i in range(20):
+        log.add("cycle.start", str(i))
+
+    assert len(log) == 5
+    assert log.recent()[0]["detail"] == "19", "the newest survives, not the oldest"
+
+
+def test_an_empty_log_is_not_an_error(client):
+    client.desk.activity.clear()
+    body = client.get("/api/activity").json()
+    assert body["events"] == []
+    assert body["count"] == 0

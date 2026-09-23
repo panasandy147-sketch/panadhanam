@@ -138,6 +138,13 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         return {"days": days, "entries": rows, "stats": analyse(rows),
                 "cards": cards(limit=10), "coach": coach}
 
+    @app.get("/api/activity")
+    async def activity(limit: int = 60) -> dict[str, Any]:
+        """What the desk just did. A working desk and a hung one look the same
+        from an empty position list; this is the difference."""
+        return {"events": desk.activity.recent(limit),
+                "count": len(desk.activity)}
+
     @app.get("/api/daily")
     async def daily_review(day: str | None = None,
                            coach: bool = True) -> dict[str, Any]:

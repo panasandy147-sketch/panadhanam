@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any
 
 from panaoptions import clock
+from panaoptions.activity import ActivityLog
 from panaoptions.config import Config, get_config
 from panaoptions.data.feed import YahooFeed
 from panaoptions.data.premarket import screen
@@ -43,6 +44,9 @@ class OptionsDesk:
         self.risk = RiskManager(self.cfg)
         self.ledger = PaperLedger(self.cfg, self.risk)
         self.notifier = Notifier(self.cfg)
+        # What the desk just did, so a working desk and a hung one look
+        # different from the outside.
+        self.activity = ActivityLog()
         self.running = False
         self.screened: list[PreMarketRead] = []
         self._screened_on: str = ""
@@ -81,6 +85,7 @@ class OptionsDesk:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    self.activity.add("error", str(exc)[:200], level="bad")
                     log.exception("cycle failed: %s", exc)
                 await asyncio.sleep(cycle_seconds)
         finally:
@@ -114,6 +119,8 @@ class OptionsDesk:
         if phase == "weekend":
             return result
 
+        self.activity.add("cycle.start", phase, ts=now)
+
         # 1. Manage what is already open, always and first.
         managed = await self._manage(now)
         result["actions"].extend(managed)
@@ -130,6 +137,12 @@ class OptionsDesk:
             self.screened = await screen(self.feed, self.cfg, now)
             self._screened_on = today
             self._screened_at = now
+            passed = [r.symbol for r in self.screened if r.passed]
+            self.activity.add(
+                "screen.done",
+                f"{len(passed)}/{len(self.screened)} passed"
+                + (f" — {', '.join(passed)}" if passed else ""),
+                level="good" if passed else "info", ts=now)
 
         # 3. New entries: only in the window, only when flat.
         if phase == "entry_window":
@@ -151,6 +164,8 @@ class OptionsDesk:
 
         candidates = [r.symbol for r in self.screened if r.passed]
         if not candidates:
+            self.activity.add("hunt.skip", "nothing passed the pre-market screen",
+                              ts=now)
             return []
 
         actions: list[str] = []
@@ -165,6 +180,12 @@ class OptionsDesk:
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
 
             if setup is None:
+                for attempt in attempts:
+                    self.activity.add(
+                        "setup.pass",
+                        f"{symbol} {attempt.strategy.value} — "
+                        + (attempt.blockers[0] if attempt.blockers else "no setup"),
+                        ts=now)
                 # Record every strategy that looked and passed, with its
                 # reason. The rejections are the half that tells you whether
                 # a rule is selective or simply impossible.
@@ -190,6 +211,11 @@ class OptionsDesk:
                     actions.append(f"{symbol}: model vetoed ({probability:.0%})")
                     continue
 
+            self.activity.add(
+                "setup.fired",
+                f"{symbol} {setup.strategy.value} {setup.direction.value} — "
+                f"{setup.pattern}", level="good", ts=now)
+
             search = await self._pick_contract(symbol, setup, now)
             if search.chosen is None:
                 store.save_signal_seen(signal_id, now, symbol,
@@ -197,6 +223,8 @@ class OptionsDesk:
                                        search.note or "no contract qualified",
                                        {"rejected": search.rejected})
                 actions.append(f"{symbol}: {search.note}")
+                self.activity.add("contract.none", f"{symbol} — {search.note}",
+                                  level="warn", ts=now)
                 log.info("%s setup fired but no contract qualified. %s",
                          symbol, search.note)
                 continue
@@ -207,6 +235,8 @@ class OptionsDesk:
                 store.save_signal_seen(signal_id, now, symbol,
                                        setup.direction.value, False, refusal)
                 actions.append(f"{symbol}: {refusal}")
+                self.activity.add("risk.refused", f"{symbol} — {refusal}",
+                                  level="warn", ts=now)
                 continue
 
             trade = self.ledger.open(signal, now)
@@ -216,6 +246,11 @@ class OptionsDesk:
                                     "strategy": setup.strategy.value})
             await self.notifier.entry(signal)
             actions.append(f"{symbol}: ENTERED {signal.alert_line()}")
+            self.activity.add(
+                "trade.open",
+                f"{signal.alert_line()} — {setup.strategy.value}, "
+                f"x{signal.quantity}",
+                level="good", ts=now)
             break            # one trade at a time; stop hunting
 
         return actions
@@ -307,6 +342,11 @@ class OptionsDesk:
             fills = self.ledger.mark(trade_id, price, underlying, now, ema_fast)
             for fill in fills:
                 actions.append(f"{trade.symbol}: {fill.reason} at {fill.price:.2f}")
+                self.activity.add(
+                    "trade.exit",
+                    f"{trade.contract_label} {fill.reason} at {fill.price:.2f} "
+                    f"({trade.realised_pnl:+,.2f})",
+                    level="good" if trade.realised_pnl >= 0 else "bad", ts=now)
             if not trade.is_open:
                 store.save_trade(trade)
                 await self._grade(trade)
@@ -368,6 +408,13 @@ class OptionsDesk:
             journal_store.save_entry(entry)
             journal_store.save_card(card)
             journal_store.export_index()
+            self.activity.add(
+                "graded",
+                f"{trade.contract_label} {entry.verdict.value if entry.verdict else '?'} "
+                f"({entry.execution_score}/10)"
+                + (f" — {', '.join(m.value for m in entry.mistakes)}"
+                   if entry.mistakes else ""),
+                level="bad" if entry.mistakes else "good")
             log.info("graded %s → %s (%d/10)%s", trade.contract_label,
                      entry.verdict.value if entry.verdict else "?",
                      entry.execution_score,

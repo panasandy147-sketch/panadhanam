@@ -353,6 +353,31 @@ function renderReview(r, target) {
       </div>` : ""}`;
 }
 
+function renderActivity(d) {
+  const events = d.events || [];
+  $("activity-meta").textContent = events.length
+    ? `${events.length} of the last ${d.count}` : "";
+  $("activity-body").innerHTML = events.length
+    ? events.map((e) => `
+        <div class="log-row ${esc(e.level)}">
+          <span class="t">${esc(e.time)}</span>
+          <span class="k">${esc(e.kind)}</span>
+          <span class="d">${esc(e.detail)}</span>
+        </div>`).join("")
+    : `<div class="empty">Nothing yet. The desk logs every cycle, every
+       symbol it judges, and the reason it passed.</div>`;
+}
+
+/* The log is the one panel worth polling faster — it is what tells you the
+   desk is alive between trades. */
+async function refreshActivity() {
+  try {
+    renderActivity(await getJSON("/api/activity?limit=60"));
+  } catch {
+    /* the next tick will retry; a log gap is not worth an error banner */
+  }
+}
+
 /* ------------------------------------------------------------------ */
 async function refresh() {
   try {
@@ -398,4 +423,6 @@ $("btn-daily-md").onclick = () => {
 };
 
 refresh();
+refreshActivity();
 setInterval(refresh, 15000);
+setInterval(refreshActivity, 5000);

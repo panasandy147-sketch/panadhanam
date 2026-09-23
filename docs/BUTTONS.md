@@ -182,6 +182,6 @@ The badge beside them says which of three states you are in:
 
 | Badge | Meaning |
 |---|---|
-| `ALERT ONLY (no orders)` | `AUTO_PLACE_ORDERS` is off. Nothing is sent anywhere. |
+| `ALERT ONLY (no orders)` | `AUTO_PLACE_ORDERS` is off. Nothing is sent anywhere. Not the default — something has turned it off. |
 | `PAPER ORDERS ON` | Approved signals become **simulated** orders, on a day you have armed. |
 | `LIVE ORDERS` | Real orders. Real money. |

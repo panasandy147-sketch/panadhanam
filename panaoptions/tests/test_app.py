@@ -321,3 +321,41 @@ async def test_the_screen_stops_repeating_once_something_qualifies(desk, monkeyp
     monkeypatch.setattr(clock, "now", lambda tz: _at(9, 30))
     await desk.cycle()
     assert len(calls) == 1, "a result that passed is not re-screened"
+
+
+# --------------------------------------------------------------------------- #
+# The activity log records the decisions, not just the trades.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_a_cycle_logs_what_it_did(desk, monkeypatch):
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+
+    kinds = [e["kind"] for e in desk.activity.recent(50)]
+    assert "cycle.start" in kinds
+    assert "screen.done" in kinds
+    assert "setup.fired" in kinds
+    assert "trade.open" in kinds
+
+
+@pytest.mark.asyncio
+async def test_a_symbol_that_was_passed_over_says_why(desk, monkeypatch):
+    # The desk spends most of a session deciding NOT to trade. Without this,
+    # a working desk and a hung one look identical.
+    desk.feed = FakeFeed(contract_mid=6.00)          # nothing affordable
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+
+    events = desk.activity.recent(50)
+    refusals = [e for e in events if e["kind"] in {"contract.none", "risk.refused"}]
+    assert refusals, "an empty result must carry its reason"
+    assert refusals[0]["level"] == "warn"
+    assert any(word in refusals[0]["detail"] for word in ("budget", "cost"))
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_logged_at_the_weekend(desk, monkeypatch):
+    monkeypatch.setattr(clock, "now",
+                        lambda tz: datetime(2026, 9, 26, 10, 0, tzinfo=ET))
+    await desk.cycle()
+    assert desk.activity.recent() == []
