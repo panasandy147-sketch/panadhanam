@@ -512,3 +512,19 @@ def test_the_box_is_on_the_page(client):
     page = client.get("/").text
     assert 'id="watch-input"' in page
     assert "cannot open or close a position" in page
+
+
+def test_the_page_offers_a_notification_toggle(client):
+    """Notifications are opt-in and only for trades.
+
+    Alerting on every setup considered would be a notification every few
+    seconds on a 1-minute desk across three symbols, and would be switched
+    off within the hour.
+    """
+    page = client.get("/").text
+    assert 'id="notify-trades"' in page
+    js = client.get("/static/app.js").text
+    assert '"trade.open"' in js and '"trade.exit"' in js
+    assert "setup.pass" not in js.split("NOTIFY_KINDS")[1][:200]
+    # Opening the page must not replay the day as a burst of alerts.
+    assert "notifySeeded" in js

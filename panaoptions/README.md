@@ -172,8 +172,12 @@ Two limits, both deliberate:
 
 ### How often it checks
 
-Every **60 seconds** by default, and all of your symbols in the same cycle —
-not one per cycle, not one per minute each. Change it with `--interval`:
+Every **60 seconds** by default, and all of your symbols **at the same
+instant** — gathered concurrently, not fetched one after another. Sequentially,
+five symbols is five round trips to Yahoo laid end to end, during which the
+first symbol's chart goes stale while the last is still being read; a cycle
+should judge one moment, not a smear of five. Change the interval with
+`--interval`:
 
 ```bash
 python run.py --profile scalp --interval 30
@@ -203,15 +207,37 @@ Two things about the cadence are worth knowing:
   manages what it has instead. It logs `hunt.skip` saying so, and the Live
   Candidate panel clears rather than leaving the last symbol on screen as
   though it were still being judged.
+* **A cycle fills every free slot.** If three symbols set up in the same
+  minute and there is room for three, all three are taken in that cycle.
+  Stopping after the first would make `max_open_trades` a limit the desk
+  could only approach one cycle at a time, and the other two setups would
+  simply be missed.
+
+### Notifications
+
+The activity-log toolbar has **Notify me when a trade is taken** — a desktop
+notification the moment a paper trade opens or closes. It is off until you ask
+for it, asks the browser's permission on the first tick, and says so plainly
+if the browser has notifications blocked rather than leaving a ticked box that
+does nothing.
+
+Only opens and closes. Alerting on every setup considered would be a
+notification every few seconds on a 1-minute desk across three symbols, and
+would be switched off within the hour. Opening the page does not replay the
+day as a burst of alerts — the first poll seeds what has already happened.
+
+For alerts that reach you away from the machine, fill in
+`notify.discord_webhook_url` or the Telegram pair in `config/settings.yaml`;
+blank means no webhook call is ever made.
 
 The dashboard prints the cadence under the entry window: the interval, how
 many symbols, and how long the last cycle actually took.
 
 ### Watching several names at once
 
-`risk.max_open_trades` is **1** by default, which makes a watchlist a queue:
-the desk scans everything and holds one position at a time. The scalp profile
-raises it to 3.
+`risk.max_open_trades` is **3** on both profiles, so a watchlist is a desk
+rather than a queue: every symbol is judged each cycle and up to three
+positions can be live at once, in different names.
 
 More than one open position exposes a rule that had been invisible:
 `max_capital_deployed_pct` is a **per-trade** cap, so three trades at 20% each
@@ -225,6 +251,21 @@ $2,000.00 is already at work across 2 position(s), and the ceiling is
 30% of $10,000.00 ($3,000.00). One QQQ 741C costs $1,180.00 and there
 is $1,000.00 of room.
 ```
+
+And `--check-config` states what holding the maximum actually costs, because
+"three positions" is an abstraction until it is a dollar figure and the
+per-trade risk number everybody reads is for one trade:
+
+```
+[warning] risk.max_open_trades
+    Up to 3 positions at once, $900 deployed (45% of the account). If all 3
+    hit the 45% backstop together — and correlated names do — that is -$405,
+    20% of the account. In practice the daily loss limit halts the desk at
+    -$200 (10%) before it gets there.
+```
+
+Lower `risk.max_total_deployed_pct` to cap the total, or
+`risk.max_open_trades` to hold fewer at once.
 
 ## Profiles: which desk are you running?
 

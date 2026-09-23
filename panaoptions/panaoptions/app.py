@@ -239,7 +239,13 @@ class OptionsDesk:
 
     # ------------------------------------------------------------------ #
     async def _hunt(self, now: datetime) -> list[str]:
-        """Look for one trade among the symbols that passed the screen."""
+        """Look for trades among the symbols that passed the screen.
+
+        Every symbol is read at the same moment and judged against every
+        enabled strategy, and the desk takes as many as it has room for —
+        `risk.max_open_trades` positions, inside the `max_total_deployed_pct`
+        ceiling.
+        """
         if self.risk.state.halted:
             self.scanning = ""
             return []
@@ -261,14 +267,39 @@ class OptionsDesk:
                               ts=now)
             return []
 
+        # Read every symbol's tape AT ONCE rather than one after another.
+        # Sequentially, five symbols is five round trips to Yahoo laid end to
+        # end — several seconds during which the first symbol's chart is going
+        # stale while the last one is still being fetched. Gathered, they are
+        # all read at the same moment, which is also the only way the setups
+        # are comparable: a cycle should judge one instant, not a smear of
+        # five.
+        self.scanning = ", ".join(candidates)
+        tapes = await asyncio.gather(
+            *(self._tape(symbol, now) for symbol in candidates),
+            return_exceptions=True)
+
         actions: list[str] = []
-        for symbol in candidates:
-            self.scanning = symbol
-            candles = await self.feed.candles(symbol, self.cfg.get("technical.timeframe", "5m"))
+        for symbol, tape in zip(candidates, tapes, strict=False):
+            if isinstance(tape, Exception):
+                log.warning("could not read %s this cycle: %s", symbol, tape)
+                self.activity.add("error", f"{symbol} — {tape}"[:200],
+                                  level="bad", ts=now)
+                continue
+            candles, session_levels = tape
             if not candles:
                 continue
 
-            session_levels = await self._levels_for(symbol, now)
+            # Room can run out part-way through: three slots and four setups
+            # means the fourth is refused, and that refusal belongs in the log
+            # rather than being silently skipped.
+            if len(self.ledger.open_trades) >= max_open:
+                self.activity.add(
+                    "hunt.skip",
+                    f"{max_open} position(s) open — {symbol} and anything "
+                    f"after it were not judged this cycle", ts=now)
+                break
+
             setup, attempts = strategies.evaluate_all(
                 symbol, candles, session_levels, self.cfg)
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
@@ -352,9 +383,20 @@ class OptionsDesk:
                 f"{signal.alert_line()} — {setup.strategy.value}, "
                 f"x{signal.quantity}",
                 level="good", ts=now)
-            break            # one trade at a time; stop hunting
+            # Keep going while there are slots left. Stopping after the first
+            # entry would make max_open_trades a limit the desk could only
+            # reach one cycle at a time, so a second setup on another symbol
+            # in the same minute would simply be missed.
 
+        self.scanning = ""
         return actions
+
+    async def _tape(self, symbol: str, now: datetime):
+        """One symbol's candles and session levels, fetched together."""
+        candles = await self.feed.candles(
+            symbol, self.cfg.get("technical.timeframe", "5m"))
+        levels = await self._levels_for(symbol, now)
+        return candles, levels
 
     def _remember_candidate(self, symbol: str, setup, now: datetime) -> None:
         """Keep the case for the newest setup, for the dashboard to show.

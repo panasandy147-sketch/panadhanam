@@ -125,10 +125,19 @@ class RiskManager:
         deployed_pct = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
         budget = self.capital * deployed_pct / 100.0
 
-        # The per-trade budget is not the whole rule once more than one
-        # position can be open. Three trades at 20% each is 60% of the account
-        # deployed with nothing having said so — the per-trade cap is satisfied
-        # every time. This is the cap on the total.
+        # Per-trade first. When nothing is open this is the binding rule, and
+        # "20% of $500 is $100, the contract is $460" is the answer somebody
+        # needs — the total ceiling would refuse the same trade with a number
+        # that explains less.
+        if budget < cost_per_contract:
+            return self._reject(
+                f"One {contract.label} costs ${cost_per_contract:,.2f}, and "
+                f"{deployed_pct:.0f}% of ${self.capital:,.2f} is ${budget:,.2f}. "
+                f"Not even one contract fits.")
+
+        # Then the total. The per-trade cap is not the whole rule once more
+        # than one position can be open: three trades at 20% each satisfy it
+        # every single time and deploy 60% of the account.
         total_pct = float(self.cfg.get("risk.max_total_deployed_pct",
                                        deployed_pct))
         room = self.capital * total_pct / 100.0 - self.state.deployed
@@ -140,8 +149,9 @@ class RiskManager:
                 f"(${self.capital * total_pct / 100:,.2f}). One "
                 f"{contract.label} costs ${cost_per_contract:,.2f} and there "
                 f"is ${max(room, 0):,.2f} of room.")
-        budget = min(budget, room)
 
+        # Whichever is tighter decides the size.
+        budget = min(budget, room)
         quantity = int(budget // cost_per_contract)
         if quantity < 1:
             return self._reject(

@@ -65,11 +65,27 @@ def test_a_contract_dearer_than_the_budget_is_refused_with_the_arithmetic(risk, 
     assert "$460.00" in why and "$100.00" in why
 
 
-def test_only_one_trade_at_a_time(risk, setup):
+def test_the_position_limit_is_what_the_config_says(risk, setup, cfg):
+    """Three at once by default, and the refusal names the number.
+
+    The desk reads every watchlist symbol in the same instant and takes as
+    many setups as it has room for, so this limit is now a real gate rather
+    than a formality — it decides how much of the account can be exposed to
+    a single bad ten minutes.
+    """
+    assert int(cfg.get("risk.max_open_trades")) == 3
+    risk.state.open_trades = 3
+    signal, why = _size(risk, setup)
+    assert signal is None
+    assert "limit is 3" in why
+
+
+def test_one_at_a_time_is_still_available(risk, setup, cfg):
+    cfg.data["risk"]["max_open_trades"] = 1
     risk.state.open_trades = 1
     signal, why = _size(risk, setup)
     assert signal is None
-    assert "One trade at a time" in why
+    assert "limit is 1" in why
 
 
 def test_the_premium_stop_is_a_backstop_in_underlying_mode(risk, setup, cfg):
@@ -144,7 +160,7 @@ def test_rolling_to_the_same_day_does_not_wipe_the_running_total(risk):
 
 
 def test_every_refusal_is_counted_so_a_dead_rule_shows_up(risk, setup):
-    risk.state.open_trades = 1
+    risk.state.open_trades = int(risk.cfg.get("risk.max_open_trades", 1))
     for _ in range(3):
         _size(risk, setup)
     assert sum(risk.state.rejections.values()) == 3

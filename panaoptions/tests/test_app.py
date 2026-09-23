@@ -143,14 +143,32 @@ def test_the_opening_five_minutes_are_skipped_deliberately(cfg):
 
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-async def test_a_setup_inside_the_window_becomes_one_paper_trade(desk, monkeypatch):
+async def test_a_setup_inside_the_window_becomes_a_paper_trade(desk, monkeypatch):
     monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
 
-    assert len(desk.ledger.open_trades) == 1
+    assert desk.ledger.open_trades
     trade = next(iter(desk.ledger.open_trades.values()))
     assert trade.symbol in desk.cfg.symbols
     assert trade.entry_price > 0
+
+
+@pytest.mark.asyncio
+async def test_several_symbols_can_fire_in_the_same_cycle(desk, monkeypatch):
+    """Every watchlist symbol is read at the same instant and judged.
+
+    Stopping after the first entry would make max_open_trades a limit the
+    desk could only approach one cycle at a time, so a second setup on
+    another symbol in the same minute would simply be missed.
+    """
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    desk.cfg.data["risk"]["max_open_trades"] = 3
+    desk.cfg.data["risk"]["max_total_deployed_pct"] = 60.0
+    await desk.cycle()
+    assert len(desk.ledger.open_trades) > 1
+    # Different names, not the same one twice.
+    symbols = {t.symbol for t in desk.ledger.open_trades.values()}
+    assert len(symbols) == len(desk.ledger.open_trades)
 
 
 @pytest.mark.asyncio
@@ -162,11 +180,12 @@ async def test_no_entries_outside_the_window(desk, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_only_one_position_is_ever_open(desk, monkeypatch):
+async def test_the_position_limit_is_never_exceeded(desk, monkeypatch):
     monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
-    await desk.cycle()
-    await desk.cycle()
-    assert len(desk.ledger.open_trades) == 1
+    limit = int(desk.cfg.get("risk.max_open_trades"))
+    for _ in range(4):
+        await desk.cycle()
+    assert len(desk.ledger.open_trades) <= limit
 
 
 @pytest.mark.asyncio
@@ -464,6 +483,7 @@ async def test_the_panel_stops_naming_a_symbol_once_the_desk_is_full(desk,
                                                                      monkeypatch):
     """"SCANNING AAPL" while holding the maximum is a lie on screen."""
     monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    desk.cfg.data["risk"]["max_open_trades"] = 1
     await desk.cycle()
     assert desk.ledger.open_trades
     desk.scanning = "AAPL"

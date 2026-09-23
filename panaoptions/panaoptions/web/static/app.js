@@ -621,14 +621,82 @@ function renderActivity(d, decisionsOnly) {
            symbol it judges, and the reason it passed.</div>`);
 }
 
+/* ------------------------------------------------------------------ */
+/* Desktop notifications when a paper trade is taken.
+ *
+ * Only for trades opened and closed — not for every setup considered, which
+ * on a 1-minute desk across three symbols would be a notification every few
+ * seconds and would be switched off within the hour.
+ *
+ * `seen` is seeded from the first poll rather than starting empty, so opening
+ * the page does not replay the whole day as a burst of alerts. */
+const NOTIFY_KINDS = new Set(["trade.open", "trade.exit"]);
+const notified = new Set();
+let notifySeeded = false;
+
+function notifyKey(e) {
+  return `${e.ts || e.time}|${e.kind}|${e.detail}`;
+}
+
+/* Browser storage is per-viewer and can throw in a private window, so every
+   read and write is guarded and the page works without it. */
+function notifyWanted() {
+  try {
+    return localStorage.getItem("panaoptions.notify") === "1";
+  } catch { return false; }
+}
+
+async function toggleNotify(on) {
+  if (!on) {
+    try { localStorage.setItem("panaoptions.notify", "0"); } catch { /* ignore */ }
+    return;
+  }
+  if (!("Notification" in window)) {
+    watchStatus("This browser has no notification support.", "bad");
+    $("notify-trades").checked = false;
+    return;
+  }
+  let granted = Notification.permission === "granted";
+  if (!granted && Notification.permission !== "denied") {
+    granted = (await Notification.requestPermission()) === "granted";
+  }
+  if (!granted) {
+    /* Say so rather than leaving a ticked box that does nothing. */
+    watchStatus("Notifications are blocked for this page in your browser "
+                + "settings.", "bad");
+    $("notify-trades").checked = false;
+    return;
+  }
+  try { localStorage.setItem("panaoptions.notify", "1"); } catch { /* ignore */ }
+}
+
+function maybeNotify(events) {
+  const fresh = events.filter((e) => NOTIFY_KINDS.has(e.kind)
+                                  && !notified.has(notifyKey(e)));
+  fresh.forEach((e) => notified.add(notifyKey(e)));
+  if (!notifySeeded) { notifySeeded = true; return; }   // never replay history
+  if (!notifyWanted() || Notification?.permission !== "granted") return;
+
+  fresh.slice(0, 3).forEach((e) => {
+    const opened = e.kind === "trade.open";
+    try {
+      new Notification(opened ? "Paper trade taken" : "Paper trade closed", {
+        body: e.detail,
+        tag: notifyKey(e),      /* the same event twice replaces, not stacks */
+      });
+    } catch { /* a notification failing is never worth breaking the page */ }
+  });
+}
+
 /* The log is the one panel worth polling faster — it is what tells you the
    desk is alive between trades. */
 async function refreshActivity() {
   const decisionsOnly = $("activity-decisions")?.checked ?? true;
   try {
-    renderActivity(
-      await getJSON(`/api/activity?limit=120&decisions=${decisionsOnly}`),
-      decisionsOnly);
+    const d = await getJSON(
+      `/api/activity?limit=120&decisions=${decisionsOnly}`);
+    renderActivity(d, decisionsOnly);
+    maybeNotify(d.events || []);
   } catch {
     /* the next tick will retry; a log gap is not worth an error banner */
   }
@@ -689,6 +757,8 @@ getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
 refresh();
 refreshActivity();
 $("activity-decisions")?.addEventListener("change", refreshActivity);
+$("notify-trades").checked = notifyWanted();
+$("notify-trades").addEventListener("change", (e) => toggleNotify(e.target.checked));
 refreshCandidate();
 setInterval(refresh, 15000);
 setInterval(refreshActivity, 5000);

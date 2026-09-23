@@ -283,7 +283,44 @@ def check(cfg) -> list[Finding]:
                 f"be filled: {listed}.",
                 fix))
 
-    # 7. Can every enabled strategy actually be reached?
+    # 7. What does holding the maximum actually cost?
+    #
+    # "Three positions" is an abstraction until it is a dollar figure, and the
+    # per-trade risk number everybody reads is for ONE trade. Three at once is
+    # three times that, correlated — index ETFs and megacaps go down together
+    # — so it is worth saying out loud before a bad morning says it instead.
+    max_open = int(cfg.get("risk.max_open_trades", 1))
+    if max_open > 1:
+        total_pct = float(cfg.get("risk.max_total_deployed_pct", deployed_pct))
+        at_work = capital * total_pct / 100.0
+        # The BACKSTOP, not the percentage stop. In underlying mode the
+        # strategy's level normally fires first, but what a position can lose
+        # before anything mechanical stops it is the disaster stop — and that
+        # is the number this warning exists to state.
+        underlying_mode = str(cfg.get("risk.stop_mode", "premium")) == "underlying"
+        backstop_pct = float(cfg.get("risk.disaster_stop_pct", 45.0)
+                             if underlying_mode else stop_pct)
+        worst = at_work * backstop_pct / 100.0
+        loss_limit_pct = float(cfg.get("risk.daily_loss_limit_pct", 0) or 0)
+        loss_limit = capital * loss_limit_pct / 100.0
+        note = ""
+        if loss_limit and loss_limit < worst:
+            note = (f" In practice the daily loss limit halts the desk at "
+                    f"-${loss_limit:,.0f} ({loss_limit_pct:.0f}%) before it "
+                    f"gets there.")
+        findings.append(Finding(
+            "warning", "risk.max_open_trades",
+            f"Up to {max_open} positions at once, ${at_work:,.0f} deployed "
+            f"({total_pct:.0f}% of the account). If all {max_open} hit the "
+            f"{backstop_pct:.0f}% backstop together — and correlated names "
+            f"do — that "
+            f"is -${worst:,.0f}, {worst / capital * 100:.0f}% of the "
+            f"account.{note}",
+            "Lower risk.max_total_deployed_pct to cap the total, or "
+            "risk.max_open_trades to hold fewer at once. Neither is wrong; "
+            "this is here so the number is a choice rather than a surprise."))
+
+    # 8. Can every enabled strategy actually be reached?
     #
     # The desk hunts until the last enabled strategy shuts, but never past the
     # square-off — a trade opened at 15:44 is forced out a minute later. A

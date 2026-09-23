@@ -204,7 +204,10 @@ strategies:
         claimed_accuracy: 0.80
 
 risk:
-  max_open_trades: 1
+  # Three names can be live at once. The desk reads every symbol on the
+  # watchlist in the same instant each cycle and takes as many setups as it
+  # has room for, rather than queueing them one at a time.
+  max_open_trades: 3
 
   # --- What "wrong" means ------------------------------------------------
   # underlying  the strategy's own invalidation level decides the exit. A
@@ -234,12 +237,16 @@ risk:
   # capital at risk: the stop below is what decides the real loss.
   max_capital_deployed_pct: 20.0
 
-  # The ceiling on ALL open positions together. With max_open_trades at 1
-  # this is the same rule as the line above; the moment a watchlist makes
-  # several symbols live at once it is not, because three trades at 20% each
-  # satisfy the per-trade cap every time and deploy 60% of the account.
-  # Unset, it falls back to the per-trade budget rather than to "no limit".
-  max_total_deployed_pct: 20.0
+  # The ceiling on ALL open positions together, and the reason the line above
+  # is not the whole rule: three trades at 20% each satisfy the per-trade cap
+  # every single time and put 60% of the account to work. Unset, this falls
+  # back to the per-trade budget rather than to "no limit".
+  #
+  # At 45%, two positions go on at full size and a third takes what is left,
+  # sizing itself down rather than being refused. Long options can expire
+  # worthless, so this is the number to lower first if three at once feels
+  # like too much — `--check-config` prints what the worst case costs.
+  max_total_deployed_pct: 45.0
   # Hard stop on the contract price itself.
   stop_loss_pct: 20.0
   # So the real risk per trade is 20% of 20% = 4% of the account. The app

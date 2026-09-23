@@ -102,8 +102,29 @@ def test_the_real_risk_per_trade_is_surfaced_as_a_warning(cfg):
 def test_a_conventional_configuration_raises_nothing(cfg):
     _settings(cfg, account__starting_capital=25_000.0,
               risk__max_capital_deployed_pct=8.0,
+              risk__max_open_trades=1,
               risk__daily_loss_limit=500.0)
     assert check(cfg) == []
+
+
+def test_holding_several_at_once_is_reported_as_a_dollar_figure(cfg):
+    """"Three positions" is an abstraction until it is money.
+
+    The per-trade risk number everybody reads is for ONE trade; three at once
+    is three times it, correlated, and that is worth saying before a bad
+    morning says it instead.
+    """
+    _settings(cfg, account__starting_capital=25_000.0,
+              risk__max_capital_deployed_pct=8.0,
+              risk__max_open_trades=3,
+              risk__max_total_deployed_pct=24.0,
+              risk__daily_loss_limit=500.0)
+    found = [f for f in check(cfg) if f.setting == "risk.max_open_trades"]
+    assert found, "holding several at once must state what it costs"
+    assert "3 positions at once" in found[0].problem
+    # The backstop, not the percentage stop — that is what a position can
+    # actually lose before anything mechanical stops it.
+    assert f"{cfg.get('risk.disaster_stop_pct'):.0f}% backstop" in found[0].problem
 
 
 # --------------------------------------------------------------------------- #
