@@ -195,6 +195,147 @@ function renderRejections(d) {
 }
 
 /* ------------------------------------------------------------------ */
+function renderStrategies(d) {
+  $("strat-meta").textContent = d.market_time || "";
+  $("strategies-body").innerHTML = `
+    <table>
+      <thead><tr><th>Strategy</th><th>Window (ET)</th><th>Status</th></tr></thead>
+      <tbody>${(d.strategies || []).map((s) => `
+        <tr>
+          <td>${esc(s.name)}</td>
+          <td class="num">${esc(s.from)} – ${esc(s.to)}</td>
+          <td><span class="pill ${s.live ? "pass" : "skip"}">${
+            !s.enabled ? "off" : s.live ? "live now" : "outside window"}</span></td>
+        </tr>`).join("")}</tbody>
+    </table>
+    <div class="empty">Each runs only inside its own window. All three skip
+      09:30–09:45, where spreads are widest and the first prints are noise.</div>`;
+}
+
+function renderJournal(d) {
+  const s = d.stats || {};
+  $("journal-meta").textContent = `last ${d.days} days`;
+  $("journal-tiles").innerHTML = `
+    <div class="tile"><div class="k">Graded</div><div class="v">${s.total || 0}</div></div>
+    <div class="tile"><div class="k">Clean execution</div>
+      <div class="v">${num(s.clean_pct, 0)}%</div>
+      <div class="sub">no rule broken</div></div>
+    <div class="tile"><div class="k">Discipline</div>
+      <div class="v">${num(s.avg_execution_score, 1)}/10</div></div>
+    <div class="tile"><div class="k">P&amp;L</div>
+      <div class="v ${sign(s.total_pnl)}">${money(s.total_pnl)}</div></div>
+    <div class="tile"><div class="k">Lost to rule breaks</div>
+      <div class="v neg">${money(s.mistake_cost)}</div>
+      <div class="sub">${num(s.avoidable_loss_pct, 0)}% of losses avoidable</div></div>
+    <div class="tile"><div class="k">Bad wins</div>
+      <div class="v ${(s.by_verdict || {}).BAD_WIN ? "neg" : ""}">${
+        (s.by_verdict || {}).BAD_WIN || 0}</div>
+      <div class="sub">paid, but broke a rule</div></div>`;
+
+  const byStrategy = Object.entries(s.by_strategy || {});
+  const strategies = byStrategy.length ? `
+    <div style="padding:10px 14px 0" class="k">Which strategy is paying</div>
+    <table>
+      <thead><tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th>
+      <th class="num">P&amp;L</th><th class="num">Discipline</th></tr></thead>
+      <tbody>${byStrategy
+        .sort((a, b) => b[1].total_pnl - a[1].total_pnl)
+        .map(([name, v]) => `
+          <tr><td>${esc(name)}</td>
+            <td class="num">${v.count}</td>
+            <td class="num">${num(v.win_rate, 0)}%</td>
+            <td class="num ${sign(v.total_pnl)}">${money(v.total_pnl)}</td>
+            <td class="num">${num(v.avg_score, 1)}/10</td></tr>`).join("")}
+      </tbody>
+    </table>` : "";
+
+  const rows = (d.entries || []).slice(0, 20).map((e) => `
+    <tr>
+      <td>${esc((e.ts || "").slice(0, 10))}</td>
+      <td>${esc(e.symbol)}</td>
+      <td>${esc(e.strategy)}</td>
+      <td>${esc(e.exit_reason)}</td>
+      <td class="num ${sign(e.pnl)}">${money(e.pnl)}</td>
+      <td><span class="verdict ${esc(e.verdict)}">${esc(e.verdict)}</span></td>
+      <td class="num">${e.execution_score}/10</td>
+    </tr>`).join("");
+
+  $("journal-body").innerHTML = strategies + (rows
+    ? `<div style="padding:10px 14px 0" class="k">Graded trades</div>
+       <table><thead><tr><th>Date</th><th>Symbol</th><th>Strategy</th>
+       <th>Exit</th><th class="num">P&amp;L</th><th>Verdict</th>
+       <th class="num">Score</th></tr></thead><tbody>${rows}</tbody></table>
+       <div class="empty">Process over outcome. <b>BAD_WIN</b> means it paid
+         while breaking a rule — the P&amp;L is rewarding a habit that will
+         eventually cost you.</div>`
+    : `<div class="empty">No graded trades yet. Every closed trade is graded
+        automatically the moment it closes.</div>`);
+}
+
+async function buildWeekly() {
+  const btn = $("btn-weekly");
+  btn.disabled = true;
+  $("weekly-status").textContent = $("w-coach").checked
+    ? "Reading the week and asking the model…" : "Reading the week…";
+  try {
+    const d = await getJSON(`/api/weekly?coach=${$("w-coach").checked}`);
+    renderWeekly(d);
+    $("btn-weekly-md").disabled = false;
+    $("weekly-status").textContent = "";
+  } catch (e) {
+    $("weekly-body").innerHTML =
+      `<div class="note crit">${esc(e.message)}</div>`;
+    $("weekly-status").textContent = "";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderWeekly(r) {
+  const s = r.stats || {};
+  const c = r.coach;
+  const list = (xs) => (xs || []).map((x) => `<li>${esc(x)}</li>`).join("");
+  const provisional = r.complete ? "" :
+    `<div class="note warn"><b>This week is not finished.</b>
+     These numbers are provisional.</div>`;
+
+  if (!s.total) {
+    $("weekly-body").innerHTML = `${provisional}
+      <div class="empty">No graded trades in ${esc(r.week_start)} – ${esc(r.week_end)}.</div>`;
+    return;
+  }
+
+  $("weekly-body").innerHTML = `${provisional}
+    <div class="tiles">
+      <div class="tile"><div class="k">Trades</div><div class="v">${s.total}</div></div>
+      <div class="tile"><div class="k">Win rate</div><div class="v">${num(s.win_rate, 0)}%</div></div>
+      <div class="tile"><div class="k">P&amp;L</div>
+        <div class="v ${sign(s.total_pnl)}">${money(s.total_pnl)}</div></div>
+      <div class="tile"><div class="k">Clean</div><div class="v">${num(s.clean_pct, 0)}%</div></div>
+      <div class="tile"><div class="k">Discipline</div>
+        <div class="v">${num(s.avg_execution_score, 1)}/10</div></div>
+    </div>
+    ${c ? `
+      <div style="padding:12px 14px">
+        <p style="margin:0 0 8px"><b>${esc(c.headline)}</b></p>
+        ${c.what_worked?.length ? `<div class="k">What worked</div><ul>${list(c.what_worked)}</ul>` : ""}
+        ${c.what_cost_money?.length ? `<div class="k">What cost money</div><ul>${list(c.what_cost_money)}</ul>` : ""}
+        ${c.rule_changes?.length ? `
+          <div class="k">Proposed changes</div>
+          <table><thead><tr><th>Rule</th><th>Change</th><th>Evidence</th></tr></thead>
+          <tbody>${c.rule_changes.map((x) => `<tr><td>${esc(x.rule)}</td>
+            <td>${esc(x.change)}</td><td>${esc(x.why)}</td></tr>`).join("")}</tbody></table>
+          <p style="font-size:11.5px;color:var(--muted)">Suggestions only —
+            <b>nothing here has been applied</b>. No model can change a stop, a
+            size, or a strategy&#39;s window.</p>` : ""}
+        <div class="k" style="margin-top:8px">Focus next week</div>
+        <p style="margin:4px 0">${esc(c.focus_next_week)}</p>
+        <p style="font-size:11px;color:var(--muted);margin-top:8px">
+          Graded by ${esc(c.generated_by)}.</p>
+      </div>` : ""}`;
+}
+
+/* ------------------------------------------------------------------ */
 async function refresh() {
   try {
     const s = await getJSON("/api/status");
@@ -212,18 +353,27 @@ async function refresh() {
     renderAccount(s);
     renderOpen(s);
 
-    const [screen, trades, contracts] = await Promise.all([
-      getJSON("/api/screen"), getJSON("/api/trades?days=30"), getJSON("/api/contracts"),
+    const [screen, trades, contracts, strategies, journal] = await Promise.all([
+      getJSON("/api/screen"), getJSON("/api/trades?days=30"),
+      getJSON("/api/contracts"), getJSON("/api/strategies"),
+      getJSON("/api/journal?days=30"),
     ]);
     renderScreen(screen);
     renderLedger(trades);
     renderRejections(trades);
     renderContracts(contracts);
+    renderStrategies(strategies);
+    renderJournal(journal);
   } catch (e) {
     $("config-body").innerHTML =
       `<div class="note crit"><b>Cannot reach the desk</b>${esc(e.message)}</div>`;
   }
 }
+
+$("btn-weekly").onclick = buildWeekly;
+$("btn-weekly-md").onclick = () => {
+  window.location.href = "/api/weekly/download?format=md";
+};
 
 refresh();
 setInterval(refresh, 15000);

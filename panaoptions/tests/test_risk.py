@@ -63,11 +63,34 @@ def test_only_one_trade_at_a_time(risk, setup):
     assert "One trade at a time" in why
 
 
-def test_the_stop_is_twenty_percent_of_the_contract_price(risk, setup):
+def test_the_premium_stop_is_a_backstop_in_underlying_mode(risk, setup, cfg):
+    # The strategy's invalidation level is what normally fires; this stop only
+    # catches a gap or a collapse in the option itself, so it is set wide.
+    assert cfg.get("risk.stop_mode") == "underlying"
     signal, _ = _size(risk, setup, mid=1.00)
-    assert signal.stop_price == 0.80
+
+    assert signal.stop_price == 0.55          # 45% disaster backstop
     assert signal.target_1 == 1.40
     assert signal.target_2 == 1.70
+
+
+def test_premium_mode_still_gives_the_tight_percentage_stop(risk, setup, cfg):
+    cfg.data["risk"]["stop_mode"] = "premium"
+    signal, _ = _size(risk, setup, mid=1.00)
+    assert signal.stop_price == 0.80          # 20% of the contract price
+
+
+def test_the_signal_carries_the_strategy_and_its_invalidation(risk, setup):
+    from panaoptions.models import SetupType
+
+    setup.strategy = SetupType.ORB_VWAP
+    setup.underlying_support = 229.4
+    setup.invalidation_note = "a 5m close back inside the opening range"
+    signal, _ = _size(risk, setup, mid=0.80)
+
+    assert signal.strategy is SetupType.ORB_VWAP
+    assert signal.underlying_support == 229.4
+    assert "opening range" in signal.invalidation_note
 
 
 def test_the_circuit_breaker_latches_at_the_daily_limit(risk, setup):

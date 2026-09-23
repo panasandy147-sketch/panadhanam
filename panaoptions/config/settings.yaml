@@ -73,8 +73,54 @@ contracts:
   max_contract_price: 20.00     # $2,000 a contract — a ceiling, not a target
   contract_multiplier: 100
 
+strategies:
+  # Each strategy runs only inside its own window, in EXCHANGE time. All three
+  # avoid 09:30-09:45, where spreads are widest and the first prints are noise.
+  orb_vwap:
+    enabled: true
+    from: "09:45"        # the 15m opening range is not final until 09:45
+    to:   "11:00"
+    volume_multiple: 1.5
+    target_range_multiple: 1.5     # take profit at 1.5x the range height
+  vwap_ema_pullback:
+    enabled: true
+    from: "10:00"
+    to:   "13:30"
+    volume_multiple: 1.0
+    touch_atr: 0.35      # how close to the line counts as a pullback
+  liquidity_sweep:
+    enabled: true
+    from: "09:45"
+    to:   "12:00"
+    volume_multiple: 1.5
+
 risk:
   max_open_trades: 1
+
+  # --- What "wrong" means ------------------------------------------------
+  # underlying  the strategy's own invalidation level decides the exit. A
+  #             fixed percentage on the premium is at the mercy of an implied
+  #             volatility shift or a wide spread and says nothing about
+  #             whether the trade was wrong. This is the recommended mode.
+  # premium     the old behaviour: a fixed % stop on the contract price.
+  #
+  # In underlying mode the percentage stop below becomes a DISASTER backstop
+  # only — it still catches a gap or a collapse in the option itself, but it
+  # is set wide enough that the underlying level is what normally fires.
+  stop_mode: "underlying"
+  disaster_stop_pct: 45.0
+
+  # --- One contract cannot be halved -------------------------------------
+  # scale     exit take_profit_1_size_pct at TP1, run the rest to TP2/trail.
+  # trail     at breakeven_trigger_pct move the stop to breakeven, then hold
+  #           until a 5m candle closes on the far side of the 9 EMA.
+  # auto      trail when the position is a single contract, scale otherwise.
+  #
+  # auto exists because a $400 budget buys one contract, and "exit 50% at
+  # +40%" on one contract silently becomes "exit everything at +40%" — the
+  # runner the strategy depends on never exists.
+  exit_style: "auto"
+  breakeven_trigger_pct: 35.0
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.
   max_capital_deployed_pct: 20.0
@@ -100,6 +146,25 @@ risk:
   daily_loss_limit: null
   # Simulated fill cost per contract, per side.
   slippage_per_contract: 0.02
+
+journal:
+  # Grade every closed trade the moment it closes, and write a card to
+  # journal/cards/. Process over outcome: a winning trade that broke a rule
+  # scores low, and a losing trade that honoured its invalidation scores high.
+  auto_grade: true
+
+  # Let a local model write the card's PROSE. It never decides the verdict,
+  # the score, a stop or a size — those stay deterministic, because a model
+  # that has read a profitable trade is very good at finding reasons it was
+  # fine. Needs Ollama running; falls back to the rules version silently.
+  use_llm: false
+  ollama_model: "qwen2.5:7b"
+  ollama_host: "http://127.0.0.1:11434"
+  ollama_timeout: 120
+  llm_label: "ollama (qwen2.5:7b, local)"
+
+  # Write the week's review to journal/weekly/ once Friday's session closes.
+  auto_weekly_review: true
 
 ml:
   enabled: false                 # needs the extra packages; see docs

@@ -131,7 +131,15 @@ class RiskManager:
         while quantity > 1 and quantity * cost_per_contract > budget:
             quantity -= 1
 
-        stop_pct = float(self.cfg.get("risk.stop_loss_pct", 20.0))
+        # In underlying mode the percentage stop is a DISASTER backstop: the
+        # strategy's own invalidation level is what normally fires, and it is
+        # checked against the underlying rather than the premium. A tight
+        # percentage stop here would take the trade out on an IV wobble that
+        # says nothing about whether the thesis was wrong.
+        underlying_mode = str(self.cfg.get("risk.stop_mode", "premium")) == "underlying"
+        stop_pct = float(self.cfg.get(
+            "risk.disaster_stop_pct" if underlying_mode else "risk.stop_loss_pct",
+            45.0 if underlying_mode else 20.0))
         tp1_pct = float(self.cfg.get("risk.take_profit_1_pct", 40.0))
         tp2_pct = float(self.cfg.get("risk.take_profit_2_pct", 70.0))
 
@@ -150,16 +158,21 @@ class RiskManager:
             stop_price=stop, target_1=target_1, target_2=target_2,
             underlying_at_entry=setup.indicators.close,
             underlying_support=setup.underlying_support,
+            underlying_target=setup.underlying_target,
+            strategy=setup.strategy,
+            invalidation_note=setup.invalidation_note,
             pattern=setup.pattern, confirmations=list(setup.confirmations),
             ml_probability=ml_probability,
         )
 
         deployed = signal.cost(multiplier)
         at_risk = signal.risk_at_stop(multiplier)
-        log.info("%s | deploying $%.2f (%.1f%% of account), risking $%.2f "
-                 "(%.1f%%) if the stop fills",
-                 signal.alert_line(), deployed, deployed / self.capital * 100,
-                 at_risk, at_risk / self.capital * 100)
+        log.info("%s | %s | deploying $%.2f (%.1f%% of account); backstop at "
+                 "$%.2f (%.1f%%) — real exit: %s",
+                 signal.alert_line(), setup.strategy.value, deployed,
+                 deployed / self.capital * 100, at_risk,
+                 at_risk / self.capital * 100,
+                 setup.invalidation_note or "the underlying level")
         return signal, ""
 
     # ------------------------------------------------------------------ #
@@ -175,6 +188,8 @@ class RiskManager:
             "risk_per_trade_pct": round(deployed_pct * stop_pct / 100, 2),
             "risk_per_trade": round(capital * deployed_pct * stop_pct / 10000, 2),
             "daily_loss_limit": self.daily_limit,
+            "stop_mode": str(self.cfg.get("risk.stop_mode", "premium")),
+            "exit_style": str(self.cfg.get("risk.exit_style", "scale")),
             "remaining_loss_budget": self.remaining_loss_budget,
             "realised_pnl": round(self.state.realised_pnl, 2),
             "trades_taken": self.state.trades_taken,

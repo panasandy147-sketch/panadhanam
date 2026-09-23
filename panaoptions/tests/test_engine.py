@@ -8,8 +8,8 @@ import pytest
 
 from panaoptions.data.greeks import atm_premium_estimate, delta
 from panaoptions.engine import indicators as ta
-from panaoptions.engine import patterns, setups
-from panaoptions.models import Candle, Direction
+from panaoptions.engine import patterns
+from panaoptions.models import Candle
 
 BASE = datetime(2026, 9, 22, 9, 30)
 
@@ -101,55 +101,6 @@ def test_a_zero_range_bar_is_no_pattern_at_all():
 
 
 # --------------------------------------------------------------------------- #
-def _trend_then(bars_in, final: Candle):
-    return bars_in + [final]
-
-
-def test_a_clean_long_setup_fires_with_every_confirmation(cfg, bars):
-    prev = bars[-1]
-    pullback = Candle(ts=prev.ts + timedelta(minutes=5), open=prev.close * 1.001,
-                      high=prev.close * 1.002, low=prev.close * 0.996,
-                      close=prev.close * 0.997, volume=900)
-    engulf = Candle(ts=pullback.ts + timedelta(minutes=5),
-                    open=pullback.close * 0.999, high=pullback.close * 1.012,
-                    low=pullback.close * 0.998, close=pullback.close * 1.011,
-                    volume=4000)
-
-    setup = setups.evaluate("AAPL", bars + [pullback, engulf], cfg)
-    assert setup.direction is Direction.LONG
-    assert setup.triggered
-    assert setup.pattern == "Bullish Engulfing"
-    assert setup.trend_aligned
-    assert setup.underlying_support == pytest.approx(engulf.low)
-
-
-def test_a_pattern_without_volume_is_blocked_and_says_so(cfg, bars):
-    prev = bars[-1]
-    pullback = Candle(ts=prev.ts + timedelta(minutes=5), open=prev.close * 1.001,
-                      high=prev.close * 1.002, low=prev.close * 0.996,
-                      close=prev.close * 0.997, volume=900)
-    quiet = Candle(ts=pullback.ts + timedelta(minutes=5),
-                   open=pullback.close * 0.999, high=pullback.close * 1.012,
-                   low=pullback.close * 0.998, close=pullback.close * 1.011,
-                   volume=50)
-
-    setup = setups.evaluate("AAPL", bars + [pullback, quiet], cfg)
-    assert not setup.triggered
-    assert any("volume" in b for b in setup.blockers)
-
-
-def test_too_little_history_is_refused_with_the_bar_count(cfg, bars):
-    setup = setups.evaluate("AAPL", bars[:10], cfg)
-    assert not setup.triggered
-    assert "only 10 bars" in setup.blockers[0]
-
-
-def test_a_quiet_market_explains_itself(cfg, bars):
-    setup = setups.evaluate("AAPL", bars, cfg)
-    assert not setup.triggered
-    assert setup.blockers, "silence with no reason is indistinguishable from a bug"
-
-
 # --------------------------------------------------------------------------- #
 def test_black_scholes_delta_behaves_at_the_boundaries():
     assert delta(230, 230, 10, 0.25, True) == pytest.approx(0.5, abs=0.05)

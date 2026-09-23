@@ -139,49 +139,63 @@ run.py --report 30                      # the paper-trading record
 No API key. Market data comes from Yahoo's public endpoints over plain
 `httpx` — one less package to install than `yfinance`.
 
-## The rules, as implemented
+## The three strategies
 
-**Pre-market screen** — RVOL above 1.5 and a gap of at least ±1.0%. RVOL is
-scaled by how much of the session has elapsed; an unscaled ratio calls every
-morning quiet.
+Every entry is tagged with the strategy that produced it, so the journal can
+answer *which of these actually pays* rather than lumping them together. All
+three skip **09:30–09:45**, where spreads are widest and the first prints are
+noise.
 
-**Entry (calls)** — price above VWAP, 9 EMA above 20 EMA, a bullish engulfing
-or hammer closing on above-average volume, and the 15-minute trend agreeing.
-Puts are the mirror image.
+### 1. Opening Range Breakout + VWAP — 09:45 to 11:00
 
-**Contract** — 7–14 DTE, delta and price per the config, bid-ask spread ≤ 5%
-of mid. Delta is computed with Black-Scholes from Yahoo's implied volatility,
-because Yahoo does not serve greeks.
+A 5m close beyond the **15-minute opening range**, with price the right side
+of VWAP, 9 EMA the right side of the 21, and volume ≥ 1.5× the 20-bar average.
 
-**Risk** — one trade at a time; 20% hard stop on the contract; scale 50% out at
-+40% and move the stop to breakeven; +70% or a 9-EMA trail for the rest; a
-daily circuit breaker at **10% of capital** that **latches** (winning it back
-is exactly the impulse it exists to stop).
+*Invalidation:* a 5m close back inside the range. *Target:* 1.5× the range
+height.
 
-The breaker is a percentage, not a dollar figure. The brief states the rule as
-"−$50, which is 10% of total capital" — $50 was the instance at $500, not the
-rule. Pinned to dollars, raising capital to $2,000 would leave a limit smaller
-than a single $80 stop-out, so the breaker would trip on the first loser and
-the desk would quietly become one-trade-a-day.
+### 2. VWAP / 9-EMA Pullback — 10:00 to 13:30
 
-**Session** — entries 09:35–10:30 ET only. Stops tighten to breakeven at
-10:45. Everything is squared off by 15:45.
+15m chart in a stacked trend (price > 20 EMA > 50 EMA, or the inverse); on the
+5m, price pulls back to the 9 EMA or VWAP and prints a rejection candle that
+takes out the previous candle's high (or low).
 
-## The dashboard
+*Invalidation:* a 5m close on the wrong side of VWAP.
 
-Read-only, on purpose. There is no endpoint that opens or closes a position —
-a trading decision belongs to the rules engine, not to whoever last clicked a
-button. That is a tested property, not an omission.
+### 3. Liquidity Sweep Reversal — 09:45 to 12:00
 
-| Panel | Answers |
-|---|---|
-| **Can the rules all hold at once?** | The one that comes first. A desk scanning and taking nothing is indistinguishable from a quiet market; this says which it is, with the command that fixes it. |
-| **Account** | Capital, deployed per trade, **at risk** per trade, day P&L, room before the halt. |
-| **Pre-market screen** | Gap and RVOL per symbol, and which passed. |
-| **What your budget buys** | The at-the-money cost of each name against your budget, and whether it fits. |
-| **Open position** | The live contract with its stop and both targets. |
-| **Paper record** | Win rate, expectancy, and the last 25 closed trades. |
-| **Why no trade** | Setups passed over, counted by reason. If one dominates, that is the rule to look at. |
+Price pokes through the **pre-market low**, takes the stops resting under it,
+then reclaims the level on the next 5m close and crosses VWAP on high volume.
+The trade is that the breakout buyers are trapped.
+
+*Invalidation:* a 5m close back through the sweep wick.
+
+Windows, volume multiples and enable flags are all in
+`config/settings.yaml` under `strategies:`.
+
+## What "wrong" means: the underlying, not the premium
+
+`risk.stop_mode: underlying` (the default) makes the **strategy's own
+invalidation level** the exit. A fixed −20% on the contract is at the mercy of
+an implied-volatility shift or a wide spread and says nothing about whether the
+trade was wrong; if the thesis breaks the option is sold whether it is down 8%
+or 22%.
+
+The percentage stop survives as a **disaster backstop** (`disaster_stop_pct`,
+45%) — wide enough that the underlying level normally fires first, but still
+there for a gap or a collapse in the option itself.
+
+## One contract cannot be halved
+
+`risk.exit_style: auto` notices when a position is a single contract, where
+"exit 50% at +40%" quietly becomes "exit everything at +40%" and the runner
+never exists. For those it switches to:
+
+1. **+35%** → stop moves to breakeven, and you get a notification
+2. then **hold** until a 5m candle closes on the far side of the 9 EMA
+
+No profit target at all: the exit is the trend ending, which is what lets one
+contract still catch a runner. Two or more contracts scale out as before.
 
 ## What gets recorded
 
@@ -196,6 +210,47 @@ python run.py --report 30
 
 With no trades yet, the report prints the rejection tally instead. If one
 reason dominates, that is the rule to look at.
+
+## The learning loop
+
+Every closed trade is graded **the moment it closes**, on process rather than
+outcome — a winning trade that broke a rule is a bad trade, and a losing trade
+that honoured its invalidation is an acceptable one. Grading on P&L teaches the
+opposite of what you want, because the market pays out on bad decisions often
+enough to make them feel right.
+
+Four verdicts, and the dangerous one is not the losses:
+
+| Verdict | Meaning |
+|---|---|
+| `GOOD_WIN` | Paid, and followed the rules |
+| `GOOD_LOSS` | Lost, and followed the rules — the cost of having an edge |
+| `BAD_WIN` | **Paid while breaking a rule.** The P&L is reinforcing the habit that will eventually cost you |
+| `BAD_LOSS` | Lost, and broke a rule |
+
+Nine mistake tags, all detected from the ledger — nothing depends on you owning
+up to anything: no strategy tag, held past the invalidation, stop not honoured,
+exited early, oversized, entered outside the window, chased, traded while
+halted, held to the forced close.
+
+Each trade gets a **card** in `journal/cards/` as markdown, and the whole thing
+is committed to git so the history outlives the database.
+
+### The weekend review
+
+**Weekly review → Build this week's review** gives you the week with the
+question that matters: *which of the three strategies is actually working.*
+Per-strategy win rate, P&L and average discipline, the money lost specifically
+to rule breaks (clean losses excluded — those are the cost of an edge), and a
+coach's read.
+
+With Ollama running (`journal.use_llm: true`) the coach's prose is the model's.
+Without it you get the deterministic version — the same numbers, read honestly.
+Either way the model **never decides a verdict, a score, a stop or a size**;
+those stay deterministic, because a model that has read a profitable trade is
+very good at finding reasons it was fine.
+
+It writes itself to `journal/weekly/` once Friday's session closes.
 
 ## The optional ML filter
 
@@ -238,9 +293,11 @@ panaoptions/
   panaoptions/
     clock.py              session windows, in New York time
     preflight.py          can every rule hold at once?
+    engine/  strategies.py levels.py   the three entry rules
+    journal/ grade.py weekly.py        the learning loop
     web/     server.py static/    the dashboard (read-only)
     data/    feed.py premarket.py greeks.py
-    engine/  indicators.py patterns.py setups.py contracts.py
+    engine/  indicators.py patterns.py contracts.py
     risk/    guardrails.py
     ledger/  paper.py store.py
     notify/  webhook.py

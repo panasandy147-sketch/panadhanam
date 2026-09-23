@@ -15,7 +15,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -116,6 +116,78 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         return {"budget": round(budget, 2), "rows": rows,
                 "delta_band": [cfg.get("contracts.min_delta"),
                                cfg.get("contracts.max_delta")]}
+
+    @app.get("/api/journal")
+    async def journal(days: int = 30) -> dict[str, Any]:
+        """Graded trades: which strategy pays, and what indiscipline cost."""
+        from datetime import date, timedelta
+
+        from panaoptions.journal.analytics import analyse
+        from panaoptions.journal.store import cards, entries
+
+        since = (date.today() - timedelta(days=days)).isoformat()
+        rows = entries(limit=500, since=since)
+        return {"days": days, "entries": rows, "stats": analyse(rows),
+                "cards": cards(limit=10)}
+
+    @app.get("/api/weekly")
+    async def weekly_review(week: str | None = None,
+                            coach: bool = True) -> dict[str, Any]:
+        from datetime import date
+
+        from panaoptions.journal import weekly
+
+        if week:
+            try:
+                start, end = weekly.week_bounds(date.fromisoformat(week))
+            except ValueError as exc:
+                raise HTTPException(400, f"'{week}' is not a date") from exc
+        else:
+            start, end = weekly.current_week(cfg)
+        review = await weekly.build(cfg, start, end, with_coach=coach)
+        return review.model_dump(mode="json")
+
+    @app.get("/api/weekly/download")
+    async def download_weekly(week: str | None = None,
+                              format: str = "md") -> Response:
+        from datetime import date
+
+        from panaoptions.journal import weekly
+
+        if format not in {"md", "json"}:
+            raise HTTPException(400, "format must be 'md' or 'json'")
+        if week:
+            start, end = weekly.week_bounds(date.fromisoformat(week))
+        else:
+            start, end = weekly.current_week(cfg)
+
+        review = await weekly.build(cfg, start, end)
+        if format == "json":
+            body, media = review.model_dump_json(indent=2), "application/json"
+        else:
+            body, media = weekly.to_markdown(review, cfg), "text/markdown; charset=utf-8"
+        name = f"panaoptions-week-{review.label}.{format}"
+        return Response(content=body, media_type=media, headers={
+            "Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/api/strategies")
+    async def strategies() -> dict[str, Any]:
+        """The three strategies, their windows, and whether each is live now."""
+        from panaoptions.engine.strategies import ALL
+
+        now = clock.now(cfg.timezone).time()
+        out = []
+        for factory in ALL:
+            strategy = factory(cfg)
+            out.append({
+                "name": strategy.name.value,
+                "enabled": strategy.enabled,
+                "from": strategy.opens.strftime("%H:%M"),
+                "to": strategy.closes.strftime("%H:%M"),
+                "live": strategy.enabled and strategy.opens <= now < strategy.closes,
+            })
+        return {"strategies": out,
+                "market_time": clock.now(cfg.timezone).strftime("%H:%M %Z")}
 
     # ---------------------------------------------------------------- #
     app.mount("/static", _VersionedStatic(directory=str(STATIC)), name="static")

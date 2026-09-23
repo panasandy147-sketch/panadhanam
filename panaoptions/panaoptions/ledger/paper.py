@@ -47,6 +47,8 @@ class PaperLedger:
             stop_price=signal.stop_price, target_1=signal.target_1,
             target_2=signal.target_2,
             underlying_support=signal.underlying_support,
+            strategy=signal.strategy,
+            invalidation_note=signal.invalidation_note,
             remaining=signal.quantity, max_price_seen=fill_price,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
@@ -90,17 +92,14 @@ class PaperLedger:
                                         ExitReason.UNDERLYING_BREAK))
                 return fills
 
+        if self._trailing(trade):
+            return fills + self._manage_trail(trade, contract_price,
+                                              underlying_price, ts, ema_fast)
+
         # 3. First target: scale out, then move the stop to breakeven.
         if not trade.breakeven_armed and contract_price >= trade.target_1:
             share = float(self.cfg.get("risk.take_profit_1_size_pct", 50.0))
             half = max(1, int(round(trade.remaining * share / 100.0)))
-            if half >= trade.remaining:
-                # A one-contract position cannot be halved. Taking the whole
-                # thing at TP1 is the honest outcome, not a partial fiction.
-                fills.append(self._exit(trade, trade.target_1, ts,
-                                        ExitReason.TARGET_1))
-                return fills
-
             fills.append(self._reduce(trade, half, trade.target_1, ts,
                                       "TARGET_1"))
             trade.breakeven_armed = True
@@ -125,6 +124,49 @@ class PaperLedger:
                 fills.append(self._exit(trade, contract_price, ts,
                                         ExitReason.TRAIL))
         return fills
+
+    # ------------------------------------------------------------------ #
+    def _trailing(self, trade: PaperTrade) -> bool:
+        """Should this trade run to a trailing exit rather than scale out?
+
+        A single contract cannot be halved, so "exit 50% at +40%" quietly
+        becomes "exit everything at +40%" and the runner the strategy depends
+        on never exists. `auto` catches exactly that case; `trail` forces it.
+        """
+        style = str(self.cfg.get("risk.exit_style", "scale")).lower()
+        if style == "trail":
+            return True
+        if style != "auto":
+            return False
+        share = float(self.cfg.get("risk.take_profit_1_size_pct", 50.0))
+        return int(round(trade.remaining * share / 100.0)) < 1 or trade.remaining < 2
+
+    def _manage_trail(self, trade: PaperTrade, contract_price: float,
+                      underlying_price: float | None, ts: datetime,
+                      ema_fast: float | None) -> list[Fill]:
+        """Breakeven at the trigger, then hold until the 9 EMA gives way.
+
+        No profit target at all: the exit is the trend ending, which is what
+        lets one contract still catch a runner.
+        """
+        trigger = float(self.cfg.get("risk.breakeven_trigger_pct", 35.0))
+        if not trade.breakeven_armed:
+            if contract_price >= trade.entry_price * (1 + trigger / 100.0):
+                trade.breakeven_armed = True
+                trade.stop_price = trade.entry_price
+                log.info("%s reached +%.0f%% — stop moved to breakeven %.2f, "
+                         "now trailing the 9 EMA",
+                         trade.contract_label, trigger, trade.stop_price)
+            return []
+
+        if ema_fast is None or underlying_price is None:
+            return []
+        closed_against = (underlying_price < ema_fast
+                          if trade.direction is Direction.LONG
+                          else underlying_price > ema_fast)
+        if closed_against:
+            return [self._exit(trade, contract_price, ts, ExitReason.EMA_TRAIL)]
+        return []
 
     # ------------------------------------------------------------------ #
     def close(self, trade_id: str, price: float, reason: ExitReason,

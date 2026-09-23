@@ -1,7 +1,7 @@
 """The loop: session windows, and the order the desk does things in."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -32,22 +32,32 @@ class FakeFeed:
                 "volume": 5_000_000}
 
     async def candles(self, symbol, interval="5m", include_prepost=False):
+        """A session that sets a 15m opening range and then breaks it upward.
+
+        Timestamps are UTC, as the real feed returns them; September is UTC-4
+        in New York, so 13:30 UTC is the 09:30 ET bell.
+        """
         self.calls.append(f"candles:{symbol}")
-        base = datetime(2026, 9, 22, 9, 30)
-        out, price = [], 100.0
-        for i in range(30):
-            price *= 1.002
-            out.append(Candle(ts=base + timedelta(minutes=5 * i), open=price * 0.999,
-                              high=price * 1.003, low=price * 0.997,
-                              close=price, volume=1000.0))
-        prev = out[-1]
-        out.append(Candle(ts=prev.ts + timedelta(minutes=5), open=prev.close * 1.001,
-                          high=prev.close * 1.002, low=prev.close * 0.996,
-                          close=prev.close * 0.997, volume=900.0))
-        p2 = out[-1]
-        out.append(Candle(ts=p2.ts + timedelta(minutes=5), open=p2.close * 0.999,
-                          high=p2.close * 1.012, low=p2.close * 0.998,
-                          close=p2.close * 1.011, volume=4000.0))
+        out = []
+        premarket = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)     # 08:00 ET
+        for i in range(18):
+            price = 100 + i * 0.02
+            out.append(Candle(ts=premarket + timedelta(minutes=5 * i),
+                              open=price, high=price + 0.2, low=price - 0.2,
+                              close=price, volume=400.0))
+
+        bell = datetime(2026, 9, 23, 13, 30, tzinfo=UTC)         # 09:30 ET
+        for i in range(3):                                       # opening range
+            price = 100.5 + i * 0.05
+            out.append(Candle(ts=bell + timedelta(minutes=5 * i), open=price,
+                              high=price + 0.3, low=price - 0.3, close=price,
+                              volume=2000.0))
+        for i in range(3, 10):                                   # drive and break
+            price = 100.6 + (i - 2) * 0.25
+            out.append(Candle(ts=bell + timedelta(minutes=5 * i),
+                              open=price - 0.1, high=price + 0.3,
+                              low=price - 0.2, close=price,
+                              volume=2000.0 if i < 9 else 9000.0))
         return out
 
     async def expiries(self, symbol):
@@ -75,7 +85,7 @@ def desk(cfg, monkeypatch, tmp_path):
 
 
 def _at(hh, mm):
-    return datetime(2026, 9, 22, hh, mm, tzinfo=ET)
+    return datetime(2026, 9, 23, hh, mm, tzinfo=ET)
 
 
 # --------------------------------------------------------------------------- #
@@ -102,7 +112,7 @@ def test_the_opening_five_minutes_are_skipped_deliberately(cfg):
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_a_setup_inside_the_window_becomes_one_paper_trade(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
 
     assert len(desk.ledger.open_trades) == 1
@@ -120,7 +130,7 @@ async def test_no_entries_outside_the_window(desk, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_only_one_position_is_ever_open(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
     await desk.cycle()
     assert len(desk.ledger.open_trades) == 1
@@ -129,7 +139,7 @@ async def test_only_one_position_is_ever_open(desk, monkeypatch):
 @pytest.mark.asyncio
 async def test_open_positions_are_managed_before_new_ones_are_hunted(desk, monkeypatch):
     # Hunting first is how a desk doubles down while a loser runs.
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     order: list[str] = []
 
     async def _manage(now):
@@ -148,7 +158,7 @@ async def test_open_positions_are_managed_before_new_ones_are_hunted(desk, monke
 
 @pytest.mark.asyncio
 async def test_positions_are_still_managed_after_the_window_shuts(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
     assert desk.ledger.open_trades
 
@@ -166,8 +176,10 @@ async def test_positions_are_still_managed_after_the_window_shuts(desk, monkeypa
 
 @pytest.mark.asyncio
 async def test_a_halted_desk_stops_hunting_but_keeps_managing(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
-    desk.risk.roll_day("2026-09-22")
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    # Same date the pinned clock reports, or the cycle rolls the day and
+    # correctly clears the halt.
+    desk.risk.roll_day("2026-09-23")
     desk.risk.record_pnl(-60.0)
     assert desk.risk.state.halted
 
@@ -177,7 +189,7 @@ async def test_a_halted_desk_stops_hunting_but_keeps_managing(desk, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_everything_is_squared_off_at_the_close(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
     assert desk.ledger.open_trades
 
@@ -190,7 +202,7 @@ async def test_everything_is_squared_off_at_the_close(desk, monkeypatch):
 @pytest.mark.asyncio
 async def test_an_unaffordable_chain_takes_no_trade_and_records_why(desk, monkeypatch):
     desk.feed = FakeFeed(contract_mid=6.00)     # $600 a contract
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
 
     result = await desk.cycle()
     assert not desk.ledger.open_trades
@@ -201,7 +213,7 @@ async def test_an_unaffordable_chain_takes_no_trade_and_records_why(desk, monkey
 
 @pytest.mark.asyncio
 async def test_stops_are_tightened_to_breakeven_after_the_midday_time(desk, monkeypatch):
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
     trade = next(iter(desk.ledger.open_trades.values()))
     assert trade.stop_price < trade.entry_price
@@ -225,7 +237,7 @@ async def test_the_screen_runs_once_a_day_not_every_cycle(desk, monkeypatch):
         return [PreMarketRead(symbol="AAPL", passed=False)]
 
     monkeypatch.setattr("panaoptions.app.screen", _screen)
-    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 40))
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
     await desk.cycle()
     await desk.cycle()
     assert len(calls) == 1

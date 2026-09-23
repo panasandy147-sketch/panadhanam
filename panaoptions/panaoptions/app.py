@@ -24,7 +24,8 @@ from panaoptions.data.feed import YahooFeed
 from panaoptions.data.premarket import screen
 from panaoptions.engine import contracts as contract_filter
 from panaoptions.engine import indicators as ta
-from panaoptions.engine import setups
+from panaoptions.engine import levels as levels_mod
+from panaoptions.engine import strategies
 from panaoptions.ledger import store
 from panaoptions.ledger.paper import PaperLedger
 from panaoptions.logging import get_logger
@@ -45,6 +46,10 @@ class OptionsDesk:
         self.running = False
         self.screened: list[PreMarketRead] = []
         self._screened_on: str = ""
+        # Opening range and pre-market extremes, per symbol, for today.
+        self._levels: dict[str, Any] = {}
+        self._levels_on: str = ""
+        self._weekly_written_for: str | None = None
         self._predictor: Any = None
 
     # ------------------------------------------------------------------ #
@@ -113,6 +118,7 @@ class OptionsDesk:
 
         if phase == "closed":
             await self._square_off(now)
+            await self._maybe_write_weekly_review()
             store.save_session(today, self.risk.state)
             return result
 
@@ -149,14 +155,22 @@ class OptionsDesk:
             if not candles:
                 continue
 
-            setup = setups.evaluate(symbol, candles, self.cfg)
+            session_levels = await self._levels_for(symbol, now)
+            setup, attempts = strategies.evaluate_all(
+                symbol, candles, session_levels, self.cfg)
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
 
-            if not setup.triggered:
-                store.save_signal_seen(
-                    signal_id, now, symbol, setup.direction.value, False,
-                    "; ".join(setup.blockers) or "no setup",
-                    {"confirmations": setup.confirmations})
+            if setup is None:
+                # Record every strategy that looked and passed, with its
+                # reason. The rejections are the half that tells you whether
+                # a rule is selective or simply impossible.
+                for attempt in attempts:
+                    store.save_signal_seen(
+                        f"{signal_id}-{attempt.strategy.name}", now, symbol,
+                        attempt.direction.value, False,
+                        "; ".join(attempt.blockers) or "no setup",
+                        {"strategy": attempt.strategy.value,
+                         "confirmations": attempt.confirmations})
                 continue
 
             # The ML filter, when it is switched on, is a veto — never a reason
@@ -194,12 +208,38 @@ class OptionsDesk:
             trade = self.ledger.open(signal, now)
             store.save_signal_seen(signal_id, now, symbol,
                                    setup.direction.value, True, "taken",
-                                   {"trade_id": trade.id})
+                                   {"trade_id": trade.id,
+                                    "strategy": setup.strategy.value})
             await self.notifier.entry(signal)
             actions.append(f"{symbol}: ENTERED {signal.alert_line()}")
             break            # one trade at a time; stop hunting
 
         return actions
+
+    async def _levels_for(self, symbol: str, now: datetime):
+        """Today's opening range and pre-market extremes, computed once.
+
+        These need a pre/post-inclusive request — the regular-session tape
+        does not contain pre-market bars at all — so they are fetched
+        separately and cached for the day.
+        """
+        today = now.date().isoformat()
+        if self._levels_on != today:
+            self._levels.clear()
+            self._levels_on = today
+
+        cached = self._levels.get(symbol)
+        # The opening range is not final until 09:45, so a partial one is
+        # recomputed rather than kept.
+        if cached is not None and cached.has_opening_range:
+            return cached
+
+        bars = await self.feed.candles(
+            symbol, self.cfg.get("technical.timeframe", "5m"),
+            include_prepost=True)
+        computed = levels_mod.compute(bars, self.cfg.timezone, now.date())
+        self._levels[symbol] = computed
+        return computed
 
     async def _pick_contract(self, symbol: str, setup, now: datetime):
         spot = setup.indicators.close
@@ -234,6 +274,7 @@ class OptionsDesk:
                 actions.append(f"{trade.symbol}: {fill.reason} at {fill.price:.2f}")
             if not trade.is_open:
                 store.save_trade(trade)
+                await self._grade(trade)
                 await self.notifier.exit(trade)
         return actions
 
@@ -272,7 +313,57 @@ class OptionsDesk:
         self.ledger.close_all(prices, ExitReason.DAY_END, now)
         for trade in closed:
             store.save_trade(trade)
+            await self._grade(trade)
             await self.notifier.exit(trade)
+
+    async def _grade(self, trade) -> None:
+        """Journal and grade a closed trade. Never fatal to the loop.
+
+        A P&L number teaches nothing on its own. The card is the learning, and
+        it grades the decision rather than the result.
+        """
+        if not bool(self.cfg.get("journal.auto_grade", True)):
+            return
+        try:
+            from panaoptions.journal import store as journal_store
+            from panaoptions.journal.grade import build_card, build_entry
+
+            entry = build_entry(trade, self.cfg)
+            card = await build_card(entry, self.cfg)
+            journal_store.save_entry(entry)
+            journal_store.save_card(card)
+            journal_store.export_index()
+            log.info("graded %s → %s (%d/10)%s", trade.contract_label,
+                     entry.verdict.value if entry.verdict else "?",
+                     entry.execution_score,
+                     f" — {', '.join(m.value for m in entry.mistakes)}"
+                     if entry.mistakes else "")
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not grade %s: %s", trade.id, exc)
+
+    async def _maybe_write_weekly_review(self) -> None:
+        """Have the week's review waiting once Friday's session has closed."""
+        if not bool(self.cfg.get("journal.auto_weekly_review", True)):
+            return
+        try:
+            from panaoptions.journal import weekly
+
+            start, end = weekly.current_week(self.cfg)
+            if self._weekly_written_for == end.isoformat():
+                return
+            if not weekly.is_complete(end, self.cfg):
+                return
+
+            review = await weekly.build(self.cfg, start, end)
+            self._weekly_written_for = end.isoformat()
+            if review.trades:
+                weekly.save(review, self.cfg)
+            else:
+                log.info("no graded trades in the week to %s", end)
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not write the weekly review: %s", exc)
+            from panaoptions.journal import weekly
+            self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
 
     # ------------------------------------------------------------------ #
     def status(self) -> dict[str, Any]:

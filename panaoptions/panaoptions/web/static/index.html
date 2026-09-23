@@ -34,6 +34,11 @@
     <div class="tiles" id="account-tiles"></div>
   </section>
 
+  <section class="wide">
+    <h2>Strategies <span class="count" id="strat-meta"></span></h2>
+    <div id="strategies-body"><div class="empty">—</div></div>
+  </section>
+
   <section>
     <h2>Pre-market screen</h2>
     <div id="screen-body"><div class="empty">Runs once a day, before the entry window.</div></div>
@@ -58,6 +63,28 @@
   <section class="wide">
     <h2>Why no trade</h2>
     <div id="rejections-body"><div class="empty">Nothing passed over yet.</div></div>
+  </section>
+
+  <section class="wide">
+    <h2>Learning <span class="count" id="journal-meta"></span></h2>
+    <div class="tiles" id="journal-tiles"></div>
+    <div id="journal-body"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Weekly review</h2>
+    <div class="toolbar">
+      <button id="btn-weekly">Build this week&#39;s review</button>
+      <label><input type="checkbox" id="w-coach" checked> Ask the model (slower)</label>
+      <button id="btn-weekly-md" disabled>Download .md</button>
+      <span id="weekly-status"></span>
+    </div>
+    <div id="weekly-body">
+      <div class="empty">
+        The week&#39;s trades, which of the three strategies actually paid, what
+        indiscipline cost, and a coach&#39;s read. Best after Friday&#39;s close.
+      </div>
+    </div>
   </section>
 
 </main>

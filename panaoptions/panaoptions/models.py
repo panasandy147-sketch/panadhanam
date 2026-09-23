@@ -49,17 +49,53 @@ class Indicators(BaseModel):
     close: float = 0.0
 
 
+class SetupType(str, Enum):
+    """The named strategies. Every trade is tagged with the one that fired it,
+    so the journal can answer "which of these actually works" rather than
+    lumping every entry together."""
+    ORB_VWAP = "ORB + VWAP"
+    VWAP_EMA_PULLBACK = "VWAP / 9-EMA Pullback"
+    LIQUIDITY_SWEEP = "Liquidity Sweep Reversal"
+    OTHER = "Other"
+
+
+class SessionLevels(BaseModel):
+    """The reference prices a strategy measures against, computed once a day."""
+    opening_range_high: float = 0.0
+    opening_range_low: float = 0.0
+    premarket_high: float = 0.0
+    premarket_low: float = 0.0
+    previous_close: float = 0.0
+
+    @property
+    def range_height(self) -> float:
+        return max(self.opening_range_high - self.opening_range_low, 0.0)
+
+    @property
+    def has_opening_range(self) -> bool:
+        return self.opening_range_high > 0 and self.opening_range_low > 0
+
+
 class Setup(BaseModel):
     """A technical trigger on the underlying, before any option is chosen."""
     symbol: str
     ts: datetime
     direction: Direction = Direction.NONE
+    strategy: SetupType = SetupType.OTHER
     pattern: str = ""
     confirmations: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     indicators: Indicators = Field(default_factory=Indicators)
     trend_aligned: bool = False
-    underlying_support: float = 0.0   # the level that invalidates the trade
+
+    # The level on the UNDERLYING that invalidates the thesis. This is the
+    # real stop: a fixed percentage on the premium is at the mercy of an IV
+    # shift or a wide spread, and says nothing about whether the trade was
+    # wrong. See risk.stop_mode.
+    underlying_support: float = 0.0
+    invalidation_note: str = ""
+    # Where the move is expected to reach, when the strategy has a view.
+    underlying_target: float = 0.0
 
     @property
     def triggered(self) -> bool:
@@ -131,6 +167,9 @@ class Signal(BaseModel):
     target_2: float = 0.0
     underlying_at_entry: float = 0.0
     underlying_support: float = 0.0
+    underlying_target: float = 0.0
+    strategy: SetupType = SetupType.OTHER
+    invalidation_note: str = ""
     pattern: str = ""
     confirmations: list[str] = Field(default_factory=list)
     ml_probability: float | None = None
@@ -153,6 +192,7 @@ class Signal(BaseModel):
 
 class ExitReason(str, Enum):
     STOP = "STOP"
+    EMA_TRAIL = "EMA_TRAIL"
     TARGET_1 = "TARGET_1"
     TARGET_2 = "TARGET_2"
     TRAIL = "TRAIL"
@@ -182,6 +222,8 @@ class PaperTrade(BaseModel):
     target_1: float
     target_2: float
     underlying_support: float = 0.0
+    strategy: SetupType = SetupType.OTHER
+    invalidation_note: str = ""
 
     remaining: int = 0
     fills: list[Fill] = Field(default_factory=list)
