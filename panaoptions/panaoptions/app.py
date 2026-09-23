@@ -14,6 +14,7 @@ how a desk ends up doubling down while a loser runs.
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -60,6 +61,11 @@ class OptionsDesk:
         # trade — so the dashboard can show the reasoning, not just the result.
         self.scanning: str = ""
         self.candidate: dict[str, Any] | None = None
+        # How long the last cycle took, and what the desk intends between
+        # them. Both shown on the dashboard, because "every 60 seconds" is a
+        # claim that ought to be checkable.
+        self.cycle_seconds: int = 60
+        self.last_cycle_seconds: float = 0.0
         self._predictor: Any = None
         # A watchlist saved from the dashboard wins over the config universe.
         # Applied at construction so a restart keeps scanning what was asked
@@ -112,6 +118,7 @@ class OptionsDesk:
 
     # ------------------------------------------------------------------ #
     async def start(self, cycle_seconds: int = 60) -> None:
+        self.cycle_seconds = cycle_seconds
         store.init()
         if not await self.feed.connect():
             log.error("no market data — refusing to start. A desk that cannot "
@@ -132,6 +139,7 @@ class OptionsDesk:
 
         try:
             while self.running:
+                started = time.monotonic()
                 try:
                     await self.cycle()
                 except asyncio.CancelledError:
@@ -139,7 +147,26 @@ class OptionsDesk:
                 except Exception as exc:
                     self.activity.add("error", str(exc)[:200], level="bad")
                     log.exception("cycle failed: %s", exc)
-                await asyncio.sleep(cycle_seconds)
+
+                # Sleep the REMAINDER, not the whole interval. Sleeping the
+                # full amount after the work makes the real period
+                # `work + interval`: with three symbols that is nearer 65
+                # seconds than 60, and the desk drifts a bar further behind
+                # every cycle while claiming to run every minute.
+                elapsed = time.monotonic() - started
+                self.last_cycle_seconds = round(elapsed, 2)
+                if elapsed > cycle_seconds:
+                    # It cannot keep up. Say so — a desk quietly running at
+                    # half its stated rate looks identical to one that is fine.
+                    self.activity.add(
+                        "slow.cycle",
+                        f"a cycle took {elapsed:.0f}s against a "
+                        f"{cycle_seconds}s interval — the desk is behind. "
+                        f"Fewer symbols, or a longer --interval.",
+                        level="warn")
+                    log.warning("cycle took %.1fs, longer than the %ds "
+                                "interval", elapsed, cycle_seconds)
+                await asyncio.sleep(max(0.0, cycle_seconds - elapsed))
         finally:
             await self.feed.close()
 
@@ -214,8 +241,18 @@ class OptionsDesk:
     async def _hunt(self, now: datetime) -> list[str]:
         """Look for one trade among the symbols that passed the screen."""
         if self.risk.state.halted:
+            self.scanning = ""
             return []
-        if len(self.ledger.open_trades) >= int(self.cfg.get("risk.max_open_trades", 1)):
+        max_open = int(self.cfg.get("risk.max_open_trades", 1))
+        if len(self.ledger.open_trades) >= max_open:
+            # Not scanning anything, and the panel must not keep showing the
+            # last symbol it looked at as though it still were.
+            self.scanning = ""
+            self.activity.add(
+                "hunt.skip",
+                f"holding {len(self.ledger.open_trades)} of {max_open} "
+                f"allowed — not looking for new trades until one closes",
+                ts=now)
             return []
 
         candidates = [r.symbol for r in self.screened if r.passed]
@@ -580,6 +617,9 @@ class OptionsDesk:
                             for t in self.ledger.open_trades.values()],
             "scanning": self.scanning,
             "candidate": self.candidate,
+            "cycle": {"seconds": self.cycle_seconds,
+                      "last_took": self.last_cycle_seconds,
+                      "symbols": len(self.cfg.symbols)},
             "ml_enabled": self._predictor is not None,
             "notifications": self.notifier.enabled,
             "paper_only": True,

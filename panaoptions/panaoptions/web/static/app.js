@@ -129,6 +129,9 @@ function renderAccount(s) {
       <div class="v" style="font-size:15px">${esc(s.session?.entry_open)}–${esc(s.session?.entry_close)}</div>
       <div class="sub">${esc(s.profile || "default")} · ${
         esc(s.session?.timeframe)} bars · ${esc(s.session?.dte)} DTE</div>
+      <div class="sub">every ${esc(s.cycle?.seconds ?? 60)}s across ${
+        esc(s.cycle?.symbols ?? 0)} symbol${s.cycle?.symbols === 1 ? "" : "s"}${
+        s.cycle?.last_took ? ` · last cycle ${num(s.cycle.last_took, 1)}s` : ""}</div>
       <div class="sub">square off ${esc(s.session?.force_exit_at)}</div></div>`;
 }
 

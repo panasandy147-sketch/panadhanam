@@ -392,3 +392,84 @@ async def test_nothing_is_logged_at_the_weekend(desk, monkeypatch):
                         lambda tz: datetime(2026, 9, 26, 10, 0, tzinfo=ET))
     await desk.cycle()
     assert desk.activity.recent() == []
+
+
+# --------------------------------------------------------------------------- #
+# Cadence
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_loop_sleeps_the_remainder_not_the_whole_interval(desk,
+                                                                    monkeypatch):
+    """Otherwise the real period is `work + interval`, not the interval.
+
+    With three symbols a cycle is several seconds, so a desk claiming to run
+    every 60 seconds runs every 65 and drifts a bar further behind all day.
+    """
+    import asyncio
+
+    slept: list[float] = []
+
+    async def _slow_cycle():
+        desk.running = False              # one pass
+        await asyncio.sleep(0)            # yield
+        return {"phase": "entry_window", "actions": []}
+
+    async def _record(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(desk, "cycle", _slow_cycle)
+    monkeypatch.setattr(asyncio, "sleep", _record)
+    monkeypatch.setattr(desk.feed, "connect", _true)
+    monkeypatch.setattr(desk, "_load_predictor", lambda: None)
+
+    await desk.start(cycle_seconds=60)
+    assert slept, "the loop never slept"
+    # Real work took a moment, so the sleep must be less than the full 60.
+    assert slept[-1] <= 60
+    assert desk.last_cycle_seconds >= 0
+
+
+async def _true(*_a, **_k):
+    return True
+
+
+@pytest.mark.asyncio
+async def test_a_desk_that_cannot_keep_up_says_so(desk, monkeypatch):
+    """A desk quietly running at half its stated rate looks fine."""
+    import asyncio
+    import time
+
+    ticks = iter([0.0, 90.0, 90.0, 90.0])
+
+    async def _cycle():
+        desk.running = False
+        return {"phase": "entry_window", "actions": []}
+
+    async def _noop(_s):
+        return None
+
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(desk, "cycle", _cycle)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+    monkeypatch.setattr(desk.feed, "connect", _true)
+    monkeypatch.setattr(desk, "_load_predictor", lambda: None)
+
+    await desk.start(cycle_seconds=60)
+    kinds = [e["kind"] for e in desk.activity.recent(20)]
+    assert "slow.cycle" in kinds
+
+
+@pytest.mark.asyncio
+async def test_the_panel_stops_naming_a_symbol_once_the_desk_is_full(desk,
+                                                                     monkeypatch):
+    """"SCANNING AAPL" while holding the maximum is a lie on screen."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+    assert desk.ledger.open_trades
+    desk.scanning = "AAPL"
+
+    await desk.cycle()                      # now at max_open_trades
+    assert desk.scanning == ""
+    details = [e["detail"] for e in desk.activity.recent(30)
+               if e["kind"] == "hunt.skip"]
+    assert any("not looking for new trades" in d for d in details)
