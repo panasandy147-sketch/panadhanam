@@ -128,6 +128,8 @@ def build_entry(trade: PaperTrade, cfg) -> JournalEntry:
         symbol=trade.symbol,
         contract=trade.contract_label,
         strategy=trade.strategy,
+        pattern=trade.pattern,
+        claimed_accuracy=trade.claimed_accuracy,
         direction=trade.direction.value,
         entry_price=trade.entry_price,
         exit_price=exits[-1].price if exits else 0.0,

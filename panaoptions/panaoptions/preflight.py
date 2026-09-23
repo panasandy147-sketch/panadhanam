@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from panaoptions.data.greeks import atm_premium_estimate
+from panaoptions.data.greeks import atm_premium_estimate, premium_estimate
 from panaoptions.logging import get_logger
 
 log = get_logger("preflight")
@@ -221,7 +221,60 @@ def check(cfg) -> list[Finding]:
             "This is a deliberate choice on a small paper account, not an "
             "error. Lower risk.max_capital_deployed_pct if you did not mean it."))
 
-    # 6. Can every enabled strategy actually be reached?
+    # 6. Can the budget buy the contract each pattern asks for?
+    #
+    # This is the trap in per-pattern contract selection. A pattern that asks
+    # for 0.70 delta at 45 DTE is asking for a much more expensive instrument
+    # than the 0.50-delta default, and the setups with the best published
+    # numbers are exactly the ones that ask for the most. Without this check
+    # the highest-conviction pattern on the list would fire, find no contract,
+    # and log a line nobody reads — which looks identical to it never firing.
+    patterns_cfg = cfg.get("strategies.candlestick_at_level.patterns", {}) or {}
+    if bool(cfg.get("strategies.candlestick_at_level.enabled", True)):
+        out_of_reach: list[tuple[str, float, float, int]] = []
+        for key, block in patterns_cfg.items():
+            if not isinstance(block, dict):
+                continue
+            band = block.get("delta") or []
+            window = block.get("dte") or []
+            if len(band) != 2 or len(window) != 2:
+                continue
+            wanted_delta, wanted_dte = float(band[0]), int(window[0])
+            costs = [premium_estimate(spot, iv, wanted_dte, wanted_delta)
+                     * multiplier
+                     for spot, iv in (_TYPICAL.get(sym.upper()) or (0, 0)
+                                      for sym in cfg.symbols)
+                     if spot]
+            if costs and min(costs) > budget:
+                out_of_reach.append((key, min(costs), wanted_delta, wanted_dte))
+
+        if out_of_reach:
+            out_of_reach.sort(key=lambda row: row[1])
+            listed = "; ".join(
+                f"{key.replace('_', ' ')} ({d:.2f}d/{dte}DTE, ~${cost:,.0f})"
+                for key, cost, d, dte in out_of_reach)
+            cheapest = out_of_reach[0][1]
+            alternative = cfg.get("universe.small_account_alternative", []) or []
+            fix = (f"Fund it — about ${cheapest / (deployed_pct / 100.0):,.0f} "
+                   f"of capital at {deployed_pct:.0f}% deployment reaches the "
+                   f"cheapest of them")
+            if alternative:
+                fix += (f" — or trade the smaller names already in the config "
+                        f"({', '.join(alternative[:4])}, ...) by moving "
+                        f"universe.small_account_alternative into "
+                        f"universe.symbols")
+            fix += (". Otherwise these are patterns this account will watch "
+                    "rather than trade, which is a legitimate choice as long "
+                    "as it is a choice.")
+            findings.append(Finding(
+                "warning", "strategies.candlestick_at_level.patterns",
+                f"{len(out_of_reach)} of {len(patterns_cfg)} patterns ask for "
+                f"a contract no name in the universe offers inside the "
+                f"${budget:,.0f} per-trade budget, so they can fire and never "
+                f"be filled: {listed}.",
+                fix))
+
+    # 7. Can every enabled strategy actually be reached?
     #
     # The desk hunts until the last enabled strategy shuts, but never past the
     # square-off — a trade opened at 15:44 is forced out a minute later. A

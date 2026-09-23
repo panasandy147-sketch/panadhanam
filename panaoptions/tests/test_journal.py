@@ -309,3 +309,63 @@ def test_a_session_is_only_over_after_the_forced_close(cfg, monkeypatch):
 
     # A past day is over whatever the clock says now.
     assert weekly.session_over(cfg, date(2026, 9, 22)) is True
+
+
+# --------------------------------------------------------------------------- #
+# Published claims versus measured results
+# --------------------------------------------------------------------------- #
+def _row(pattern, pnl, claimed=0.0):
+    return {"pnl": pnl, "strategy": "Candlestick at a Key Level",
+            "pattern": pattern, "claimed_accuracy": claimed,
+            "execution_score": 8, "mistakes": "[]", "verdict": "GOOD_WIN",
+            "return_pct": 0.0}
+
+
+def test_patterns_are_graded_separately_not_as_one_strategy():
+    """Seventeen patterns under one strategy name teaches nothing.
+
+    "Candlestick at a Key Level lost money" is not a finding anybody can act
+    on; which of them lost it is.
+    """
+    from panaoptions.journal.analytics import analyse
+
+    stats = analyse([_row("Hammer", 40.0), _row("Hammer", -20.0),
+                     _row("Three Black Crows", -60.0)])
+    by_pattern = stats["by_pattern"]
+    assert set(by_pattern) == {"Hammer", "Three Black Crows"}
+    assert by_pattern["Hammer"]["count"] == 2
+    assert by_pattern["Three Black Crows"]["total_pnl"] == -60.0
+
+
+def test_a_thin_sample_is_not_compared_against_a_published_number():
+    """Three trades against an 84% claim is not evidence either way.
+
+    Printing "yours: 33%" beside it invites exactly the wrong conclusion, so
+    the measured column withholds until the sample can carry it.
+    """
+    from panaoptions.journal.analytics import analyse
+
+    thin = analyse([_row("Bullish Three-Line Strike", -10.0, 0.84)] * 3)
+    slot = thin["by_pattern"]["Bullish Three-Line Strike"]
+    assert slot["claimed"] == 0.84
+    assert slot["comparable"] is False
+    assert slot["gap"] is None
+
+
+def test_a_real_sample_is_measured_against_the_claim():
+    from panaoptions.journal.analytics import analyse
+
+    rows = ([_row("Bullish Three-Line Strike", 30.0, 0.84)] * 5
+            + [_row("Bullish Three-Line Strike", -30.0, 0.84)] * 5)
+    slot = analyse(rows)["by_pattern"]["Bullish Three-Line Strike"]
+    assert slot["comparable"] is True
+    assert slot["win_rate"] == 50.0
+    # Published 84%, measured 50% — the gap is the whole point of recording it.
+    assert slot["gap"] == pytest.approx(-34.0)
+
+
+def test_a_trade_with_no_named_pattern_is_left_out_rather_than_bucketed():
+    from panaoptions.journal.analytics import analyse
+
+    stats = analyse([_row("", 10.0), _row("Hammer", 10.0)])
+    assert set(stats["by_pattern"]) == {"Hammer"}

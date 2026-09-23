@@ -42,6 +42,13 @@ class JournalEntry(BaseModel):
     symbol: str
     contract: str
     strategy: SetupType = SetupType.OTHER
+    # Which pattern produced it. Seventeen patterns roll up under one strategy
+    # name, and "Candlestick at a Key Level lost money" is not a finding you
+    # can act on — the question is always WHICH of them.
+    pattern: str = ""
+    # What that pattern is published as scoring, for the review to hold the
+    # claim against the measurement. Never read by the risk path.
+    claimed_accuracy: float = 0.0
     direction: str = "LONG"
 
     entry_price: float = 0.0

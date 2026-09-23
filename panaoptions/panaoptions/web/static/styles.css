@@ -202,6 +202,10 @@ footer { padding: 14px 18px 30px; color: var(--muted); font-size: 11.5px; text-a
   .log-row .d { grid-column: 1 / -1; padding-left: 62px; }
 }
 
+/* A published figure sits next to a measured one and must not read as
+   equally authoritative. */
+.muted { color: var(--muted); }
+
 /* --- Live candidate: chart on the left, the case on the right ----------- */
 .candidate { display: grid; grid-template-columns: 1.35fr 1fr; gap: 0; }
 .candidate-chart { border-right: 1px solid var(--border); }

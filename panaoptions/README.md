@@ -184,9 +184,14 @@ The trade is that the breakout buyers are trapped.
 
 ### 4. Candlestick at a Key Level — 09:45 to 15:00
 
-Seven reversal patterns on the **15m** chart — Hammer, Bullish Engulfing,
-Morning Star and Tweezer Bottom for calls; Shooting Star, Bearish Engulfing,
-Evening Star and Tweezer Top for puts.
+Thirteen reversal and continuation patterns on the **15m** chart.
+
+*Single and two-candle:* Hammer, Bullish Engulfing, Morning Star, Tweezer
+Bottom, Piercing Line for calls; Shooting Star, Bearish Engulfing, Evening
+Star, Tweezer Top, Dark Cloud Cover for puts.
+
+*Multi-candle structures:* Three-Line Strike, Three Black Crows, Three White
+Soldiers, Abandoned Baby, and the Liquidity Sweep Rejection.
 
 The pattern is the smaller half of the rule. Three gates have to clear:
 
@@ -209,11 +214,109 @@ the hammer's low, under the morning star's low, above the shooting star's
 high. The stop is that level on the **underlying**, not a percentage of the
 premium.
 
-*Contract:* each pattern asks for its own, because a sharp reversal off a level
-and a slow structural turn are not the same bet. Delta bands run **0.45–0.70**
-depending on the pattern, at **14–30 DTE** — longer-dated than the intraday
-rules so theta does not eat the move before it happens. The bands are in
-`config/settings.yaml` under `strategies.candlestick_at_level.delta`.
+#### The multi-candle structures
+
+Six more patterns, all of which are defined by what they **interrupt** — three
+long red candles after a rally is distribution, the same three mid-range is
+noise with a story attached. Each one is refused in writing when the run-in
+does not match (`trend_lookback`, default 10 bars).
+
+| Pattern | Side | Delta | DTE | Stop anchor |
+|---|---|---|---|---|
+| Bullish / Bearish Three-Line Strike | CALL / PUT | 0.65–0.75 | 30–45 | Candle 4's low (high) |
+| Three Black Crows | PUT | 0.55–0.65 | 21–35 | Candle 2's high |
+| Three White Soldiers | CALL | 0.50–0.60 | 30–45 | Midpoint of candle 2 |
+| Bullish / Bearish Abandoned Baby | CALL / PUT | 0.50–0.60 | 14–30 | The isolated doji's low (high) |
+| Piercing Line / Dark Cloud Cover | CALL / PUT | 0.50–0.60 | 14–30 | The reversing candle's far wick |
+| Liquidity Sweep Rejection | CALL / PUT | 0.55–0.65 | 14–30 | Beyond the tip of the sweep wick |
+
+**Three-Line Strike** — three consecutive lower closes, then one wide candle
+that opens at or below the third's low and closes above the *first* candle's
+open. One session undoing three; everyone short through the run is offside at
+once. Because candle 4 is wide, it asks for delta in the money and real time.
+
+**Three Black Crows / Three White Soldiers** — three long bodies, each opening
+inside the previous one's body and closing near its extreme. The near-the-low
+test matters: three red closes with long lower wicks is buyers showing up
+every session, which is the opposite of what the pattern claims, so it is
+rejected.
+
+**Abandoned Baby** — an island reversal. The gaps *are* the pattern: the doji
+must not overlap the candle on either side. Without both gaps it is a Morning
+Star, which is a weaker signal with a different stop, so the overlap test is
+strict and the two are never logged as one.
+
+**Piercing Line / Dark Cloud Cover** — a close back past the midpoint of the
+previous body. The textbook asks the second candle to gap; intraday bars gap
+only at the open, so a strict gap rule would make this fire once a day at
+09:30 and never again. Opening beyond the previous close carries the same
+meaning. A close past the *whole* body is an engulfing — a different pattern
+with a different stop — and is reported as one.
+
+**Liquidity Sweep Rejection** — not a separate detector. It is what a Hammer or
+Shooting Star *is* when its wick pushes through the level and the candle closes
+back inside: the stops resting beyond the level were filled first, so the trade
+is that whoever got filled out there is now offside. It earns its own name, its
+own contract and a stop beyond the wick tip rather than at the level.
+
+*Contract:* each pattern asks for its own delta **and** its own expiry, because
+a sharp reversal off a level and a four-candle structural turn are not the same
+bet. A four-candle reversal is a multi-session move and dies on theta at 7
+days; handing it the intraday default would buy the right thesis with the wrong
+contract. The bands are in `config/settings.yaml` under
+`strategies.candlestick_at_level.patterns`.
+
+#### About those published win rates
+
+The config records a `claimed_accuracy` for the patterns that have one —
+0.84 for the Three-Line Strike, 0.78 for Three Black Crows, and so on. Three
+things are true about those numbers and the app is built to keep all three
+visible:
+
+1. **They are measured on daily bars**, mostly on individual equities. This
+   desk reads a **15-minute intraday tape**. A figure from one is a hypothesis
+   about the other, not a result.
+2. **The headline figure is usually a different question.** Bulkowski's ~84%
+   for the three-line strike is how often it *reverses*, which is not the same
+   as how often a trade on it pays after spread, slippage and theta. His own
+   ranked performance tables put it well down the list.
+3. **The figure is usually cited for the bearish pattern**, and mirrored onto
+   the bullish one on the assumption that the market is symmetrical. It is not.
+
+So the number is carried as a **claim, never as a fact**. Nothing in the risk
+or sizing path reads it — there is a test that proves a 0.99 claim and a 0.00
+claim size the identical position — and the journal prints it beside what the
+pattern actually did here:
+
+```
+| Pattern                    | Trades | Yours | Published | Gap      | Total   |
+| Bullish Three-Line Strike  | 12     | 50%   | 84%       | -34 pts  | -180.00 |
+| Hammer                     | 4      | —     | —         | —        |  +60.00 |
+```
+
+`Yours` stays blank until there are at least 10 trades, because three trades
+against an 84% claim is not evidence either way and printing "33%" beside it
+invites exactly the wrong conclusion.
+
+#### Can this account actually buy them?
+
+Per-pattern contract selection has a trap in it: **the patterns with the best
+published numbers ask for the most expensive contracts.** A 0.70-delta call at
+45 DTE is a different instrument at a different price from the 0.50-delta
+default, and on a small account the highest-conviction setup on the list is the
+one most likely to fire and find nothing it can buy.
+
+`run.py --check-config` prices every pattern's band against the universe and
+says so:
+
+```
+[warning] strategies.candlestick_at_level.patterns
+    15 of 17 patterns ask for a contract no name in the universe offers
+    inside the $400 per-trade budget, so they can fire and never be filled
+```
+
+On a $2,000 account that is most of them, with the large-cap universe. Swapping
+`universe.small_account_alternative` into `universe.symbols` clears it.
 
 Windows, volume multiples and enable flags are all in
 `config/settings.yaml` under `strategies:`.

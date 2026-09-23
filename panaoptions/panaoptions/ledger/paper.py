@@ -48,6 +48,8 @@ class PaperLedger:
             target_2=signal.target_2,
             underlying_support=signal.underlying_support,
             strategy=signal.strategy,
+            pattern=signal.pattern,
+            claimed_accuracy=signal.claimed_accuracy,
             invalidation_note=signal.invalidation_note,
             remaining=signal.quantity, max_price_seen=fill_price,
         )

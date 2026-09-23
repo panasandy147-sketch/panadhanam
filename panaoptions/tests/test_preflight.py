@@ -202,3 +202,41 @@ def test_windows_inside_the_session_raise_nothing(cfg):
     from panaoptions import preflight
 
     assert not [f for f in preflight.check(cfg) if f.setting.endswith(".to")]
+
+
+def test_a_pattern_that_can_never_be_filled_is_called_out(cfg):
+    """The trap in per-pattern contract selection.
+
+    The setups with the best published numbers ask for the most expensive
+    contracts. Without this check the highest-conviction pattern on the list
+    fires, finds nothing it can buy, and logs a line nobody reads — which is
+    indistinguishable from it never firing at all.
+    """
+    from panaoptions import preflight
+
+    cfg.data["account"]["starting_capital"] = 2000.0
+    found = [f for f in preflight.check(cfg)
+             if f.setting == "strategies.candlestick_at_level.patterns"]
+    assert found, "an unaffordable pattern band must be reported"
+    assert "three line strike" in found[0].problem
+    # And the fix names the smaller universe the config already ships.
+    assert "small_account_alternative" in found[0].fix
+
+
+def test_the_small_account_universe_clears_the_pattern_check(cfg):
+    from panaoptions import preflight
+
+    cfg.data["universe"]["symbols"] = cfg.data["universe"]["small_account_alternative"]
+    assert not [f for f in preflight.check(cfg)
+                if f.setting == "strategies.candlestick_at_level.patterns"]
+
+
+def test_a_disabled_candlestick_strategy_raises_no_pattern_warning(cfg):
+    from panaoptions import preflight
+
+    cfg.data["strategies"]["candlestick_at_level"]["enabled"] = False
+    try:
+        assert not [f for f in preflight.check(cfg)
+                    if f.setting == "strategies.candlestick_at_level.patterns"]
+    finally:
+        cfg.data["strategies"]["candlestick_at_level"]["enabled"] = True

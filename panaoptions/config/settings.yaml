@@ -119,17 +119,89 @@ strategies:
     # and theta must not eat the move before it happens.
     min_dte: 14
     max_dte: 30
-    # Each pattern asks for its own contract — a sharp reversal off a level
-    # and a slow structural turn are not the same bet.
-    delta:
-      hammer:             [0.50, 0.65]
-      bullish_engulfing:  [0.55, 0.70]
-      morning_star:       [0.45, 0.55]
-      tweezer_bottom:     [0.50, 0.65]
-      shooting_star:      [0.50, 0.60]
-      bearish_engulfing:  [0.55, 0.65]
-      evening_star:       [0.45, 0.55]
-      tweezer_top:        [0.50, 0.65]
+    # How many bars of run-in decide whether a pattern interrupted a trend.
+    # Most of these mean nothing without one: three long red candles after a
+    # rally is distribution, the same three mid-range is noise.
+    trend_lookback: 10
+
+    # Each pattern asks for its own contract — a sharp reversal off a level and
+    # a four-candle structural turn are not the same bet and do not want the
+    # same delta or the same amount of time.
+    #
+    # `claimed_accuracy` is the win rate the pattern is PUBLISHED as having,
+    # recorded here as a claim so the journal can hold it against what the
+    # pattern actually does on this desk. Those figures come from studies of
+    # DAILY bars on equities; this desk reads a 15m intraday tape, where they
+    # are a hypothesis and nothing more. Nothing in the risk or sizing path
+    # reads this number — it is for the review, not for the decision.
+    patterns:
+      hammer:
+        delta: [0.50, 0.65]
+        dte:   [14, 30]
+      bullish_engulfing:
+        delta: [0.55, 0.70]
+        dte:   [14, 30]
+      morning_star:
+        delta: [0.45, 0.55]
+        dte:   [14, 30]
+      tweezer_bottom:
+        delta: [0.50, 0.65]
+        dte:   [14, 30]
+      shooting_star:
+        delta: [0.50, 0.60]
+        dte:   [14, 30]
+      bearish_engulfing:
+        delta: [0.55, 0.65]
+        dte:   [14, 30]
+      evening_star:
+        delta: [0.45, 0.55]
+        dte:   [14, 30]
+      tweezer_top:
+        delta: [0.50, 0.65]
+        dte:   [14, 30]
+
+      # --- the multi-candle structures ---------------------------------- #
+      # In the money, and given real time: candle 4 is wide, so a higher delta
+      # is what keeps theta from eating the expansion it is betting on.
+      bullish_three_line_strike:
+        delta: [0.65, 0.75]
+        dte:   [30, 45]
+        claimed_accuracy: 0.84
+      bearish_three_line_strike:
+        delta: [0.65, 0.75]
+        dte:   [30, 45]
+        claimed_accuracy: 0.84
+      three_black_crows:
+        delta: [0.55, 0.65]
+        dte:   [21, 35]
+        claimed_accuracy: 0.78
+      three_white_soldiers:
+        delta: [0.50, 0.60]
+        dte:   [30, 45]
+        claimed_accuracy: 0.75
+      bullish_abandoned_baby:
+        delta: [0.50, 0.60]
+        dte:   [14, 30]
+        claimed_accuracy: 0.70
+      bearish_abandoned_baby:
+        delta: [0.50, 0.60]
+        dte:   [14, 30]
+        claimed_accuracy: 0.70
+      piercing_line:
+        delta: [0.50, 0.60]
+        dte:   [14, 30]
+        claimed_accuracy: 0.67
+      dark_cloud_cover:
+        delta: [0.50, 0.60]
+        dte:   [14, 30]
+        claimed_accuracy: 0.67
+      # A wick that pierced the level and closed back inside. Not a separate
+      # detector: it is what a hammer or shooting star IS when it takes the
+      # stops beyond a level first.
+      liquidity_sweep_rejection:
+        delta: [0.55, 0.65]
+        dte:   [14, 30]
+        claimed_accuracy: 0.80
 
 risk:
   max_open_trades: 1

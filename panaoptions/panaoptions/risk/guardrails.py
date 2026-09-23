@@ -164,7 +164,8 @@ class RiskManager:
             key_level=setup.key_level,
             key_level_source=setup.key_level_source,
             reasoning=list(setup.reasoning),
-            pattern=setup.pattern, confirmations=list(setup.confirmations),
+            pattern=setup.pattern, claimed_accuracy=setup.claimed_accuracy,
+            confirmations=list(setup.confirmations),
             ml_probability=ml_probability,
         )
 

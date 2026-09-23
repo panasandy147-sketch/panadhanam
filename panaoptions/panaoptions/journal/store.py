@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS journal (
     symbol TEXT,
     contract TEXT,
     strategy TEXT,
+    pattern TEXT,
+    claimed_accuracy REAL,
     direction TEXT,
     entry_price REAL, exit_price REAL, stop_price REAL,
     quantity INTEGER,
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS journal (
 );
 CREATE INDEX IF NOT EXISTS idx_journal_session ON journal(session_date);
 CREATE INDEX IF NOT EXISTS idx_journal_strategy ON journal(strategy);
+CREATE INDEX IF NOT EXISTS idx_journal_pattern ON journal(pattern);
 
 CREATE TABLE IF NOT EXISTS cards (
     trade_id TEXT PRIMARY KEY,
@@ -54,9 +57,25 @@ CREATE TABLE IF NOT EXISTS cards (
 """
 
 
+# Columns added after the table first shipped. CREATE TABLE IF NOT EXISTS is
+# a no-op on an existing database, so without this an upgrade leaves anyone
+# who has already traded with a table the new INSERT cannot fill — and the
+# failure would land on the first graded trade after the update, which is the
+# worst possible moment to discover it.
+_ADDED_COLUMNS = (
+    ("journal", "pattern", "TEXT"),
+    ("journal", "claimed_accuracy", "REAL"),
+)
+
+
 def init() -> None:
     conn = get_conn()
     conn.executescript(SCHEMA)
+    for table, column, kind in _ADDED_COLUMNS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+            log.info("journal: added %s.%s", table, column)
     conn.commit()
     JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
     (JOURNAL_DIR / "cards").mkdir(exist_ok=True)
@@ -67,13 +86,15 @@ def save_entry(entry: JournalEntry) -> None:
     conn = get_conn()
     conn.execute("""
         INSERT OR REPLACE INTO journal (id, trade_id, ts, session_date, symbol,
-            contract, strategy, direction, entry_price, exit_price, stop_price,
+            contract, strategy, pattern, claimed_accuracy, direction,
+            entry_price, exit_price, stop_price,
             quantity, pnl, return_pct, hold_minutes, exit_reason, mistakes,
             verdict, execution_score, payload)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (entry.id, entry.trade_id, entry.ts.isoformat(),
           entry.ts.date().isoformat(), entry.symbol, entry.contract,
-          entry.strategy.value, entry.direction, entry.entry_price,
+          entry.strategy.value, entry.pattern, entry.claimed_accuracy,
+          entry.direction, entry.entry_price,
           entry.exit_price, entry.stop_price, entry.quantity, entry.pnl,
           entry.return_pct, entry.hold_minutes, entry.exit_reason,
           json.dumps([m.value for m in entry.mistakes]),
@@ -165,6 +186,26 @@ def export_index() -> Path:
                               key=lambda kv: -kv[1]["total_pnl"]):
             lines.append(f"| {name} | {s['count']} | {s['win_rate']:.0f}% | "
                          f"{s['total_pnl']:+,.2f} | {s['avg_score']:.1f}/10 |")
+        lines.append("")
+
+    if stats.get("by_pattern"):
+        lines += ["## By pattern", "",
+                  "Published win rates come from studies of DAILY bars on",
+                  "equities. This desk reads a 15m intraday tape, so they are",
+                  "a hypothesis here — the `Yours` column is the only one",
+                  "measured on your own data, and it is marked `—` until",
+                  "there are enough trades for the comparison to mean",
+                  "anything.",
+                  "",
+                  "| Pattern | Trades | Yours | Published | Gap | Total |",
+                  "|---|---|---|---|---|---|"]
+        for name, s in sorted(stats["by_pattern"].items(),
+                              key=lambda kv: -kv[1]["count"]):
+            measured = f"{s['win_rate']:.0f}%" if s["comparable"] else "—"
+            published = f"{s['claimed']:.0%}" if s["claimed"] else "—"
+            gap = f"{s['gap']:+.0f} pts" if s["gap"] is not None else "—"
+            lines.append(f"| {name} | {s['count']} | {measured} | {published} "
+                         f"| {gap} | {s['total_pnl']:+,.2f} |")
         lines.append("")
 
     path = JOURNAL_DIR / "README.md"

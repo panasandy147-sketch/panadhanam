@@ -387,24 +387,71 @@ class CandlestickAtLevel(Strategy):
     name = SetupType.CANDLESTICK_AT_LEVEL
     window = ("09:45", "15:00")
 
-    # (min delta, max delta) per pattern, and how confident the structure is.
-    _DEFAULT_DELTA = {
-        "Hammer": (0.50, 0.65),
-        "Bullish Engulfing": (0.55, 0.70),
-        "Morning Star": (0.45, 0.55),
-        "Tweezer Bottom": (0.50, 0.65),
-        "Shooting Star": (0.50, 0.60),
-        "Bearish Engulfing": (0.55, 0.65),
-        "Evening Star": (0.45, 0.55),
-        "Tweezer Top": (0.50, 0.65),
+    # Per pattern: the delta band and the expiry window it asks for. A sharp
+    # reversal off a level and a four-candle structural turn are not the same
+    # bet, so they do not want the same contract. A wide-range candle that
+    # undoes three sessions is worth paying up for in delta; a doji island
+    # tends to move fast and does not need the time.
+    _DEFAULT_CONTRACT = {
+        "Hammer":                    ((0.50, 0.65), (14, 30)),
+        "Bullish Engulfing":         ((0.55, 0.70), (14, 30)),
+        "Morning Star":              ((0.45, 0.55), (14, 30)),
+        "Tweezer Bottom":            ((0.50, 0.65), (14, 30)),
+        "Shooting Star":             ((0.50, 0.60), (14, 30)),
+        "Bearish Engulfing":         ((0.55, 0.65), (14, 30)),
+        "Evening Star":              ((0.45, 0.55), (14, 30)),
+        "Tweezer Top":               ((0.50, 0.65), (14, 30)),
+        "Bullish Three-Line Strike": ((0.65, 0.75), (30, 45)),
+        "Bearish Three-Line Strike": ((0.65, 0.75), (30, 45)),
+        "Three White Soldiers":      ((0.50, 0.60), (30, 45)),
+        "Three Black Crows":         ((0.55, 0.65), (21, 35)),
+        "Bullish Abandoned Baby":    ((0.50, 0.60), (14, 30)),
+        "Bearish Abandoned Baby":    ((0.50, 0.60), (14, 30)),
+        "Piercing Line":             ((0.50, 0.60), (14, 30)),
+        "Dark Cloud Cover":          ((0.50, 0.60), (14, 30)),
+        "Liquidity Sweep Rejection": ((0.55, 0.65), (14, 30)),
     }
+
+    @staticmethod
+    def _key(pattern: str) -> str:
+        return pattern.lower().replace(" ", "_").replace("-", "_")
 
     def delta_band(self, pattern: str) -> tuple[float, float]:
         configured = self.cfg.get(
-            f"strategies.candlestick_at_level.delta.{pattern.lower().replace(' ', '_')}")
+            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.delta")
         if isinstance(configured, list | tuple) and len(configured) == 2:
             return float(configured[0]), float(configured[1])
-        return self._DEFAULT_DELTA.get(pattern, (0.45, 0.60))
+        return self._DEFAULT_CONTRACT.get(pattern, ((0.45, 0.60), (0, 0)))[0]
+
+    def dte_window(self, pattern: str) -> tuple[int, int]:
+        """How much time this pattern's thesis needs to play out.
+
+        A four-candle reversal is a multi-session move and dies on theta at 7
+        days; the config-wide default would quietly give it the wrong contract.
+        """
+        configured = self.cfg.get(
+            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.dte")
+        if isinstance(configured, list | tuple) and len(configured) == 2:
+            return int(configured[0]), int(configured[1])
+        fallback = self._DEFAULT_CONTRACT.get(pattern, (None, (0, 0)))[1]
+        if fallback != (0, 0):
+            return fallback
+        return (int(self.cfg.get("strategies.candlestick_at_level.min_dte", 14)),
+                int(self.cfg.get("strategies.candlestick_at_level.max_dte", 30)))
+
+    def claimed_accuracy(self, pattern: str) -> float:
+        """The win rate this pattern is published as having, or 0.
+
+        Recorded so the journal can hold it against what it actually does on
+        THIS desk's data. A number from somebody else's backtest on daily bars
+        is a hypothesis about a 15m intraday tape, not a result.
+        """
+        value = self.cfg.get(
+            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.claimed_accuracy")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
     def evaluate(self, symbol, df5, df15, levels) -> Setup:
         setup = _base(symbol, df5, self.name)
@@ -432,6 +479,24 @@ class CandlestickAtLevel(Strategy):
 
         snapshot = ta.compute(df5, self.cfg)
         setup.indicators = snapshot
+
+        # --- what it interrupted ------------------------------------------ #
+        # Most of these patterns are defined by their context: three long red
+        # candles after a rally is distribution, and the same three in the
+        # middle of a range is noise with a story attached.
+        if found.requires_trend:
+            run_in = int(self.cfg.get(
+                "strategies.candlestick_at_level.trend_lookback", 10))
+            trend = patterns.prior_trend(
+                frame, before=bars_ago + found.bars, lookback=run_in)
+            if trend != found.requires_trend:
+                wanted = "a downtrend" if found.requires_trend < 0 else "an uptrend"
+                saw = ("an uptrend" if trend > 0
+                       else "a downtrend" if trend < 0 else "no clear trend")
+                setup.blockers.append(
+                    f"{found.name} needs {wanted} to interrupt and the last "
+                    f"{run_in} {timeframe} bars show {saw}")
+                return setup
 
         # --- the location gate ------------------------------------------- #
         moving_averages = {"20 EMA": float(ta.ema(frame["close"], 20).iloc[-1]),
@@ -474,30 +539,52 @@ class CandlestickAtLevel(Strategy):
             return setup
 
         # --- confirmed ----------------------------------------------------- #
-        band = self.delta_band(found.name)
+        # A single-wick rejection that actually PIERCED the level and closed
+        # back inside is not the same event as one that stopped at it: the
+        # stops resting beyond the level were taken first, and the trade is
+        # that whoever was filled there is now offside. It gets its own name
+        # and its own contract rather than being logged as a plain hammer.
+        name = found.name
+        swept = False
+        if found.name in {"Hammer", "Shooting Star"}:
+            swept = (float(pattern_bar["low"]) < level.price
+                     <= float(pattern_bar["close"])) if found.bullish else (
+                float(pattern_bar["high"]) > level.price
+                >= float(pattern_bar["close"]))
+            if swept:
+                name = "Liquidity Sweep Rejection"
+
+        band = self.delta_band(name)
+        min_dte, max_dte = self.dte_window(name)
         setup.direction = Direction.LONG if found.bullish else Direction.SHORT
-        setup.pattern = found.name
+        setup.pattern = name
         setup.trend_aligned = True
         setup.entry_trigger = found.trigger
         setup.key_level = level.price
         setup.key_level_source = level.source
         setup.delta_band = band
-        setup.min_dte_override = int(self.cfg.get(
-            "strategies.candlestick_at_level.min_dte", 14))
-        setup.max_dte_override = int(self.cfg.get(
-            "strategies.candlestick_at_level.max_dte", 30))
+        setup.min_dte_override = min_dte
+        setup.max_dte_override = max_dte
+        setup.claimed_accuracy = self.claimed_accuracy(name)
         setup.underlying_support = found.invalidation
         setup.invalidation_note = (
             f"a close back through {found.invalidation:.2f} "
             f"({'below' if found.bullish else 'above'} the "
             f"{found.name.lower()})")
+        if swept:
+            setup.invalidation_note = (
+                f"a close back through {found.invalidation:.2f}, beyond the "
+                f"tip of the sweep wick")
 
         right = "CALL" if found.bullish else "PUT"
         setup.confirmations = [
-            f"{found.name} on the {timeframe} close"
+            f"{name} on the {timeframe} close"
             + (f", {bars_ago} bar{'s' if bars_ago > 1 else ''} ago"
                if bars_ago else ""),
-            f"at {level.source} ({level.price:.2f}) — {level.kind}",
+            (f"wick swept {level.source} ({level.price:.2f}) and closed back "
+             f"inside — the stops beyond it were taken first"
+             if swept else
+             f"at {level.source} ({level.price:.2f}) — {level.kind}"),
             f"price took out {found.trigger:.2f}",
         ]
         volume_multiple = float(self.cfg.get(
@@ -515,11 +602,16 @@ class CandlestickAtLevel(Strategy):
         # The case for the trade, in the order somebody would read it.
         setup.reasoning = [
             f"**Buy a {right}** on {symbol}.",
-            f"**The pattern.** {found.name} completed on the {timeframe} "
+            f"**The pattern.** {name} completed on the {timeframe} "
             f"chart. {found.note}",
-            f"**Why here.** It formed at {level.source} ({level.price:.2f}), a "
-            f"{level.kind} level the market has already turned at. The same "
-            f"candle mid-range would be ignored.",
+            (f"**Why here.** The wick pushed through {level.source} "
+             f"({level.price:.2f}) — taking the stops resting beyond it — and "
+             f"the candle closed back inside. The trade is that whoever got "
+             f"filled out there is now offside."
+             if swept else
+             f"**Why here.** It formed at {level.source} ({level.price:.2f}), "
+             f"a {level.kind} level the market has already turned at. The "
+             f"same candle mid-range would be ignored."),
             f"**The trigger.** Price took out {found.trigger:.2f}, which is "
             f"what turns a pattern into an entry.",
             f"**What kills it.** A close back through "
@@ -529,6 +621,20 @@ class CandlestickAtLevel(Strategy):
             f"{setup.min_dte_override}–{setup.max_dte_override} days out, so "
             f"theta does not eat the move before it happens.",
         ]
+        if found.requires_trend:
+            setup.reasoning.insert(3, (
+                "**What it interrupted.** "
+                + ("A run of selling into the level, which is the only context "
+                   "this pattern means anything in."
+                   if found.requires_trend < 0 else
+                   "A run of buying into the level — this is distribution, "
+                   "not a dip.")))
+        if setup.claimed_accuracy:
+            setup.reasoning.append(
+                f"**The published number.** This pattern is cited at "
+                f"~{setup.claimed_accuracy:.0%} on DAILY bars in somebody "
+                f"else's study. That is a hypothesis about this 15m tape, not "
+                f"a result — the journal tracks what it actually does here.")
         return setup
 
 

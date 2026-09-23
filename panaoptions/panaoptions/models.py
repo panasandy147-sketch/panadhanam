@@ -111,6 +111,10 @@ class Setup(BaseModel):
     delta_band: tuple[float, float] | None = None
     min_dte_override: int = 0
     max_dte_override: int = 0
+    # The win rate this pattern is published as having, if any. Carried so the
+    # journal can hold the claim against what it actually did here; it never
+    # influences sizing, and nothing in the risk path reads it.
+    claimed_accuracy: float = 0.0
     # Plain-language case for the trade, for the dashboard to show.
     reasoning: list[str] = Field(default_factory=list)
 
@@ -191,6 +195,7 @@ class Signal(BaseModel):
     key_level_source: str = ""
     reasoning: list[str] = Field(default_factory=list)
     pattern: str = ""
+    claimed_accuracy: float = 0.0
     confirmations: list[str] = Field(default_factory=list)
     ml_probability: float | None = None
 
@@ -243,6 +248,10 @@ class PaperTrade(BaseModel):
     target_2: float
     underlying_support: float = 0.0
     strategy: SetupType = SetupType.OTHER
+    # Which pattern produced it, carried so the journal can grade patterns
+    # rather than only the strategy they all roll up under.
+    pattern: str = ""
+    claimed_accuracy: float = 0.0
     invalidation_note: str = ""
 
     remaining: int = 0

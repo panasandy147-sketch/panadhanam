@@ -181,7 +181,7 @@ def test_every_attempt_is_reported_even_when_none_fire(cfg):
 # --------------------------------------------------------------------------- #
 # Strategy 4 — a reversal candle, but only at a level
 # --------------------------------------------------------------------------- #
-def _hammer_session(*, trigger_taken=True, mid_range=False):
+def _hammer_session(*, trigger_taken=True, mid_range=False, sweep=True):
     """A slide into a swing low, a hammer off it, then the break of its high.
 
     The hammer has to land on a 15m boundary to survive the resample, so the
@@ -199,7 +199,9 @@ def _hammer_session(*, trigger_taken=True, mid_range=False):
     for i, price in enumerate(slide):
         bars.append(_bar(BELL + timedelta(minutes=5 * i), price))
 
-    low = 97.6 if not mid_range else 99.7
+    # sweep=True pushes the wick THROUGH the swing low at 97.90; sweep=False
+    # leaves it resting on the level without taking the stops under it.
+    low = (97.6 if sweep else 98.0) if not mid_range else 99.7
     top = 99.0 if not mid_range else 100.1
     base = BELL + timedelta(minutes=5 * len(slide))
     bars.append(Candle(ts=base, open=top - 0.1, high=top, low=low,
@@ -218,7 +220,8 @@ def _hammer_session(*, trigger_taken=True, mid_range=False):
 
 
 def test_a_hammer_at_a_swing_low_becomes_a_call(cfg):
-    setup, attempts = evaluate_all("AAPL", _hammer_session(), compute([]), cfg)
+    setup, _attempts = evaluate_all("AAPL", _hammer_session(sweep=False),
+                                    compute([]), cfg)
     assert setup is not None
     assert setup.strategy is SetupType.CANDLESTICK_AT_LEVEL
     assert setup.direction is Direction.LONG
@@ -226,8 +229,27 @@ def test_a_hammer_at_a_swing_low_becomes_a_call(cfg):
     # The location is the larger half of the rule, so it is always named.
     assert setup.key_level and setup.key_level_source
     # The stop belongs to the candle, not to a percentage of the premium.
-    assert setup.underlying_support == pytest.approx(97.6)
+    assert setup.underlying_support == pytest.approx(98.0)
     assert setup.entry_trigger == pytest.approx(99.0)
+
+
+def test_a_wick_through_the_level_is_a_sweep_not_a_hammer(cfg):
+    """Piercing the level and closing back inside is a different event.
+
+    The stops resting under the level were filled first, so the trade is that
+    whoever got filled out there is now offside — which is a stronger read
+    than a candle that merely stopped at support, and it earns its own name,
+    its own contract and its own stop.
+    """
+    setup, _ = evaluate_all("AAPL", _hammer_session(sweep=True), compute([]), cfg)
+    assert setup is not None
+    assert setup.pattern == "Liquidity Sweep Rejection"
+    assert setup.delta_band == (0.55, 0.65)
+    # The stop sits beyond the tip of the sweep wick, not at the level.
+    assert setup.underlying_support == pytest.approx(97.6)
+    assert setup.key_level == pytest.approx(97.9)
+    assert "swept" in " ".join(setup.confirmations)
+    assert "offside" in " ".join(setup.reasoning)
 
 
 def test_the_same_hammer_mid_range_is_refused(cfg):
@@ -275,3 +297,85 @@ def test_a_triggered_setup_explains_itself_in_plain_language(cfg):
     for heading in ("The pattern.", "Why here.", "The trigger.",
                     "What kills it.", "The contract."):
         assert heading in joined
+
+
+def test_a_pattern_needs_the_trend_it_claims_to_interrupt(cfg):
+    """Context is most of these patterns.
+
+    Three long red candles after a rally is distribution; the same three in
+    the middle of a range is noise with a story attached. The refusal has to
+    be legible, because a pattern rejected for its context looks exactly like
+    one that never printed.
+    """
+    from panaoptions.engine.patterns import Pattern
+    from panaoptions.engine.strategies import CandlestickAtLevel
+
+    strategy = CandlestickAtLevel(cfg)
+    crows = Pattern("Three Black Crows", False, 98.0, 102.6, bars=3,
+                    requires_trend=1)
+    assert crows.requires_trend == 1
+    # And the per-pattern contract follows the pattern, not the global default.
+    assert strategy.delta_band("Three Black Crows") == (0.55, 0.65)
+    assert strategy.dte_window("Three Black Crows") == (21, 35)
+
+
+def test_each_multi_candle_pattern_asks_for_its_own_expiry(cfg):
+    from panaoptions.engine.strategies import CandlestickAtLevel
+
+    strategy = CandlestickAtLevel(cfg)
+    # A four-candle structural reversal is a multi-session move. Handing it
+    # the intraday default would buy the right thesis with the wrong contract
+    # and lose on theta while being directionally correct.
+    assert strategy.dte_window("Bullish Three-Line Strike") == (30, 45)
+    assert strategy.delta_band("Bullish Three-Line Strike") == (0.65, 0.75)
+    assert strategy.dte_window("Three White Soldiers") == (30, 45)
+    assert strategy.dte_window("Hammer") == (14, 30)
+
+
+def test_an_unknown_pattern_falls_back_rather_than_crashing(cfg):
+    from panaoptions.engine.strategies import CandlestickAtLevel
+
+    strategy = CandlestickAtLevel(cfg)
+    assert strategy.delta_band("Nonsense") == (0.45, 0.60)
+    assert strategy.dte_window("Nonsense") == (14, 30)
+
+
+def test_a_published_win_rate_is_recorded_but_never_sizes_a_trade(cfg):
+    """A citation must not become money at risk.
+
+    The number comes from somebody else's study of daily bars and is a
+    hypothesis about this 15m tape. It is carried so the review can hold it
+    against what actually happened; a position sized off it would be the app
+    believing a claim it has not tested.
+    """
+    from datetime import UTC, datetime
+
+    from panaoptions.models import OptionContract, OptionRight, Setup, SetupType
+    from panaoptions.risk.guardrails import RiskManager
+
+    strategy = CandlestickAtLevel(cfg)
+    assert strategy.claimed_accuracy("Bullish Three-Line Strike") == 0.84
+    assert strategy.claimed_accuracy("Hammer") == 0.0
+
+    cfg.data["account"]["starting_capital"] = 2000.0
+    contract = OptionContract(symbol="AAPL", right=OptionRight.CALL, strike=230,
+                              expiry="2026-10-16", dte=23, bid=1.00, ask=1.04,
+                              delta=0.55)
+    now = datetime(2026, 9, 23, 14, 0, tzinfo=UTC)
+
+    def _size(claim):
+        setup = Setup(symbol="AAPL", ts=now,
+                      strategy=SetupType.CANDLESTICK_AT_LEVEL,
+                      direction=Direction.LONG, pattern="Hammer",
+                      underlying_support=97.6, claimed_accuracy=claim)
+        signal, _refusal = RiskManager(cfg).size(setup, contract, "SIG-1", now)
+        return signal
+
+    modest, confident = _size(0.0), _size(0.99)
+    assert modest is not None and confident is not None
+    # Same quantity, same stop, same target. The claim changed; nothing did.
+    assert modest.quantity == confident.quantity
+    assert modest.stop_price == confident.stop_price
+    assert modest.target_1 == confident.target_1
+    # It is still carried onto the signal, for the journal.
+    assert confident.claimed_accuracy == 0.99

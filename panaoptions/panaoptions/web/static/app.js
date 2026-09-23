@@ -409,6 +409,34 @@ function renderJournal(d) {
       </tbody>
     </table>` : "";
 
+  /* Which pattern is paying, against what it is published as scoring.
+     The published figures are from studies of DAILY bars; this desk reads a
+     15m tape, so "Yours" is the only measured column and it stays blank until
+     the sample can carry the comparison. */
+  const byPattern = Object.entries(s.by_pattern || {});
+  const patterns = byPattern.length ? `
+    <div style="padding:10px 14px 0" class="k">Which pattern is paying</div>
+    <table>
+      <thead><tr><th>Pattern</th><th class="num">Trades</th>
+      <th class="num">Yours</th><th class="num">Published</th>
+      <th class="num">Gap</th><th class="num">P&amp;L</th></tr></thead>
+      <tbody>${byPattern
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([name, v]) => `
+          <tr><td>${esc(name)}</td>
+            <td class="num">${v.count}</td>
+            <td class="num">${v.comparable ? num(v.win_rate, 0) + "%" : "—"}</td>
+            <td class="num muted">${v.claimed ? num(v.claimed * 100, 0) + "%" : "—"}</td>
+            <td class="num ${v.gap == null ? "" : sign(v.gap)}">${
+              v.gap == null ? "—" : (v.gap > 0 ? "+" : "") + num(v.gap, 0) + " pts"}</td>
+            <td class="num ${sign(v.total_pnl)}">${money(v.total_pnl)}</td></tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="empty">Published rates come from studies of daily bars on
+      equities — a hypothesis about this 15m tape, not a result. Only
+      &ldquo;Yours&rdquo; is measured here, and it stays blank until there are
+      enough trades for the comparison to mean anything.</div>` : "";
+
   const rows = (d.entries || []).slice(0, 20).map((e) => `
     <tr>
       <td>${esc((e.ts || "").slice(0, 10))}</td>
@@ -420,7 +448,7 @@ function renderJournal(d) {
       <td class="num">${e.execution_score}/10</td>
     </tr>`).join("");
 
-  $("journal-body").innerHTML = strategies + (rows
+  $("journal-body").innerHTML = strategies + patterns + (rows
     ? `<div style="padding:10px 14px 0" class="k">Graded trades</div>
        <table><thead><tr><th>Date</th><th>Symbol</th><th>Strategy</th>
        <th>Exit</th><th class="num">P&amp;L</th><th>Verdict</th>
