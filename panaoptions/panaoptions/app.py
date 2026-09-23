@@ -51,6 +51,7 @@ class OptionsDesk:
         self._levels: dict[str, Any] = {}
         self._levels_on: str = ""
         self._weekly_written_for: str | None = None
+        self._daily_written_for: str | None = None
         self._predictor: Any = None
 
     # ------------------------------------------------------------------ #
@@ -119,6 +120,7 @@ class OptionsDesk:
 
         if phase == "closed":
             await self._square_off(now)
+            await self._maybe_write_daily_review()
             await self._maybe_write_weekly_review()
             store.save_session(today, self.risk.state)
             return result
@@ -373,6 +375,35 @@ class OptionsDesk:
                      if entry.mistakes else "")
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not grade %s: %s", trade.id, exc)
+
+    async def _maybe_write_daily_review(self) -> None:
+        """Write the day's review once the session is over, once per day.
+
+        A day is a diary entry rather than evidence — it says how the session
+        was executed, not which strategy works. That judgement needs the week,
+        and the review says so rather than letting one good day read as proof.
+        """
+        if not bool(self.cfg.get("journal.auto_daily_review", True)):
+            return
+        try:
+            from panaoptions.journal import weekly
+
+            day = weekly.today(self.cfg)
+            if self._daily_written_for == day.isoformat():
+                return
+            if not weekly.session_over(self.cfg, day):
+                return
+
+            review = await weekly.build_daily(self.cfg, day)
+            self._daily_written_for = day.isoformat()
+            if review.trades:
+                weekly.save(review, self.cfg)
+            else:
+                log.info("no trades to review for %s", day)
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not write the daily review: %s", exc)
+            from panaoptions.journal import weekly
+            self._daily_written_for = weekly.today(self.cfg).isoformat()
 
     async def _maybe_write_weekly_review(self) -> None:
         """Have the week's review waiting once Friday's session has closed."""

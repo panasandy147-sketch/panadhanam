@@ -176,7 +176,13 @@ journal:
   ollama_timeout: 120
   llm_label: "ollama (qwen2.5:7b, local)"
 
-  # Write the week's review to journal/weekly/ once Friday's session closes.
+  # Write the day's review to journal/daily/ once the session closes, and the
+  # week's to journal/weekly/ once Friday's does.
+  #
+  # A day says how the session was EXECUTED. Which strategy actually works is
+  # a question a single session cannot answer, so the daily review declines to
+  # answer it and the weekly one does.
+  auto_daily_review: true
   auto_weekly_review: true
 
 ml:

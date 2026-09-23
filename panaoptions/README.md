@@ -1,8 +1,13 @@
 # panaoptions
 
-Intraday US **options** paper trading on a small account. A separate app in the
+Intraday **US options** paper trading on a small account. A separate app in the
 same repository as `panadhanam`, sharing no code with it: different
 instruments, different risk model, different session rules.
+
+**US only, by design.** The session clock, the 15-minute opening range, the
+pre-market window and the option chains are all built around 09:30–16:00 ET.
+It is not a market toggle — for Indian equities and F&O use `panadhanam`,
+which follows both markets.
 
 **Nothing here can place a real order.** There is no broker adapter in this
 package, by design.
@@ -237,6 +242,16 @@ halted, held to the forced close.
 Each trade gets a **card** in `journal/cards/` as markdown, and the whole thing
 is committed to git so the history outlives the database.
 
+### Two reviews: daily and weekly
+
+**Today's review** writes itself once the session closes, to `journal/daily/`.
+It answers *how did I execute* — every trade, the rules broken, the money lost
+to indiscipline, and a coach's read.
+
+It deliberately **refuses to judge a strategy**. One session of two or three
+trades says nothing about whether ORB beats the pullback, and letting a good
+day read as proof is how a fluke becomes a rule. That question belongs to:
+
 ### The weekend review
 
 **Weekly review → Build this week's review** gives you the week with the
@@ -265,7 +280,13 @@ Either way the model **never decides a verdict, a score, a stop or a size** —
 those stay deterministic, because a model that has read a profitable trade is
 very good at finding reasons it was fine.
 
-It writes itself to `journal/weekly/` once Friday's session closes.
+It writes itself to `journal/weekly/` once Friday's session closes, and
+compares the three strategies head to head — which is the comparison that
+needs a sample rather than a session.
+
+Both panels have a **Build** button for looking before the close, and download
+as `.md` or `.json`. Turn either off with `journal.auto_daily_review` /
+`journal.auto_weekly_review`.
 
 ## The optional ML filter
 

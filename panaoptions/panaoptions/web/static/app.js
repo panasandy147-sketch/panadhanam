@@ -283,40 +283,47 @@ function renderJournal(d) {
         automatically the moment it closes.</div>`);
 }
 
-async function buildWeekly() {
-  const btn = $("btn-weekly");
+async function buildReview(period) {
+  const daily = period === "day";
+  const btn = $(daily ? "btn-daily" : "btn-weekly");
+  const status = $(daily ? "daily-status" : "weekly-status");
+  const body = daily ? "daily-body" : "weekly-body";
+  const coach = $(daily ? "d-coach" : "w-coach").checked;
+
   btn.disabled = true;
-  $("weekly-status").textContent = $("w-coach").checked
-    ? "Reading the week and asking the model…" : "Reading the week…";
+  status.textContent = coach
+    ? "Reading and asking the model…" : "Reading…";
   try {
-    const d = await getJSON(`/api/weekly?coach=${$("w-coach").checked}`);
-    renderWeekly(d);
-    $("btn-weekly-md").disabled = false;
-    $("weekly-status").textContent = "";
+    const d = await getJSON(`/api/${daily ? "daily" : "weekly"}?coach=${coach}`);
+    renderReview(d, body);
+    $(daily ? "btn-daily-md" : "btn-weekly-md").disabled = false;
+    status.textContent = "";
   } catch (e) {
-    $("weekly-body").innerHTML =
-      `<div class="note crit">${esc(e.message)}</div>`;
-    $("weekly-status").textContent = "";
+    $(body).innerHTML = `<div class="note crit">${esc(e.message)}</div>`;
+    status.textContent = "";
   } finally {
     btn.disabled = false;
   }
 }
 
-function renderWeekly(r) {
+function renderReview(r, target) {
   const s = r.stats || {};
+  const daily = r.period === "day";
   const c = r.coach;
   const list = (xs) => (xs || []).map((x) => `<li>${esc(x)}</li>`).join("");
   const provisional = r.complete ? "" :
-    `<div class="note warn"><b>This week is not finished.</b>
+    `<div class="note warn"><b>This ${daily ? "session is not over" : "week is not finished"}.</b>
      These numbers are provisional.</div>`;
 
   if (!s.total) {
-    $("weekly-body").innerHTML = `${provisional}
-      <div class="empty">No graded trades in ${esc(r.week_start)} – ${esc(r.week_end)}.</div>`;
+    $(target).innerHTML = `${provisional}
+      <div class="empty">No graded trades ${daily
+        ? `on ${esc(r.week_start)}`
+        : `in ${esc(r.week_start)} – ${esc(r.week_end)}`}.</div>`;
     return;
   }
 
-  $("weekly-body").innerHTML = `${provisional}
+  $(target).innerHTML = `${provisional}
     <div class="tiles">
       <div class="tile"><div class="k">Trades</div><div class="v">${s.total}</div></div>
       <div class="tile"><div class="k">Win rate</div><div class="v">${num(s.win_rate, 0)}%</div></div>
@@ -381,9 +388,13 @@ async function refresh() {
   }
 }
 
-$("btn-weekly").onclick = buildWeekly;
+$("btn-weekly").onclick = () => buildReview("week");
 $("btn-weekly-md").onclick = () => {
   window.location.href = "/api/weekly/download?format=md";
+};
+$("btn-daily").onclick = () => buildReview("day");
+$("btn-daily-md").onclick = () => {
+  window.location.href = "/api/daily/download?format=md";
 };
 
 refresh();

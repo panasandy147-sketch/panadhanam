@@ -73,6 +73,24 @@
   </section>
 
   <section class="wide">
+    <h2>Today&#39;s review <span class="count" id="daily-meta"></span></h2>
+    <div class="toolbar">
+      <button id="btn-daily">Build today&#39;s review</button>
+      <label><input type="checkbox" id="d-coach" checked> Ask the model (slower)</label>
+      <button id="btn-daily-md" disabled>Download .md</button>
+      <span id="daily-status"></span>
+    </div>
+    <div id="daily-body">
+      <div class="empty">
+        How the session was executed: every trade, the rules broken, and a
+        coach&#39;s read. It writes itself after the close — this button is for
+        looking before then. Which strategy actually works is a question one
+        session cannot answer; that is the weekly review below.
+      </div>
+    </div>
+  </section>
+
+  <section class="wide">
     <h2>Weekly review</h2>
     <div class="toolbar">
       <button id="btn-weekly">Build this week&#39;s review</button>

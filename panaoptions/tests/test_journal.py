@@ -233,3 +233,79 @@ async def test_saving_writes_both_formats(cfg, isolated):
     from pathlib import Path
     assert Path(out["markdown"]).exists()
     assert Path(out["json"]).exists()
+
+
+# --------------------------------------------------------------------------- #
+# The daily review. Same machinery, a much firmer caveat.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_a_daily_review_covers_one_session(cfg):
+    jstore.save_entry(build_entry(_trade(pnl=50.0, day=23), cfg))
+    jstore.save_entry(build_entry(_trade(pnl=-20.0, day=24), cfg))
+
+    review = await weekly.build_daily(cfg, date(2026, 9, 23))
+    assert review.period == "day"
+    assert review.stats["total"] == 1, "the other day's trade is not this day's"
+    assert review.label == "2026-09-23"
+    assert review.title == "Daily Review — 2026-09-23"
+
+
+@pytest.mark.asyncio
+async def test_a_daily_review_refuses_to_judge_a_strategy(cfg):
+    # One session says how you executed. Which strategy works needs the week,
+    # and letting a good day read as proof is how a fluke becomes a rule.
+    for pnl in (50.0, 40.0, 30.0):
+        jstore.save_entry(build_entry(
+            _trade(pnl=pnl, day=23, quantity=1, entry=0.80 + pnl / 1000), cfg))
+
+    review = await weekly.build_daily(cfg, date(2026, 9, 23))
+    assert "weekly review's job" in review.coach.headline
+    assert "Tomorrow" in review.coach.focus_next_week
+
+
+@pytest.mark.asyncio
+async def test_an_empty_day_says_what_to_look_at(cfg):
+    review = await weekly.build_daily(cfg, date(2026, 9, 23))
+    assert review.trades == []
+    assert "no trades were taken today" in review.coach.headline.lower()
+    assert "rejection tally" in review.coach.focus_next_week
+
+
+@pytest.mark.asyncio
+async def test_the_daily_markdown_is_titled_as_a_day(cfg):
+    jstore.save_entry(build_entry(_trade(day=23), cfg))
+    review = await weekly.build_daily(cfg, date(2026, 9, 23))
+    markdown = weekly.to_markdown(review, cfg)
+
+    assert markdown.startswith("# Daily Review — 2026-09-23")
+    assert "How each strategy did today" in markdown
+
+
+@pytest.mark.asyncio
+async def test_daily_and_weekly_are_saved_to_different_folders(cfg, isolated):
+    from pathlib import Path
+
+    jstore.save_entry(build_entry(_trade(day=23), cfg))
+
+    daily = weekly.save(await weekly.build_daily(cfg, date(2026, 9, 23)), cfg)
+    week = weekly.save(
+        await weekly.build(cfg, date(2026, 9, 21), date(2026, 9, 25)), cfg)
+
+    assert Path(daily["markdown"]).parent.name == "daily"
+    assert Path(week["markdown"]).parent.name == "weekly"
+    assert daily["period"] == "day" and week["period"] == "week"
+
+
+def test_a_session_is_only_over_after_the_forced_close(cfg, monkeypatch):
+    from panaoptions import clock
+
+    monkeypatch.setattr(clock, "now",
+                        lambda tz: datetime(2026, 9, 23, 12, 0, tzinfo=ET))
+    assert weekly.session_over(cfg, date(2026, 9, 23)) is False
+
+    monkeypatch.setattr(clock, "now",
+                        lambda tz: datetime(2026, 9, 23, 16, 0, tzinfo=ET))
+    assert weekly.session_over(cfg, date(2026, 9, 23)) is True
+
+    # A past day is over whatever the clock says now.
+    assert weekly.session_over(cfg, date(2026, 9, 22)) is True

@@ -138,6 +138,41 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         return {"days": days, "entries": rows, "stats": analyse(rows),
                 "cards": cards(limit=10), "coach": coach}
 
+    @app.get("/api/daily")
+    async def daily_review(day: str | None = None,
+                           coach: bool = True) -> dict[str, Any]:
+        """The session's review. A diary entry, not evidence about a strategy."""
+        from datetime import date
+
+        from panaoptions.journal import weekly
+
+        try:
+            when = date.fromisoformat(day) if day else weekly.today(cfg)
+        except ValueError as exc:
+            raise HTTPException(400, f"'{day}' is not a date") from exc
+        review = await weekly.build_daily(cfg, when, with_coach=coach)
+        return review.model_dump(mode="json")
+
+    @app.get("/api/daily/download")
+    async def download_daily(day: str | None = None,
+                             format: str = "md") -> Response:
+        from datetime import date
+
+        from panaoptions.journal import weekly
+
+        if format not in {"md", "json"}:
+            raise HTTPException(400, "format must be 'md' or 'json'")
+        when = date.fromisoformat(day) if day else weekly.today(cfg)
+        review = await weekly.build_daily(cfg, when)
+
+        if format == "json":
+            body, media = review.model_dump_json(indent=2), "application/json"
+        else:
+            body, media = weekly.to_markdown(review, cfg), "text/markdown; charset=utf-8"
+        name = f"panaoptions-day-{review.label}.{format}"
+        return Response(content=body, media_type=media, headers={
+            "Content-Disposition": f'attachment; filename="{name}"'})
+
     @app.get("/api/weekly")
     async def weekly_review(week: str | None = None,
                             coach: bool = True) -> dict[str, Any]:
