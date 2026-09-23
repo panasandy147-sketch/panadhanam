@@ -156,8 +156,13 @@ journal:
   # Let a local model write the card's PROSE. It never decides the verdict,
   # the score, a stop or a size — those stay deterministic, because a model
   # that has read a profitable trade is very good at finding reasons it was
-  # fine. Needs Ollama running; falls back to the rules version silently.
-  use_llm: false
+  # fine.
+  #
+  # Safe to leave on: if Ollama is not running, or the model is not pulled,
+  # every card falls back to the rules-written version and the failure is
+  # logged once rather than per trade. `run.py --check-llm` says which you
+  # are getting, so "on" and "actually working" stay distinguishable.
+  use_llm: true
   ollama_model: "qwen2.5:7b"
   ollama_host: "http://127.0.0.1:11434"
   ollama_timeout: 120

@@ -200,6 +200,48 @@ async def _explain_contracts() -> None:
         print("       most of the edge. Not recommended.\n")
 
 
+async def _check_llm() -> int:
+    """Is the journal's coach the model, or the rules fallback?
+
+    `journal.use_llm: true` is safe to leave on — a dead Ollama falls back
+    silently. That is exactly why it needs checking: "configured" and
+    "working" look identical from the dashboard otherwise.
+    """
+    from panaoptions.ml.llm import probe
+
+    cfg = get_config()
+    on = bool(cfg.get("journal.use_llm", False))
+
+    print("\n=== JOURNAL COACH ===")
+    if not on:
+        print("  journal.use_llm is false — cards are written by the rules.\n"
+              "  That works; it is just not the model's reading.\n")
+        return 0
+
+    result = await probe(cfg)
+    print(f"  Host   {result['host']}")
+    print(f"  Model  {result.get('model', '—')}")
+    if result["ok"]:
+        print("\n  Working. Cards and the weekly review are written by the model.")
+        print("  It writes the prose only — verdicts, scores, stops and sizes")
+        print("  stay deterministic.\n")
+        return 0
+
+    print(f"\n  NOT working: {result['error']}\n")
+    installed = result.get("installed")
+    if installed:
+        print(f"  Models you do have: {', '.join(installed)}")
+        print(f"  Either pull the configured one, or point at one of these:\n"
+              f"\n      {_interpreter_with_dependencies() or 'python'} run.py "
+              f"--set OLLAMA_MODEL={installed[0]}\n")
+    else:
+        print("  Install Ollama from https://ollama.com/download, then:\n"
+              f"\n      ollama serve\n      ollama pull {result.get('model')}\n")
+    print("  Meanwhile every card falls back to the rules-written version, so\n"
+          "  nothing is lost — the grading and the numbers are unaffected.\n")
+    return 1
+
+
 def _set_env(assignments: list[str]) -> int:
     """Write settings into .env, which survives a restart.
 
@@ -399,6 +441,8 @@ def main() -> None:
     parser.add_argument("--train", nargs="*", metavar="SYMBOL",
                         help="train the optional ML filter")
     parser.add_argument("--check", action="store_true", help="verify the data feed")
+    parser.add_argument("--check-llm", action="store_true",
+                        help="is Ollama actually writing the journal cards?")
     parser.add_argument("--check-config", action="store_true",
                         help="can all the rules hold at once?")
     # action="extend" matters: with a plain nargs="+" argparse keeps only the
@@ -420,6 +464,8 @@ def main() -> None:
         raise SystemExit(_set_env(args.set_env))
     if args.check_config:
         raise SystemExit(_check_config())
+    if args.check_llm:
+        raise SystemExit(asyncio.run(_check_llm()))
     if args.check:
         raise SystemExit(0 if asyncio.run(_check()) else 1)
     if args.explain_contracts:

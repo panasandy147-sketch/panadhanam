@@ -133,6 +133,7 @@ run.py --set PANAOPTIONS_CAPITAL=2000   # per-machine, survives a restart
 run.py --check                          # is the data feed reachable?
 run.py --screen                         # what passes the pre-market filter?
 run.py --explain-contracts              # what your budget buys, live
+run.py --check-llm                      # is the coach the model, or the rules?
 run.py --report 30                      # the paper-trading record
 ```
 
@@ -244,9 +245,23 @@ Per-strategy win rate, P&L and average discipline, the money lost specifically
 to rule breaks (clean losses excluded — those are the cost of an edge), and a
 coach's read.
 
-With Ollama running (`journal.use_llm: true`) the coach's prose is the model's.
-Without it you get the deterministic version — the same numbers, read honestly.
-Either way the model **never decides a verdict, a score, a stop or a size**;
+`journal.use_llm` is **on by default** and safe to leave on: if Ollama is not
+running the cards fall back to the rules-written version, the failure is logged
+once rather than per trade, and the grading is unaffected.
+
+That safety is exactly why it needs checking — "configured" and "working" look
+identical otherwise:
+
+```bash
+python run.py --check-llm
+```
+
+It names the model, says which version you are getting, and on a failure prints
+the command that fixes it (including the models you *do* have installed, if the
+configured one is missing). The dashboard's **Learning** panel says the same
+thing in its header: *cards by qwen2.5:7b* or *cards by the rules*.
+
+Either way the model **never decides a verdict, a score, a stop or a size** —
 those stay deterministic, because a model that has read a profitable trade is
 very good at finding reasons it was fine.
 

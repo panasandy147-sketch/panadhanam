@@ -116,13 +116,18 @@ async def structured_complete(*, system: str, prompt: str, schema: type[T],
 
 
 async def probe(cfg) -> dict[str, Any]:
-    """Health check for `run.py --check-llm`."""
+    """Health check for `run.py --check-llm`.
+
+    Every return path carries the host AND the model, so the caller can always
+    print the command that fixes it — a failure that cannot name the model is
+    a failure you cannot act on.
+    """
     url, name = host(cfg), model(cfg)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{url}/api/tags")
             if response.status_code != 200:
-                return {"ok": False, "host": url,
+                return {"ok": False, "host": url, "model": name,
                         "error": f"HTTP {response.status_code}"}
             installed = [m["name"] for m in response.json().get("models", [])]
             have = any(m == name or m.split(":")[0] == name.split(":")[0]
@@ -132,7 +137,8 @@ async def probe(cfg) -> dict[str, Any]:
                     "error": None if have else
                     f"model '{name}' not installed — run: ollama pull {name}"}
     except httpx.ConnectError:
-        return {"ok": False, "host": url,
-                "error": "Ollama is not running. Start it, then retry."}
+        return {"ok": False, "host": url, "model": name,
+                "error": "Ollama is not reachable. Install it, or start it "
+                         "with `ollama serve`."}
     except Exception as exc:                     # noqa: BLE001
-        return {"ok": False, "host": url, "error": str(exc)}
+        return {"ok": False, "host": url, "model": name, "error": str(exc)}

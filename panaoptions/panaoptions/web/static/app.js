@@ -214,7 +214,18 @@ function renderStrategies(d) {
 
 function renderJournal(d) {
   const s = d.stats || {};
-  $("journal-meta").textContent = `last ${d.days} days`;
+  const c = d.coach || {};
+  $("journal-meta").textContent =
+    `last ${d.days} days · cards by ${c.writing_cards ? esc(c.model) : "the rules"}`;
+
+  // A coach that is switched on but not answering looks exactly like one that
+  // is working, unless the page says so.
+  $("journal-coach").innerHTML = (c.configured && !c.writing_cards)
+    ? `<div class="note warn"><b>${esc(c.model)} is configured but not
+       answering.</b> ${esc(c.down_reason || "")} Cards are still being written
+       and graded — by the rules rather than the model. Check with
+       <code>run.py --check-llm</code>.</div>`
+    : "";
   $("journal-tiles").innerHTML = `
     <div class="tile"><div class="k">Graded</div><div class="v">${s.total || 0}</div></div>
     <div class="tile"><div class="k">Clean execution</div>

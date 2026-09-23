@@ -127,8 +127,16 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
         since = (date.today() - timedelta(days=days)).isoformat()
         rows = entries(limit=500, since=since)
+        from panaoptions.ml import llm
+
+        # "Configured" and "working" look identical from a dashboard unless
+        # something says which you are getting.
+        coach = {"configured": bool(cfg.get("journal.use_llm", False)),
+                 "model": llm.model(cfg), "down_reason": llm.health.reason}
+        coach["writing_cards"] = coach["configured"] and not llm.health.reason
+
         return {"days": days, "entries": rows, "stats": analyse(rows),
-                "cards": cards(limit=10)}
+                "cards": cards(limit=10), "coach": coach}
 
     @app.get("/api/weekly")
     async def weekly_review(week: str | None = None,

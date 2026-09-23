@@ -212,3 +212,43 @@ def test_a_missing_asset_does_not_break_the_page(monkeypatch, tmp_path):
     from panaoptions.web import server
     monkeypatch.setattr(server, "STATIC", tmp_path)
     assert server._asset_version("nope.js") == "0"
+
+
+# --------------------------------------------------------------------------- #
+# "Configured" and "working" must not look the same on the page.
+# --------------------------------------------------------------------------- #
+def test_the_journal_endpoint_says_who_is_writing_the_cards(client, cfg):
+    cfg.data["journal"]["use_llm"] = True
+    from panaoptions.ml import llm
+    llm.health.mark_up()
+
+    coach = client.get("/api/journal").json()["coach"]
+    assert coach["configured"] is True
+    assert coach["writing_cards"] is True
+    assert coach["model"]
+
+
+def test_a_coach_that_is_on_but_down_reports_itself(client, cfg):
+    cfg.data["journal"]["use_llm"] = True
+    from panaoptions.ml import llm
+    llm.health.mark_down("Ollama is not reachable at http://127.0.0.1:11434")
+    try:
+        coach = client.get("/api/journal").json()["coach"]
+        assert coach["configured"] is True
+        assert coach["writing_cards"] is False, \
+            "on and answering are different things"
+        assert "not reachable" in coach["down_reason"]
+    finally:
+        llm.health.mark_up()
+
+
+def test_the_strategies_endpoint_lists_all_three_with_their_windows(client):
+    body = client.get("/api/strategies").json()
+    names = [s["name"] for s in body["strategies"]]
+
+    assert len(names) == 3
+    assert "ORB + VWAP" in names
+    for strategy in body["strategies"]:
+        assert strategy["from"] < strategy["to"]
+        assert strategy["from"] >= "09:45", \
+            "every strategy skips the opening chop"
