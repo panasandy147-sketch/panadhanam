@@ -170,11 +170,18 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         }
 
     @app.get("/api/activity")
-    async def activity(limit: int = 60) -> dict[str, Any]:
+    async def activity(limit: int = 60, decisions: bool = False
+                       ) -> dict[str, Any]:
         """What the desk just did. A working desk and a hung one look the same
-        from an empty position list; this is the difference."""
-        return {"events": desk.activity.recent(limit),
-                "count": len(desk.activity)}
+        from an empty position list; this is the difference.
+
+        `decisions=true` drops the scanning chatter and leaves what was taken,
+        refused, and why — which on a 1-minute desk is the only way to see a
+        trade from four hours ago.
+        """
+        return {"events": desk.activity.recent(limit, notable_only=decisions),
+                "count": len(desk.activity),
+                "decisions": desk.activity.notable_count}
 
     @app.get("/api/daily")
     async def daily_review(day: str | None = None,

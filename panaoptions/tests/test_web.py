@@ -408,3 +408,37 @@ def test_the_dashboard_names_the_profile_it_is_running(client):
     assert body["profile"] == "default"
     assert body["session"]["timeframe"] == "5m"
     assert body["session"]["dte"] == "7-14"
+
+
+def test_the_activity_log_can_drop_the_scanning_chatter(client):
+    """On a 1-minute desk the full stream holds about twenty minutes.
+
+    Thirteen events a minute evict a 13:10 trade by 13:33 — by its own desk's
+    scanning noise — so anyone looking in the afternoon would see a wall of
+    "no setup" and conclude nothing had happened all day.
+    """
+    log = client.desk.activity
+    log.add("trade.open", "QQQ 739C x2")
+    for i in range(500):                       # a few hours of chatter
+        log.add("setup.pass", f"QQQ no setup {i}")
+
+    full = client.get("/api/activity?limit=120").json()
+    assert all(e["kind"] == "setup.pass" for e in full["events"]), \
+        "the trade should have rolled out of the live window"
+
+    decisions = client.get("/api/activity?limit=120&decisions=true").json()
+    kinds = [e["kind"] for e in decisions["events"]]
+    assert "trade.open" in kinds, "a decision must survive the chatter"
+    assert "setup.pass" not in kinds
+    assert decisions["decisions"] >= 1
+
+
+def test_a_decision_is_still_reachable_from_the_merged_stream(client):
+    """With less chatter the full stream should still carry it, so the
+    default view is not lying by omission on a slow day."""
+    log = client.desk.activity
+    log.add("trade.open", "QQQ 739C x2")
+    for i in range(20):
+        log.add("setup.pass", f"QQQ no setup {i}")
+    kinds = [e["kind"] for e in client.get("/api/activity?limit=120").json()["events"]]
+    assert "trade.open" in kinds

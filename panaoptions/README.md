@@ -203,6 +203,14 @@ Work down the gates in order; each one is visible somewhere:
    that is hung look identical from an empty position list; this is the
    difference.
 
+   It has two tiers, and on the scalp profile that matters. Scanning chatter
+   runs at about thirteen events a minute — three symbols against four
+   strategies, every cycle — so the live window holds roughly twenty minutes
+   of a six-and-a-half-hour session. **Trades and decisions only** (ticked by
+   default) reads a separate buffer that the chatter cannot evict, so a trade
+   taken at 13:10 is still on screen at 15:30. Untick it to watch the desk
+   scanning and confirm it is alive between trades.
+
 ### A note on 0-DTE
 
 The scalp profile buys same-day contracts, which changes three things the

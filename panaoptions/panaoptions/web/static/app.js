@@ -532,10 +532,19 @@ function renderReview(r, target) {
       </div>` : ""}`;
 }
 
-function renderActivity(d) {
+function renderActivity(d, decisionsOnly) {
   const events = d.events || [];
   $("activity-meta").textContent = events.length
-    ? `${events.length} of the last ${d.count}` : "";
+    ? (decisionsOnly ? `${events.length} of ${d.decisions} decisions today`
+                     : `${events.length} of the last ${d.count}`)
+    : "";
+  /* On a 1-minute desk the scanning chatter is thirteen events a minute, so
+     the full stream holds about twenty minutes. Decisions are kept in their
+     own buffer that the chatter cannot evict — say which one is on screen so
+     an empty full stream is never read as an empty day. */
+  $("activity-hint").textContent = decisionsOnly
+    ? "Everything the desk took, refused or graded today."
+    : "Live scanning window — the last few minutes only.";
   $("activity-body").innerHTML = events.length
     ? events.map((e) => `
         <div class="log-row ${esc(e.level)}">
@@ -543,15 +552,21 @@ function renderActivity(d) {
           <span class="k">${esc(e.kind)}</span>
           <span class="d">${esc(e.detail)}</span>
         </div>`).join("")
-    : `<div class="empty">Nothing yet. The desk logs every cycle, every
-       symbol it judges, and the reason it passed.</div>`;
+    : (decisionsOnly
+        ? `<div class="empty">No trade taken or refused yet today. Untick the
+           box to watch the desk scanning.</div>`
+        : `<div class="empty">Nothing yet. The desk logs every cycle, every
+           symbol it judges, and the reason it passed.</div>`);
 }
 
 /* The log is the one panel worth polling faster — it is what tells you the
    desk is alive between trades. */
 async function refreshActivity() {
+  const decisionsOnly = $("activity-decisions")?.checked ?? true;
   try {
-    renderActivity(await getJSON("/api/activity?limit=60"));
+    renderActivity(
+      await getJSON(`/api/activity?limit=120&decisions=${decisionsOnly}`),
+      decisionsOnly);
   } catch {
     /* the next tick will retry; a log gap is not worth an error banner */
   }
@@ -603,6 +618,7 @@ $("btn-daily-md").onclick = () => {
 
 refresh();
 refreshActivity();
+$("activity-decisions")?.addEventListener("change", refreshActivity);
 refreshCandidate();
 setInterval(refresh, 15000);
 setInterval(refreshActivity, 5000);
