@@ -57,6 +57,9 @@ const state = {
   switching: false,
   chart: null,
   series: {},
+  // Epoch ms of the LAST BAR on the chart, so the page can say how fresh it
+  // is rather than implying it is always current.
+  chartLoadedAt: null,
   timeframe: "5m",
   paused: false,
 };
@@ -101,6 +104,7 @@ function handle(event) {
                                   rationale: data.rationale, data_available: true,
                                 }; renderAgents(); break;
     case "signal.approved":
+      followDesk(data?.instrument?.symbol || data?.symbol);
     case "signal.proposed":
     case "signal.rejected":     upsertSignal(data); break;
     case "risk.state":          renderRisk(data); loadTradingDay(); break;
@@ -579,6 +583,7 @@ function ema(values, period) {
 async function loadChart() {
   const symbol = $("chart-symbol").value;
   if (!symbol) return;
+  state.chartLoadedAt = null;
   const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/candles?timeframe=${state.timeframe}&count=250`);
   if (!res.ok) return;
   const raw = (await res.json()).candles;
@@ -609,7 +614,46 @@ async function loadChart() {
   state.series.vwap.setData(vwap);
   state.chart.timeScale().fitContent();
 
+  // The last bar's own timestamp, not the wall clock: it is the honest
+  // answer to "how fresh is this", and outside market hours it correctly
+  // shows the closing print rather than pretending to be live.
+  state.chartLoadedAt = candles[candles.length - 1].time * 1000;
+  renderChartFreshness();
+
   loadChain(symbol);
+}
+
+/* How old is what you are looking at? A chart that silently stops updating is
+   worse than no chart: it invites you to read a stale line as the current
+   one. */
+function renderChartFreshness() {
+  const el = $("chart-freshness");
+  if (!el) return;
+  if (!state.chartLoadedAt) { el.textContent = ""; return; }
+
+  const ageMinutes = Math.round((Date.now() - state.chartLoadedAt) / 60000);
+  const stamp = new Date(state.chartLoadedAt)
+    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  if (ageMinutes <= 2) {
+    el.textContent = `live · last bar ${stamp}`;
+  } else if (state.status?.phase === "open") {
+    el.textContent = `last bar ${stamp} (${ageMinutes}m ago)`;
+  } else {
+    el.textContent = `last traded ${stamp} · market ${esc(state.status?.phase || "closed")}`;
+  }
+}
+
+/* Point the chart at whatever the desk most recently acted on, so the lines
+   on screen are the ones behind the newest signal rather than whichever
+   symbol happened to be first in the list. */
+function followDesk(symbol) {
+  if (!symbol || !$("chart-follow")?.checked) return;
+  const picker = $("chart-symbol");
+  if (!picker || picker.value === symbol) return;
+  if (![...picker.options].some((o) => o.value === symbol)) return;
+  picker.value = symbol;
+  loadChart();
 }
 
 /* ====================================================================== */
@@ -1893,4 +1937,12 @@ function bind() {
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
+  // The chart used to load once and never again, so the EMAs and VWAP on
+  // screen were from whenever the page happened to be opened. Refresh on the
+  // same cadence the desk cycles at; slower when the market is shut, where
+  // the last-traded print cannot change.
+  setInterval(() => {
+    if (state.status?.phase === "open") loadChart();
+  }, 60_000);
+  setInterval(renderChartFreshness, 20_000);
 })();

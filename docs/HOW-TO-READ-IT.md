@@ -181,3 +181,32 @@ report genuine last-week results, and the board will rank real setups.
 Run it in paper mode for weeks. Watch the Agent Scorecard's hit rate. If the
 replay expectancy is negative on your configuration, the answer is to change the
 configuration — not to trade it anyway and hope.
+
+
+---
+
+## The chart
+
+**EMA 9, EMA 21, EMA 50 and VWAP** are on it because they are exactly what the
+Candlestick & Technical analyst reads — the chart shows you the lines the desk
+is deciding on, not a decorative overlay.
+
+| Line | What the desk uses it for |
+|---|---|
+| **EMA 9 / EMA 21** | Their order is the trend filter. 9 above 21 permits a long; below permits a short. Crossing them is not itself a signal. |
+| **EMA 50** | The slower backdrop. A setup against it is a counter-trend trade and scores lower. |
+| **VWAP** | The line the session is leaning on. Price the wrong side of it blocks the setup outright. |
+
+It refreshes every 60 seconds while the market is open — the same cadence the
+desk cycles at. The header says how fresh it is:
+
+- `live · last bar 14:32` — current
+- `last bar 14:20 (12m ago)` — the feed is behind, so do not read the last
+  candle as the current price
+- `last traded 16:00 · market closed` — the closing print, which is the honest
+  thing to show when nothing is trading
+
+**Follow the desk** (on by default) points the chart at whatever symbol the
+newest signal was for, so the lines on screen are the ones behind the trade
+rather than whichever symbol happened to be first in the list. Untick it to
+pin the chart while you look at something else.

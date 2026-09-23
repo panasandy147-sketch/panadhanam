@@ -199,10 +199,15 @@
 
   <!-- ============================ CHART =========================== -->
   <section class="card span-all">
-    <h2>Price Action</h2>
+    <h2>Price Action <span class="count" id="chart-freshness"></span></h2>
     <div class="chart-toolbar">
       <label class="sr-only" for="chart-symbol">Symbol</label>
       <select id="chart-symbol"></select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;
+                    color:var(--text-muted)">
+        <input type="checkbox" id="chart-follow" checked style="width:auto">
+        Follow the desk
+      </label>
       <div class="tf-group" id="tf-group">
         <button data-tf="1m">1m</button>
         <button data-tf="5m" aria-pressed="true">5m</button>
