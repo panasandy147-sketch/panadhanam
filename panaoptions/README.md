@@ -145,6 +145,87 @@ run.py --report 30                      # the paper-trading record
 No API key. Market data comes from Yahoo's public endpoints over plain
 `httpx` — one less package to install than `yfinance`.
 
+## The watchlist
+
+The **Watchlist** box at the top of the dashboard takes comma-separated
+tickers — `QQQ, SPY, AAPL, NVDA` — and every enabled strategy then runs
+against every one of them, each cycle, taking paper trades whenever the rules
+agree. Commas, spaces and newlines all work, because people paste from all
+three. Press Enter or **Scan these**; **Reset to config** goes back to
+`universe.symbols`.
+
+The change applies on the next cycle, not the next restart, and it is saved to
+`data/watchlist.json` so it survives one. The panel header says whether the
+desk is running your list or the shipped one.
+
+Two limits, both deliberate:
+
+* **20 symbols.** Each one costs several feed requests every cycle. Past this
+  the desk spends its time waiting on Yahoo rather than deciding, which looks
+  exactly like being broken.
+* **It chooses what to LOOK at, never what to buy.** Choosing what to watch
+  and choosing what to trade are different powers, and only the first one
+  belongs to whoever last used the dashboard. Every rule still has to agree
+  before a position is opened, and dropping a symbol does not liquidate an
+  open position in it — that trade was taken under rules that still apply and
+  its exit is already defined.
+
+### How often it checks
+
+Every **60 seconds** by default, and all of your symbols in the same cycle —
+not one per cycle, not one per minute each. Change it with `--interval`:
+
+```bash
+python run.py --profile scalp --interval 30
+```
+
+One cycle, in order: manage any open position → run the pre-market screen if
+it is due → then, inside the entry window and only when there is room, judge
+every symbol that passed, in turn, against every enabled strategy.
+
+For `QQQ, SPY, AAPL` that is **3 data requests per cycle** in steady state
+(one candle series per symbol), plus one option-chain request per open
+position, plus 15 on the first cycle of the day when the screen runs. About
+390 cycles in a session.
+
+Two things about the cadence are worth knowing:
+
+* **The interval is the period, not the gap.** The loop sleeps the remainder
+  of the interval rather than the whole of it after finishing. Sleeping the
+  full amount would make the real period `work + interval` — nearer 65
+  seconds than 60 with three symbols — and the desk would drift a bar further
+  behind every cycle while still claiming to run every minute. If a cycle
+  ever overruns the interval it writes `slow.cycle` to the activity log and
+  says to use fewer symbols or a longer interval, because a desk quietly
+  running at half its stated rate looks exactly like one that is fine.
+* **A full desk stops hunting.** While `risk.max_open_trades` positions are
+  open, no symbol is scanned for new entries until one closes — the desk
+  manages what it has instead. It logs `hunt.skip` saying so, and the Live
+  Candidate panel clears rather than leaving the last symbol on screen as
+  though it were still being judged.
+
+The dashboard prints the cadence under the entry window: the interval, how
+many symbols, and how long the last cycle actually took.
+
+### Watching several names at once
+
+`risk.max_open_trades` is **1** by default, which makes a watchlist a queue:
+the desk scans everything and holds one position at a time. The scalp profile
+raises it to 3.
+
+More than one open position exposes a rule that had been invisible:
+`max_capital_deployed_pct` is a **per-trade** cap, so three trades at 20% each
+satisfy it every time and deploy 60% of the account. There is now a ceiling on
+the total as well — `risk.max_total_deployed_pct` — which falls back to the
+per-trade budget when it is not set rather than to "no limit", so an upgrade
+cannot silently remove it. The refusal names the number:
+
+```
+$2,000.00 is already at work across 2 position(s), and the ceiling is
+30% of $10,000.00 ($3,000.00). One QQQ 741C costs $1,180.00 and there
+is $1,000.00 of room.
+```
+
 ## Profiles: which desk are you running?
 
 ```bash
