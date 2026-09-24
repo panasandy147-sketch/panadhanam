@@ -672,6 +672,19 @@ The dashboard's widest panel answers three questions the position list cannot:
   symbol on the left, with 9/21/50 EMAs and VWAP, refreshed while the page is
   open and labelled with the age of the last bar.
 
+  **Today's session only.** Three days of 5m bars squeeze today into the
+  right-hand third, and the pattern fired on today's tape. "Today" is the
+  last bar's exchange date rather than the wall clock, so the panel still
+  shows a complete last session before the open, after the close and at a
+  weekend. `?session=false` returns the longer history.
+
+  **Labelled in exchange time.** The charting library renders epochs in UTC
+  and the browser's clock is wherever the viewer is; neither is the market's.
+  Left alone the axis reads 15:00 for an 11:00 ET bar, which makes every
+  strategy window on the page look wrong. The same applies to the VWAP: keyed
+  on the viewer's local day it resets at 00:30 ET — the middle of the
+  afternoon — for anyone outside the Americas.
+
 A new signal **flashes the panel for 15 seconds** — green for a call, red for
 a put — then settles back rather than leaving a tinted card behind. Anyone with
 `prefers-reduced-motion` set gets one steady tint instead of a pulse.
