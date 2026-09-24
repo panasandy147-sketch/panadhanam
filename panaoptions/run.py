@@ -236,11 +236,19 @@ async def _probe_sources() -> int:
         return 1
 
     best = "cboe" if "cboe" in working else working[0]
-    print(f"  Use: data.provider: \"{best}\"  in config/settings.yaml")
+    current = str(cfg.get("data.provider", "yahoo")).lower()
+    if current == best:
+        print(f"  Already using {best}. Nothing to change.")
+        return 0
+
+    from panaoptions.preflight import _python
+
+    print(f"  Switch to {best} — one command, no file editing:\n")
+    print(f"      {_python()} run.py --set PANAOPTIONS_PROVIDER={best}\n")
     if best == "cboe":
-        print("  (charts stay on Yahoo, which is working; chains come from\n"
-              "   CBOE with greeks and no account. Delayed ~15 minutes, which\n"
-              "   suits the default profile and not the scalp one.)")
+        print("  Charts stay on Yahoo, which is working; chains come from "
+              "CBOE\n  with greeks and no account. Delayed about 15 minutes, "
+              "which suits\n  the default profile and not the scalp one.")
     return 0
 
 
@@ -256,9 +264,9 @@ def _print_chain_fix(provider: str) -> None:
   endpoint has been refusing requests. There are two ways out:
 
     CBOE — no account, no key, no signup. Public delayed quotes WITH greeks.
-      In config/settings.yaml:   data:
-                                   provider: "cboe"
       Charts stay on Yahoo, which is working. About 15 minutes delayed.
+
+          run.py --set PANAOPTIONS_PROVIDER=cboe
 
     Tradier — real-time-capable, but signing up opens a US brokerage account
       and asks for SSN and phone. Only worth it if you want live data.

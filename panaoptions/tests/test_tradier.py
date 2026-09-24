@@ -235,3 +235,27 @@ def test_a_typo_in_the_provider_name_does_not_stop_the_desk(cfg, monkeypatch,
         feed = make_feed(cfg)
     assert isinstance(feed, YahooFeed)
     assert any("tradeir" in r.message for r in caplog.records)
+
+
+def test_the_provider_can_be_set_per_machine_without_editing_yaml(monkeypatch):
+    """Yahoo's chain endpoint works for some people and 401s for others.
+
+    That makes the data source exactly the kind of setting that belongs
+    beside the machine rather than in a file everyone shares — and it has to
+    be settable with one command, because the people hitting it are already
+    two failures deep.
+    """
+    from panaoptions import config as config_mod
+
+    monkeypatch.setenv("PANAOPTIONS_PROVIDER", "cboe")
+    monkeypatch.setattr(config_mod, "ENV_PATH", config_mod.ROOT / "absent.env")
+    cfg = config_mod.Config()
+    assert cfg.get("data.provider") == "cboe"
+
+
+def test_an_unset_provider_leaves_the_config_alone(monkeypatch):
+    from panaoptions import config as config_mod
+
+    monkeypatch.delenv("PANAOPTIONS_PROVIDER", raising=False)
+    monkeypatch.setattr(config_mod, "ENV_PATH", config_mod.ROOT / "absent.env")
+    assert config_mod.Config().get("data.provider") == "yahoo"

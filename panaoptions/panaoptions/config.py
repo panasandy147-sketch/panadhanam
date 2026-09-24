@@ -107,6 +107,14 @@ class Config:
         if capital is not None:
             account["starting_capital"] = capital
 
+        # Which market data source, per machine. Yahoo's chain endpoint works
+        # for some people and returns 401 for others, so this is exactly the
+        # kind of setting that belongs beside the machine rather than in a
+        # file everyone shares.
+        provider = (os.getenv("PANAOPTIONS_PROVIDER") or "").strip().lower()
+        if provider:
+            self.data.setdefault("data", {})["provider"] = provider
+
         notify = self.data.setdefault("notify", {})
         for env_key, cfg_key in (
             ("DISCORD_WEBHOOK_URL", "discord_webhook_url"),

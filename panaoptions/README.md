@@ -195,14 +195,21 @@ actually using, so the bands mean what they say.
 
 ### Setting CBOE up
 
-Nothing to sign up for. In `config/settings.yaml`:
+Nothing to sign up for, and no file to edit:
 
-```yaml
-data:
-  provider: "cboe"
+```bash
+python run.py --set PANAOPTIONS_PROVIDER=cboe
+python run.py --check
 ```
 
-Then `python run.py --check`. Charts continue to come from Yahoo; option
+`--set` writes to `.env`, which survives a restart — an environment variable
+exported in a shell lasts until that shell closes, which works once and then
+silently reverts. `--probe-sources` prints this exact command for whichever
+source it found working.
+
+You can also set `data.provider` in `config/settings.yaml` if you would
+rather have it in the shared file; the environment variable wins when both
+are set, because which endpoint answers is a property of the machine. Charts continue to come from Yahoo; option
 chains come from CBOE's public delayed-quotes feed, greeks included.
 
 The endpoint is undocumented and could change. Every field is read
