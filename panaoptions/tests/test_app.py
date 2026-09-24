@@ -393,6 +393,8 @@ async def test_the_screen_retries_while_nothing_qualifies(desk, monkeypatch):
         return [PreMarketRead(symbol="SPY", passed=False)]
 
     monkeypatch.setattr("panaoptions.app.screen", _screen)
+    # The mechanism, at a known interval; the shipped one is a minute.
+    monkeypatch.setitem(desk.cfg.data["premarket"], "rescreen_minutes", 5)
 
     monkeypatch.setattr(clock, "now", lambda tz: _at(9, 0))
     await desk.cycle()
@@ -629,10 +631,16 @@ def test_an_empty_screen_says_why_and_who_came_closest(desk):
     ]
     line = desk._screen_summary([])
     assert line.startswith("0/3 passed — no symbol to hunt")
-    assert "closest: NVDA gap +0.9% RVOL 1.4x" in line
+    assert "closest: NVDA gap +0.9% RVOL 1.40x" in line
     assert "AND" in line
 
 
 def test_a_screen_that_passes_names_what_is_hunted(desk):
     desk.screened = [PreMarketRead(symbol="SPY", passed=True)]
     assert desk._screen_summary(["SPY"]) == "1/1 passed — hunting SPY"
+
+
+def test_the_shipped_screen_rechecks_every_minute(cfg):
+    """A name can gap or wake up mid-session; five minutes was too long to
+    miss it for."""
+    assert int(cfg.get("premarket.rescreen_minutes")) == 1

@@ -462,7 +462,9 @@ input:focus, select:focus {
 .calc-out .v { font-family: var(--mono); font-size: 15px; font-weight: 600; }
 
 /* --------------------------------------------------------------- chart */
-#chart { height: 340px; width: 100%; }
+/* The activity log took the chart's place and is the panel the desk is read
+   from, so it gets the room. */
+#log.scroll { max-height: 460px; }
 .chart-toolbar {
   display: flex;
   gap: 6px;

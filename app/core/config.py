@@ -249,6 +249,18 @@ class Config:
         return False
 
     @property
+    def llm_in_decisions(self) -> bool:
+        """May the model change a trading decision, or only write about one?
+
+        Off by default. A local 7B model reviewing five analysts per symbol
+        took ~25 s a symbol, so a 13-name watchlist was judged once every five
+        minutes, and its instruction that "a flat day is a perfectly good
+        outcome" vetoed setups the rules had passed. The journal, the
+        post-mortems and the weekly coach still use the model either way.
+        """
+        return self.llm_enabled and bool(self.get("decisions.use_llm", False))
+
+    @property
     def llm_label(self) -> str:
         """What the dashboard shows."""
         provider = self.llm_provider

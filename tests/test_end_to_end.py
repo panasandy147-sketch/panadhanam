@@ -35,6 +35,12 @@ async def engine(cfg, monkeypatch):
     cfg.settings["system"]["square_off_time"] = "23:59"
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
     cfg.settings["execution"]["auto_place_orders"] = True
+    # A known policy, so each case below meets or misses it exactly. The
+    # shipped high-risk profile has its own tests at the end of this file.
+    cfg.settings["consensus"].update({"min_confirmations": 2,
+                                      "min_composite_score": 0.35,
+                                      "conflict_policy": "flat"})
+    cfg.settings["risk"].update({"risk_per_trade_pct": 1.0, "min_risk_reward": 2.0})
     broker = PaperBroker(config={"total_capital": 100_000})
     await broker.connect()
     eng = TradingEngine(broker, cfg)
@@ -396,3 +402,38 @@ async def test_a_day_of_no_trades_still_says_why(engine):
     assert report["trades_taken"] == 0 or not engine.broker._orders
     reasons = {r["reason"] for r in report["top_rejections"]}
     assert "Not enough confirmations" in reasons
+
+
+# --------------------------------------------------------------------------- #
+# The shipped high-risk paper profile
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_shipped_profile_trades_on_one_strong_voice(engine, cfg):
+    """The profile that ships: one strong analyst, a 0.25 score and 1.5R are
+    enough. Candlestick +0.75 alone was the commonest "no trade" on the
+    desk's log before it."""
+    cfg.reload()
+    cfg.switch_market("IN")
+    cfg.settings["system"]["no_new_entry_after"] = "23:59"
+    cfg.settings["system"]["square_off_time"] = "23:59"
+    cfg.settings["execution"]["auto_place_orders"] = True
+    assert cfg.get("consensus.min_confirmations") == 1
+    await engine.trading_day.start()
+    _votes(engine, {"candlestick": (0.75, 0.9)})
+    [result] = await engine.run_cycle([SYMBOL])
+    assert result["signal_id"], result["rejected"]
+    assert engine.broker._orders
+    row = next(r for r in db.open_signals() if r["id"] == result["signal_id"])
+    assert row["risk_reward"] == pytest.approx(cfg.get("risk.min_risk_reward"), abs=0.01)
+
+
+def test_the_model_does_not_decide_trades_unless_asked(cfg, monkeypatch):
+    """A local model re-scoring every analyst took ~25 s a symbol and vetoed
+    setups the rules passed. It writes the journal; the rules decide."""
+    monkeypatch.setattr(type(cfg), "llm_enabled", property(lambda self: True))
+    assert cfg.llm_in_decisions is False
+    cfg.settings.setdefault("decisions", {})["use_llm"] = True
+    try:
+        assert cfg.llm_in_decisions is True
+    finally:
+        cfg.settings["decisions"]["use_llm"] = False

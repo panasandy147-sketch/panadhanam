@@ -98,7 +98,7 @@ class BaseAgent(abc.ABC):
             report = AgentReport(agent_id=self.agent_id, symbol=ctx.symbol,
                                  data_available=False, rationale=f"rule engine error: {exc}")
 
-        if self.cfg.llm_enabled and report.data_available:
+        if self.cfg.llm_in_decisions and report.data_available:
             try:
                 enhanced = await self._run_llm(ctx, report)
                 if enhanced:

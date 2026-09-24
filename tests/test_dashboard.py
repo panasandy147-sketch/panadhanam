@@ -224,9 +224,10 @@ def test_the_page_keeps_only_what_the_desk_needs_on_screen():
     page = (STATIC / "index.html").read_text()
     headings = re.findall(r"<h2>([^<]+)", page)
     headings = [h.strip() for h in headings]
-    assert headings == ["Account", "Price Action", "Open Positions", "Signals",
-                        "Today", "Weekly Review", "Activity Log"]
-    for gone in ("Trade Opportunities", "Agent Desk", "Position Sizing",
+    assert headings == ["Account", "Activity Log", "Open Positions", "Signals",
+                        "Today", "Weekly Review"]
+    for gone in ("Price Action", 'id="chart"', "LightweightCharts",
+                 "Trade Opportunities", "Agent Desk", "Position Sizing",
                  "News &amp; Sentiment", "Macro Backdrop", "Option Chain",
                  "Agent Scorecard", "Trade Journal", "Historical Replay"):
         assert gone not in page, gone
@@ -263,12 +264,12 @@ def test_no_function_is_defined_twice():
     assert not dupes, dupes
 
 
-def test_the_chart_is_drawn_in_market_time():
+def test_the_activity_log_sits_where_the_chart_was():
+    """What the desk decided, and why, is what a paper desk is read from."""
+    page = (STATIC / "index.html").read_text()
+    assert page.index("Activity Log") < page.index("Open Positions")
     script = (STATIC / "app.js").read_text()
-    assert "tickMarkFormatter" in script
-    # The VWAP resets on the market's day, not the viewer's.
-    assert "marketDay(c.time)" in script
-    assert "toDateString()" not in script
+    assert "loadChart" not in script and "initChart" not in script
 
 
 def test_notifications_fire_on_trades_only():
@@ -284,3 +285,21 @@ def test_the_decisions_log_shows_why_a_symbol_was_passed_over():
     script = (STATIC / "app.js").read_text()
     assert "function isNewPass" in script
     assert "no trade:" in script
+
+
+def test_template_risk_defaults_in_env_are_retired_but_choices_are_kept(tmp_path):
+    """.env beats settings.yaml, and the template shipped 1% / 3% / 2R — so a
+    .env copied from it would pin the old risk for ever. A value someone
+    actually chose is left exactly as it is."""
+    import run
+
+    env = tmp_path / ".env"
+    env.write_text("TOTAL_CAPITAL=100000\nRISK_PER_TRADE_PCT=1.0\n"
+                   "MAX_DAILY_LOSS_PCT=4.5\nMIN_RISK_REWARD=2.0\n", encoding="utf-8")
+    retired = run._retire_template_risk(env)
+    text = env.read_text(encoding="utf-8")
+    assert set(retired) == {"RISK_PER_TRADE_PCT", "MIN_RISK_REWARD"}
+    assert "\nMAX_DAILY_LOSS_PCT=4.5\n" in text           # a choice — kept
+    assert "TOTAL_CAPITAL=100000" in text
+    assert not any(line.startswith("RISK_PER_TRADE_PCT") for line in text.splitlines())
+    assert run._retire_template_risk(env) == []            # idempotent

@@ -146,7 +146,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     sections.append({
         "title": "The vote (when there is enough agreement)",
         "intro": ("This is the gate most setups stop at. Both numbers must be "
-                  "met together."),
+                  "met together. The desk ships with a high-risk paper profile: "
+                  "one strong analyst is enough."),
         "rules": [
             _rule("Analysts agreeing, at least (each voting ±0.25 or stronger "
                   "in the trade's direction; the fundamental filter does not count)",
@@ -158,6 +159,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Macro must agree with the direction",
                   "yes" if g("consensus.require_macro_alignment", False) else "no",
                   "consensus.require_macro_alignment"),
+            _rule("The language model may change or veto the vote (it still "
+                  "writes the journal and the weekly coach either way)",
+                  "yes" if g("decisions.use_llm", False) else "no — the rules decide",
+                  "decisions.use_llm"),
             _rule("High-impact news against the trade vetoes it",
                   "yes" if g("consensus.veto_on_high_impact_news", True) else "no",
                   "consensus.veto_on_high_impact_news"),

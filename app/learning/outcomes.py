@@ -7,7 +7,7 @@ outcome is just an opinion.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.brokers.base import BrokerAdapter
@@ -250,10 +250,12 @@ class OutcomeTracker:
             opened = datetime.fromisoformat(str(entry_ts))
         except ValueError:
             return False
-        if opened.tzinfo is not None:
-            opened = opened.replace(tzinfo=None)
-
-        held = (datetime.now() - opened).total_seconds() / 60.0
+        # Rows are written in UTC. Measured against the machine's local clock
+        # instead, a trade on a PC in New York looked four hours younger than
+        # it was, and the time stop never fired.
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=UTC)
+        held = (datetime.now(UTC) - opened).total_seconds() / 60.0
         if held < minutes:
             return False
 
@@ -265,10 +267,14 @@ class OutcomeTracker:
         return not in_favour
 
     def _past_squareoff(self) -> bool:
+        """Is it past square-off on the MARKET's clock?
+
+        This used the computer's own clock. On a UTC machine every US trade
+        was squared off the moment it opened; on a PC in New York the Indian
+        15:15 square-off (05:45 ET) never came at all.
+        """
+        from app.core import clock
+
         cutoff = str(self.cfg.get("system.square_off_time", "15:15"))
-        try:
-            h, m = (int(x) for x in cutoff.split(":"))
-        except ValueError:
-            return False
-        now = datetime.now()
-        return (now.hour, now.minute) >= (h, m)
+        timezone = str(self.cfg.get("system.timezone", "Asia/Kolkata"))
+        return clock.past(timezone, cutoff)

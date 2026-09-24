@@ -2,8 +2,9 @@
    panadhanam dashboard client
    One WebSocket carries every live event; REST fills in history on load.
 
-   The page is deliberately small: account, the chart the desk is acting on,
-   what is open, what was signalled, the reviews, and a log of decisions. The
+   The page is deliberately small: account, the log of what the desk decided
+   and why, what is open, what was signalled, and the reviews. No chart: the
+   desk trades from its analysts, not from what a person reads off a candle. The
    desk scans, cycles and arms itself — the controls that did those by hand
    are gone from the page (the API still has them), because a button pressed
    by accident on a desk that runs itself is a state nobody chose.
@@ -49,10 +50,6 @@ const state = {
   market: null,
   tradingDay: null,
   switching: false,
-  chart: null,
-  series: {},
-  chartLoadedAt: null,   // epoch ms of the LAST BAR, not of the fetch
-  timeframe: "5m",
   weekly: null,
   log: { all: [], decisions: [] },
   lastPass: {},          // symbol -> the last "no trade" reason logged
@@ -61,22 +58,10 @@ const state = {
 /* ====================================================================== */
 /* Market time                                                            */
 /* ====================================================================== */
-/* The chart library renders epochs in UTC and the browser's clock is
-   wherever the viewer is; neither is the market's. Every time on this page —
-   the axis, the freshness label, the VWAP's daily reset — is in the active
-   market's own timezone. Keyed on the viewer's day instead, a New York
-   session watched from India rolls over at 00:30 ET, mid-afternoon. */
+/* The browser's clock is wherever the viewer is, not the market's. Every
+   time on this page is in the active market's own timezone. */
 const marketTz = () => state.market?.timezone || "Asia/Kolkata";
 const tzLabel = () => ({ IN: "IST", US: "ET" }[state.market?.code] || "");
-
-const inMarket = (epoch, opts) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: marketTz(), ...opts })
-    .format(new Date(epoch * 1000));
-const marketDay = (epoch) =>
-  inMarket(epoch, { year: "numeric", month: "2-digit", day: "2-digit" });
-const marketClock = (epoch) =>
-  inMarket(epoch, { hour: "2-digit", minute: "2-digit", hour12: false });
-const marketDate = (epoch) => inMarket(epoch, { day: "2-digit", month: "short" });
 
 /* ====================================================================== */
 /* WebSocket                                                              */
@@ -109,8 +94,6 @@ function handle(event) {
   switch (topic) {
     case "system.status":       applyStatus(data); break;
     case "signal.approved":
-      followDesk(data?.instrument?.symbol || data?.symbol);
-      // falls through
     case "signal.proposed":
     case "signal.rejected":     upsertSignal(data); break;
     case "risk.state":          renderRisk(data); break;
@@ -173,9 +156,7 @@ async function adoptMarket(profile) {
     `<div class="empty">No signals yet for ${esc(profile.name)}.</div>`;
   $("s-today").hidden = true;
 
-  await loadWatchlist();
-  initChart();
-  await Promise.all([loadChart(), loadPositions(), loadStatus(), loadTradingDay()]);
+  await Promise.all([loadPositions(), loadStatus(), loadTradingDay()]);
 }
 
 async function switchMarket(code) {
@@ -447,171 +428,6 @@ async function loadPositions() {
       <td class="num">${money(Math.round(p.total_risk))}</td>
     </tr>
     <tr class="why-row"><td colspan="7">${whyHtml(p)}</td></tr>`).join("")}</tbody></table>`;
-}
-
-/* ====================================================================== */
-/* Chart                                                                  */
-/* ====================================================================== */
-function ink(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function initChart() {
-  const el = $("chart");
-  el.innerHTML = "";
-  if (typeof LightweightCharts === "undefined") {
-    el.innerHTML = `<div class="empty">Chart library unavailable.</div>`;
-    state.chart = null;
-    return;
-  }
-  state.chart = LightweightCharts.createChart(el, {
-    layout: { background: { color: "transparent" }, textColor: ink("--text-muted"), fontSize: 11 },
-    grid: { vertLines: { color: ink("--grid") }, horzLines: { color: ink("--grid") } },
-    rightPriceScale: { borderColor: ink("--baseline") },
-    timeScale: {
-      borderColor: ink("--baseline"), timeVisible: true, secondsVisible: false,
-      // Market time, not UTC — otherwise 09:15 IST reads 03:45 on the axis.
-      tickMarkFormatter: (t) => (state.timeframe === "1d" ? marketDate(t) : marketClock(t)),
-    },
-    localization: {
-      timeFormatter: (t) => (state.timeframe === "1d"
-        ? marketDate(t) : `${marketClock(t)} ${tzLabel()}`),
-    },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    autoSize: true,
-  });
-
-  state.series.candles = state.chart.addCandlestickSeries({
-    upColor: ink("--good"), downColor: ink("--critical"),
-    borderUpColor: ink("--good"), borderDownColor: ink("--critical"),
-    wickUpColor: ink("--good"), wickDownColor: ink("--critical"),
-  });
-  const line = (color, width = 2) =>
-    state.chart.addLineSeries({ color, lineWidth: width, priceLineVisible: false,
-                                lastValueVisible: false, crosshairMarkerVisible: false });
-  state.series.ema9  = line(ink("--series-1"));
-  state.series.ema21 = line(ink("--series-2"));
-  state.series.ema50 = line(ink("--series-4"));
-  state.series.vwap  = line(ink("--series-6"));
-}
-
-/* The chart library throws on anything but strictly ascending, unique times —
-   which would blank the chart. Live feeds occasionally re-send a forming candle
-   or overlap two ranges, so sort, de-duplicate and drop malformed bars. */
-function normaliseBars(bars) {
-  const byTime = new Map();
-  for (const b of bars || []) {
-    const t = Number(b.time);
-    if (!Number.isFinite(t)) continue;
-    if (![b.open, b.high, b.low, b.close].every(Number.isFinite)) continue;
-    byTime.set(t, { ...b, time: t });
-  }
-  return [...byTime.values()].sort((a, b) => a.time - b.time);
-}
-
-function ema(values, period) {
-  const k = 2 / (period + 1);
-  let prev = values[0];
-  return values.map((v, i) => (i === 0 ? (prev = v) : (prev = v * k + prev * (1 - k))));
-}
-
-async function loadChart() {
-  const symbol = $("chart-symbol").value;
-  if (!symbol) return;
-  state.chartLoadedAt = null;
-
-  const res = await fetch(
-    `/api/market/${encodeURIComponent(symbol)}/candles` +
-    `?timeframe=${state.timeframe}&session=true`);
-  if (!res.ok || !state.chart) return;
-  const d = await res.json();
-
-  // Today's session is what is drawn; the bars before it are there so the
-  // lines are right. An EMA 50 started from nine bars of today is not an
-  // EMA 50, and a wrong line on a right chart is worse than no line.
-  const shown = normaliseBars(d.candles);
-  if (!shown.length) return;
-  const all = normaliseBars([...(d.warmup || []), ...shown]);
-  const firstShown = shown[0].time;
-
-  const closes = all.map((c) => c.close);
-  const times = all.map((c) => c.time);
-  const visible = (arr) => times
-    .map((t, i) => ({ time: t, value: arr[i] }))
-    .filter((p) => p.time >= firstShown);
-
-  const e9 = ema(closes, 9), e21 = ema(closes, 21), e50 = ema(closes, 50);
-  state.series.candles.setData(shown);
-  state.series.ema9.setData(visible(e9));
-  state.series.ema21.setData(visible(e21));
-  state.series.ema50.setData(visible(e50));
-
-  // Session VWAP, reset on each MARKET day. It means nothing on daily bars,
-  // where every bar is its own session, so it is not drawn there.
-  let vwapNow = null;
-  if (state.timeframe === "1d") {
-    state.series.vwap.setData([]);
-  } else {
-    let pv = 0, vol = 0, day = null;
-    const vwap = all.map((c) => {
-      const today = marketDay(c.time);
-      if (today !== day) { pv = 0; vol = 0; day = today; }
-      const typical = (c.high + c.low + c.close) / 3;
-      const v = c.volume || 1;
-      pv += typical * v; vol += v;
-      return pv / vol;
-    });
-    state.series.vwap.setData(visible(vwap));
-    vwapNow = vwap[vwap.length - 1];
-  }
-  state.chart.timeScale().fitContent();
-
-  renderTrend(closes[closes.length - 1], e9[e9.length - 1],
-              e21[e21.length - 1], vwapNow);
-
-  // The last bar's own timestamp is the honest answer to "how fresh is this".
-  state.chartLoadedAt = shown[shown.length - 1].time * 1000;
-  state.chartSessionOnly = !!d.session_only;
-  renderChartFreshness();
-}
-
-/* The trend, said in words, from the same lines that are drawn. Up only when
-   price is above VWAP AND the fast EMA is above the slow one; down on the
-   mirror; anything else is called mixed rather than forced into a side. */
-function renderTrend(close, e9, e21, vwap) {
-  const el = $("chart-trend");
-  if (!el || close == null) return;
-  const anchor = vwap ?? e21;
-  const anchorName = vwap != null ? "VWAP" : "EMA 21";
-  const up = close > anchor && e9 > e21;
-  const down = close < anchor && e9 < e21;
-  el.className = "trend " + (up ? "up" : down ? "down" : "flat");
-  el.textContent = up ? `▲ Uptrend` : down ? `▼ Downtrend` : "◆ Mixed";
-  el.title = `Price ${close > anchor ? "above" : "below"} ${anchorName}; `
-    + `EMA 9 ${e9 > e21 ? "above" : "below"} EMA 21`;
-}
-
-function renderChartFreshness() {
-  const el = $("chart-freshness");
-  if (!el) return;
-  if (!state.chartLoadedAt) { el.textContent = ""; return; }
-  const epoch = state.chartLoadedAt / 1000;
-  const age = Math.round((Date.now() - state.chartLoadedAt) / 60000);
-  const stamp = `${marketClock(epoch)} ${tzLabel()}`;
-  const scope = state.chartSessionOnly ? "today · " : "";
-  if (age <= 6) el.textContent = `${scope}live · last bar ${stamp}`;
-  else if (state.status?.phase === "open") el.textContent = `${scope}last bar ${stamp} (${age}m ago)`;
-  else el.textContent = `${scope}last traded ${stamp} · market ${state.status?.phase || "closed"}`;
-}
-
-/* Point the chart at whatever the desk most recently acted on. */
-function followDesk(symbol) {
-  if (!symbol || !$("chart-follow")?.checked) return;
-  const picker = $("chart-symbol");
-  if (!picker || picker.value === symbol) return;
-  if (![...picker.options].some((o) => o.value === symbol)) return;
-  picker.value = symbol;
-  loadChart();
 }
 
 /* ====================================================================== */
@@ -1061,13 +877,6 @@ function closeRules() {
 /* ====================================================================== */
 /* Boot                                                                   */
 /* ====================================================================== */
-async function loadWatchlist() {
-  const res = await fetch("/api/watchlist");
-  const { watchlist } = await res.json();
-  $("chart-symbol").innerHTML = watchlist
-    .map((w) => `<option value="${esc(w.symbol)}">${esc(w.symbol)}</option>`).join("");
-}
-
 async function loadHistory() {
   const res = await fetch("/api/signals?limit=40");
   if (!res.ok) return;
@@ -1088,7 +897,6 @@ function bind() {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
     try { localStorage.setItem("theme", root.dataset.theme); } catch { /* ignore */ }
-    initChart(); loadChart();
   };
   $("market-switch").onclick = (e) => {
     const btn = e.target.closest("button[data-market]");
@@ -1112,14 +920,6 @@ function bind() {
   $("btn-weekly-md").onclick = () => downloadWeekly("md");
   $("btn-weekly-json").onclick = () => downloadWeekly("json");
   $("btn-weekly-save").onclick = saveWeekly;
-  $("chart-symbol").onchange = loadChart;
-  $("tf-group").onclick = (e) => {
-    const btn = e.target.closest("button[data-tf]");
-    if (!btn) return;
-    [...$("tf-group").children].forEach((b) => b.setAttribute("aria-pressed", b === btn));
-    state.timeframe = btn.dataset.tf;
-    loadChart();
-  };
   $("log-decisions").onchange = renderLog;
   $("notify-trades").checked = notifyWanted();
   $("notify-trades").onchange = (e) => toggleNotify(e.target.checked);
@@ -1134,16 +934,9 @@ function bind() {
   bind();
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
-  initChart();
-  await loadWatchlist();
-  await Promise.all([loadHistory(), loadStatus(), loadChart(), loadPositions(),
-                     loadTradingDay()]);
+  await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
-  // Refresh on the desk's own cadence while the market is open; the closing
-  // print cannot change once it is shut.
-  setInterval(() => { if (state.status?.phase === "open") loadChart(); }, 60_000);
-  setInterval(renderChartFreshness, 20_000);
 })();

@@ -6,15 +6,6 @@
 <title>panadhanam — Trading Desk</title>
 <link rel="stylesheet" href="/static/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
-<!-- Charts are vendored so the dashboard works with no internet connection.
-     The CDN line is only a fallback if the local file is ever removed. -->
-<script src="/static/vendor-lightweight-charts.js"></script>
-<script>
-  if (typeof LightweightCharts === "undefined") {
-    document.write('<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0'
-      + '/dist/lightweight-charts.standalone.production.js"><\/script>');
-  }
-</script>
 </head>
 <body>
 
@@ -74,32 +65,23 @@
     <div class="stats" id="risk-stats"></div>
   </section>
 
-  <!-- ============================ CHART =========================== -->
+  <!-- ============================ ACTIVITY ======================== -->
+  <!-- Where the chart used to be: what the desk decided and why is what a
+       paper desk is read from. -->
   <section class="card span-all">
-    <h2>Price Action <span class="trend" id="chart-trend"></span>
-      <span class="count" id="chart-freshness"></span></h2>
+    <h2>Activity Log <span class="count" id="log-meta"></span></h2>
     <div class="chart-toolbar">
-      <label class="sr-only" for="chart-symbol">Symbol</label>
-      <select id="chart-symbol"></select>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;
-                    color:var(--text-muted)">
-        <input type="checkbox" id="chart-follow" checked style="width:auto">
-        Follow the desk
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+        <input type="checkbox" id="log-decisions" checked style="width:auto">
+        Trades and decisions only
       </label>
-      <div class="tf-group" id="tf-group">
-        <button data-tf="1m">1m</button>
-        <button data-tf="5m" aria-pressed="true">5m</button>
-        <button data-tf="15m">15m</button>
-        <button data-tf="1d">1D</button>
-      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+        <input type="checkbox" id="notify-trades" style="width:auto">
+        Notify me when a trade is taken
+      </label>
+      <span id="log-hint" style="font-size:11.5px;color:var(--text-muted)"></span>
     </div>
-    <div id="chart"></div>
-    <div class="legend">
-      <span><i style="background:var(--series-1)"></i>EMA 9</span>
-      <span><i style="background:var(--series-2)"></i>EMA 21</span>
-      <span><i style="background:var(--series-4)"></i>EMA 50</span>
-      <span><i style="background:var(--series-6)"></i>VWAP</span>
-    </div>
+    <div class="scroll flush" id="log"></div>
   </section>
 
   <!-- ====================== POSITIONS + SIGNALS =================== -->
@@ -133,23 +115,6 @@
       <span id="weekly-status" style="font-size:11.5px;color:var(--text-muted)"></span>
     </div>
     <div id="weekly-body"></div>
-  </section>
-
-  <!-- ============================ ACTIVITY ======================== -->
-  <section class="card span-all">
-    <h2>Activity Log <span class="count" id="log-meta"></span></h2>
-    <div class="chart-toolbar">
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
-        <input type="checkbox" id="log-decisions" checked style="width:auto">
-        Trades and decisions only
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
-        <input type="checkbox" id="notify-trades" style="width:auto">
-        Notify me when a trade is taken
-      </label>
-      <span id="log-hint" style="font-size:11.5px;color:var(--text-muted)"></span>
-    </div>
-    <div class="scroll flush" id="log"></div>
   </section>
 
 </main>

@@ -181,6 +181,43 @@ def _set_env(assignments: list[str]) -> int:
 _REAL_MONEY_BROKERS = {"zerodha", "upstox", "angelone"}
 
 
+# The values .env.example used to ship. A .env still holding exactly these was
+# copied from the template rather than chosen, and .env beats settings.yaml —
+# so they would pin the desk to the old conservative risk for ever.
+_TEMPLATE_RISK = {"RISK_PER_TRADE_PCT": 1.0, "MAX_DAILY_LOSS_PCT": 3.0,
+                  "MIN_RISK_REWARD": 2.0}
+
+
+def _retire_template_risk(env_path) -> list[str]:
+    """Comment out template-default risk lines so settings.yaml decides.
+
+    Only a line whose value is still exactly the old template default is
+    touched; anything else was a choice and is left alone. Called on paper
+    accounts only.
+    """
+    if not env_path.exists():
+        return []
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+    retired: list[str] = []
+    for i, line in enumerate(lines):
+        key, sep, value = line.strip().partition("=")
+        if not sep or key not in _TEMPLATE_RISK:
+            continue
+        try:
+            is_default = float(value.split("#")[0].strip()) == _TEMPLATE_RISK[key]
+        except ValueError:
+            continue
+        if is_default:
+            lines[i] = (f"# {line.strip()}   # retired: the template default; "
+                        f"config/settings.yaml decides (see Rules on the dashboard)")
+            retired.append(key)
+    if retired:
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"- Risk: {', '.join(retired)} in .env were the old template "
+              f"defaults — retired, so config/settings.yaml decides")
+    return retired
+
+
 def _ensure_paper_orders() -> int:
     """Keep simulated order placement on for a PAPER account. Never real money.
 
@@ -207,11 +244,13 @@ def _ensure_paper_orders() -> int:
               f"AUTO_PLACE_ORDERS exactly as it is.")
         return 0
 
+    root = Path(__file__).resolve().parent
+    _retire_template_risk(root / ".env")
+
     if bool(cfg.get("execution.auto_place_orders", False)):
         print(f"- Paper trading: ON ({broker} — simulated fills, no real money)")
         return 0
 
-    root = Path(__file__).resolve().parent
     set_values(root / ".env", {"AUTO_PLACE_ORDERS": "true"},
                template=root / ".env.example")
     print(f"- Paper trading: was OFF in .env — turned ON ({broker} is a "

@@ -475,7 +475,9 @@ class OptionsDesk:
 
         closest = sorted((r for r in self.screened if r.previous_close),
                          key=nearness, reverse=True)[:3]
-        near = ", ".join(f"{r.symbol} gap {r.gap_pct:+.1f}% RVOL {r.rvol:.1f}x"
+        # Two decimals: "RVOL 1.5x" against a 1.5x bar read as a pass that
+        # was refused, when it was 1.46.
+        near = ", ".join(f"{r.symbol} gap {r.gap_pct:+.1f}% RVOL {r.rvol:.2f}x"
                          for r in closest)
         return (f"{head} — no symbol to hunt. The screen needs a gap of "
                 f"|{min_gap:g}|% AND RVOL {min_rvol:g}x; closest: {near or 'none'}. "

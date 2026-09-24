@@ -45,7 +45,7 @@ class CMIOAgent(BaseAgent):
                          reports: list[AgentReport]) -> dict[str, Any]:
         baseline = self._weighted_vote(ctx, reports)
 
-        if self.cfg.llm_enabled:
+        if self.cfg.llm_in_decisions:
             try:
                 enhanced = await self._llm_synthesise(ctx, reports, baseline)
                 if enhanced:

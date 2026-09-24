@@ -58,7 +58,8 @@ class RiskManager:
             daily_loss_limit=float(self.cfg.get("risk.total_capital", 100_000))
             * float(self.cfg.get("risk.max_daily_loss_pct", 3.0)) / 100.0,
         )
-        self._day = datetime.now().date()
+        self._day = clock.market_now(
+            str(self.cfg.get("system.timezone", "Asia/Kolkata"))).date()
 
     # ------------------------------------------------------------------ #
     # Day boundary
@@ -197,7 +198,11 @@ class RiskManager:
         rr = reward_points / stop_points if stop_points > 0 else 0.0
         min_rr = float(self.cfg.get("risk.min_risk_reward", 2.0))
         max_rr = float(self.cfg.get("risk.max_risk_reward", 10.0))
-        if rr < min_rr:
+        # Compared at the precision it is printed at. The desk places its own
+        # target at exactly min_rr, and float error or rounding the prices to
+        # the paisa/cent lands it a hair under — "R:R 1.50 below the 1.5:1
+        # minimum" rejected the very target the desk had just set.
+        if round(rr, 2) < min_rr:
             reasons.append(f"R:R {rr:.2f} below the {min_rr}:1 minimum — rejected")
         elif rr > max_rr:
             reasons.append(f"R:R {rr:.2f} implausibly high (>{max_rr}) — target is not credible")

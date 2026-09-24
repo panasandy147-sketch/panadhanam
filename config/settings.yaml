@@ -37,18 +37,21 @@ risk:
   # sensible practice size. That is the sizing maths being honest, not a fault
   # — and small capital does not make live trading safer, staying in paper does.
   total_capital: 10000
-  risk_per_trade_pct: 1.0        # 1% of capital risked per trade (0.5 is safer)
-  max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
-  max_daily_loss_pct: 3.0        # kill-switch: halt all new trades for the day
-  max_open_positions: 3
-  max_exposure_pct: 50.0         # max notional as % of (capital x intraday_leverage)
+  # HIGH-RISK PAPER PROFILE. These were 1.0 / 2.0 / 3.0 / 3 / 50 / 2.0; raised
+  # so the paper desk takes more and larger trades to learn from. Put them
+  # back before any thought of real money.
+  risk_per_trade_pct: 2.0        # 2% of capital risked per trade (was 1.0)
+  max_risk_per_trade_pct: 3.0    # hard ceiling — never exceed (was 2.0)
+  max_daily_loss_pct: 6.0        # kill-switch: halt all new trades for the day (was 3.0)
+  max_open_positions: 5          # was 3
+  max_exposure_pct: 100.0        # max notional as % of (capital x intraday_leverage); was 50
   # Your broker's intraday (MIS) margin multiplier. 1.0 = assume NO leverage,
   # which is the safe default: a 1L account can then hold at most 50k of stock.
   # Indian brokers typically allow ~5x on MIS for liquid names — set it to what
   # YOUR broker actually gives you. This only widens position size; it never
   # relaxes the per-trade risk limit, which stays 1-2% of real capital.
   intraday_leverage: 1.0
-  min_risk_reward: 2.0           # 1:2 minimum, rejected below this
+  min_risk_reward: 1.5           # 1:1.5 minimum, rejected below this (was 2.0)
   max_risk_reward: 10.0          # sanity ceiling (implausible targets rejected)
   # Stop loss must be a real structural level, not a round number guess.
   min_stop_distance_pct: 0.15    # SL closer than this = "ill-defined", rejected
@@ -79,11 +82,25 @@ risk:
 # CONFIRMATION POLICY — how many agents must agree before a signal fires.
 # --------------------------------------------------------------------------
 consensus:
-  min_confirmations: 2           # e.g. Candlestick breakout + OI buildup
-  min_composite_score: 0.35      # weighted score threshold (-1..+1)
+  # HIGH-RISK PAPER PROFILE: one strong analyst is enough (was 2), at a lower
+  # combined score (was 0.35), and a disagreement sides with the chart rather
+  # than cancelling out. Most setups used to stop right here.
+  min_confirmations: 1           # analysts voting ±0.25 or stronger
+  min_composite_score: 0.25      # weighted score threshold (-1..+1)
   veto_on_high_impact_news: true # a -0.7 news score kills a long, and vice versa
   require_macro_alignment: false # set true to demand macro bias agreement too
-  conflict_policy: "flat"        # flat | side_with_technicals | side_with_macro
+  conflict_policy: "side_with_technicals"   # flat | side_with_technicals | side_with_macro
+
+# --------------------------------------------------------------------------
+# DECISIONS — may the local model change a trade decision?
+# --------------------------------------------------------------------------
+decisions:
+  # false: the analysts and the CMIO decide by their rules, in seconds. The
+  # model (Ollama or Claude) still writes the journal post-mortems and the
+  # weekly coach. true: it re-scores every analyst and can veto the vote,
+  # which with a local 7B model took ~25 s a symbol and turned down setups
+  # the rules had passed.
+  use_llm: false
 
 # --------------------------------------------------------------------------
 # AGENT WEIGHTS — the learning loop nudges these over time (see learning:).

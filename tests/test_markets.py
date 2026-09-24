@@ -163,7 +163,7 @@ def test_indian_equity_keeps_its_lot_semantics(cfg):
     rm.set_capital(100_000)
     sig = rm.evaluate(_ctx("RELIANCE", 2950.0), Bias.BULLISH, [], 0.6, ["a", "b"])
     assert sig.unit_size == 1          # cash equity is still 1 share
-    assert sig.capital_at_risk_pct <= 1.01
+    assert sig.capital_at_risk_pct <= float(cfg.get("risk.risk_per_trade_pct")) + 0.01
 
 
 @pytest.mark.asyncio

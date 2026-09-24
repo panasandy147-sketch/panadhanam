@@ -17,6 +17,11 @@ def rm(cfg):
     # currently says — the sizing assertions below are about the maths, not
     # about the shipped default.
     m.set_capital(100_000)
+    # Likewise the policy: these tests are about the arithmetic at a known 1%
+    # risk and 2R, not about the (high-risk paper) profile that ships.
+    m.cfg.settings["risk"].update({"risk_per_trade_pct": 1.0,
+                                   "max_risk_per_trade_pct": 2.0,
+                                   "min_risk_reward": 2.0})
     return m
 
 

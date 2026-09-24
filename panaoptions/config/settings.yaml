@@ -80,8 +80,9 @@ premarket:
   # qualifies, and the day is written off before it starts.
   screen_from: "09:00"
   # While nothing has qualified, try again this often — the pre-market tape
-  # thickens as the open approaches. Once something passes, it stops.
-  rescreen_minutes: 5
+  # thickens as the open nears, and a name can gap or wake up mid-session.
+  # Once something passes, it stops.
+  rescreen_minutes: 1
 
 technical:
   timeframe: "5m"

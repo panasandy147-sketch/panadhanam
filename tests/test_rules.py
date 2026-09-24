@@ -26,7 +26,8 @@ def test_sizing_is_shown_in_money_for_the_real_account(cfg):
     try:
         doc = build(cfg, capital=100_000)
         [risk] = [r for r in _rows(doc) if r["setting"] == "risk.risk_per_trade_pct"]
-        assert risk["value"] == "1% = $1,000"
+        pct = float(cfg.get("risk.risk_per_trade_pct"))
+        assert risk["value"] == f"{pct:g}% = ${1000 * pct:,.0f}"
         [cutoff] = [r for r in _rows(doc) if r["setting"].endswith("no_new_entry_after")]
         assert cutoff["value"] == "15:30" and "us.yaml" in cutoff["setting"]
     finally:

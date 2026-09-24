@@ -140,7 +140,7 @@ async def test_non_actionable_entries_still_show_the_projected_trade(engine):
                 assert t["stop_loss"] < t["entry"] < t["target"]
             else:
                 assert t["stop_loss"] > t["entry"] > t["target"]
-            assert t["risk_reward"] >= 2.0
+            assert t["risk_reward"] >= float(eng.cfg.get("risk.min_risk_reward")) - 0.01
 
 
 # --------------------------------------------------------------------------- #
