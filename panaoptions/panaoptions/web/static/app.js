@@ -79,6 +79,22 @@ async function resetWatchlist() {
 }
 
 /* ------------------------------------------------------------------ */
+/* The one failure that stops everything while looking like nothing is
+   wrong: charts fine, setups firing, no contract ever priced. */
+function renderFeed(s) {
+  const f = s.feed || {};
+  const el = $("feed-health");
+  if (!el) return;
+  el.innerHTML = (f.options_available === false)
+    ? `<div class="note crit"><b>Option chains are not available.</b>
+       Charts are working, so the desk will screen, chart and fire setups —
+       and every one will report &ldquo;no contract&rdquo;. Nothing can be
+       bought until this is fixed.
+       ${f.options_error ? `<br><code>${esc(f.options_error)}</code>` : ""}
+       <br>Check with <code>python run.py --check</code>.</div>`
+    : "";
+}
+
 function renderConfig(c) {
   const blockers = c.blockers || [];
   const warnings = c.warnings || [];
@@ -214,8 +230,14 @@ function renderOpen(s) {
 
 function renderLedger(d) {
   const s = d.stats || {};
+  const open = d.open || [];
+  const atWork = open.reduce(
+    (sum, t) => sum + (t.entry_price || 0) * (t.remaining || 0) * 100, 0);
   $("ledger-tiles").innerHTML = `
-    <div class="tile"><div class="k">Trades</div><div class="v">${s.trades || 0}</div></div>
+    <div class="tile"><div class="k">Open now</div>
+      <div class="v ${open.length ? "pos" : ""}">${open.length}</div>
+      <div class="sub">${open.length ? money(atWork) + " at work" : "flat"}</div></div>
+    <div class="tile"><div class="k">Closed</div><div class="v">${s.trades || 0}</div></div>
     <div class="tile"><div class="k">Win rate</div><div class="v">${num(s.win_rate, 0)}%</div></div>
     <div class="tile"><div class="k">Total P&amp;L</div>
       <div class="v ${sign(s.total_pnl)}">${money(s.total_pnl)}</div></div>
@@ -234,11 +256,28 @@ function renderLedger(d) {
       <td class="num ${sign(t.realised_pnl)}">${money(t.realised_pnl)}</td>
     </tr>`).join("");
 
-  $("trades-body").innerHTML = rows
+  /* A trade shows here the moment it is bought, not when it is sold.
+     Waiting for the exit meant "Trades 0" stayed on screen while a position
+     was live, which reads as "nothing was bought". */
+  const openRows = open.map((t) => `
+    <tr>
+      <td>now</td>
+      <td>${esc(t.symbol)}</td>
+      <td>${esc(t.contract_label)}</td>
+      <td><span class="pill warn">holding x${t.remaining}</span></td>
+      <td class="num">${money((t.entry_price || 0) * (t.remaining || 0) * 100)}
+        <span class="sub">at ${num(t.entry_price, 2)}</span></td>
+    </tr>`).join("");
+
+  $("trades-body").innerHTML = (openRows || rows)
     ? `<table><thead><tr><th>Date</th><th>Symbol</th><th>Contract</th>
-       <th>Exit</th><th class="num">P&amp;L</th></tr></thead>
-       <tbody>${rows}</tbody></table>`
-    : `<div class="empty">No closed trades in the last ${d.days} days.</div>`;
+       <th>Status</th><th class="num">P&amp;L / cost</th></tr></thead>
+       <tbody>${openRows}${rows}</tbody></table>`
+      + (openRows && !rows
+          ? `<div class="empty">Bought and still held — P&amp;L is booked
+             when it closes.</div>` : "")
+    : `<div class="empty">No trades in the last ${d.days} days. Nothing has
+       been bought.</div>`;
 }
 
 function renderRejections(d) {
@@ -752,6 +791,7 @@ async function refresh() {
       getJSON("/api/contracts"), getJSON("/api/strategies"),
       getJSON("/api/journal?days=30"),
     ]);
+    renderFeed(s);
     renderScreen(screen);
     renderLedger(trades);
     renderRejections(trades);

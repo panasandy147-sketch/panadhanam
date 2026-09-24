@@ -36,6 +36,12 @@ _INTERVAL_RANGE = {"1m": "5d", "5m": "60d", "15m": "60d", "1d": "1y"}
 
 
 class YahooFeed:
+    # Why the last request to each endpoint family failed, or "".
+    options_error: str = ""
+    chart_error: str = ""
+    # Whether the options endpoint answered at connect time. None = not probed.
+    options_available: bool | None = None
+
     def __init__(self, timeout: float = 15.0) -> None:
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
@@ -59,6 +65,22 @@ class YahooFeed:
                           "a VPN, or a corporate proxy", r.status_code)
                 return False
             self.connected = True
+
+            # Charts are not the product. This app buys options, so an
+            # options endpoint that refuses the request means the desk can
+            # screen, chart and fire setups all day and never place one paper
+            # trade — which is exactly what it looks like from the outside.
+            self.options_error = ""
+            probe = await self._get(OPTIONS.format(sym="SPY"))
+            self.options_available = bool(
+                (probe or {}).get("optionChain", {}).get("result"))
+            if not self.options_available:
+                log.error(
+                    "Yahoo option chains are NOT available (%s). Charts work, "
+                    "so the desk will screen and fire setups — and every one "
+                    "of them will report 'no contract'. Nothing can trade "
+                    "until this endpoint answers.",
+                    self.options_error or "empty response")
             return True
         except Exception as exc:
             log.error("Yahoo connect failed: %s", exc)
@@ -77,12 +99,28 @@ class YahooFeed:
         try:
             r = await self._client.get(url, params=params)
             if r.status_code != 200:
+                self._note_failure(url, f"HTTP {r.status_code}")
                 log.debug("%s -> HTTP %s", url, r.status_code)
                 return None
             return r.json()
         except Exception as exc:
+            self._note_failure(url, f"{type(exc).__name__}: {exc}")
             log.debug("%s failed: %s", url, exc)
             return None
+
+    def _note_failure(self, url: str, reason: str) -> None:
+        """Keep the last reason a request failed, per endpoint family.
+
+        Returning a bare empty list for a rejected request is how "the market
+        has no puts today" and "Yahoo refused the request" end up reading the
+        same on screen. The options endpoint is a DIFFERENT host and API path
+        from the chart one and fails independently of it, so a desk whose
+        charts work can still be unable to price a single contract.
+        """
+        if url.startswith(OPTIONS.split("{")[0]):
+            self.options_error = reason
+        else:
+            self.chart_error = reason
 
     # ------------------------------------------------------------------ #
     async def candles(self, symbol: str, interval: str = "5m",
@@ -125,8 +163,16 @@ class YahooFeed:
     async def chain_for_window(self, symbol: str, spot: float,
                                min_dte: int, max_dte: int) -> list[OptionContract]:
         """Every contract across the expiries inside the DTE window."""
+        self.options_error = ""
         stamps = await self.expiries(symbol)
         today = datetime.now(UTC).date()
+
+        if not stamps:
+            # No expiry list at all is a broken endpoint, not a quiet market.
+            self.options_error = (self.options_error
+                                  or "the options endpoint returned nothing")
+            log.warning("%s: no expiry list — %s", symbol, self.options_error)
+            return []
 
         wanted = []
         for epoch in stamps:
@@ -134,8 +180,14 @@ class YahooFeed:
             if min_dte <= dte <= max_dte:
                 wanted.append(epoch)
         if not wanted:
-            log.debug("%s has no expiry between %d and %d days out",
-                      symbol, min_dte, max_dte)
+            nearest = sorted(
+                (datetime.fromtimestamp(e, tz=UTC).date() - today).days
+                for e in stamps)
+            self.options_error = (
+                f"no expiry between {min_dte} and {max_dte} days out; the "
+                f"listed ones are {', '.join(str(d) for d in nearest[:6])} "
+                f"days")
+            log.debug("%s: %s", symbol, self.options_error)
             return []
 
         chains = await asyncio.gather(

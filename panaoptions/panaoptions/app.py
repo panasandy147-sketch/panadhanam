@@ -516,12 +516,23 @@ class OptionsDesk:
 
     async def _pick_contract(self, symbol: str, setup, now: datetime):
         spot = setup.indicators.close
-        chain = await self.feed.chain_for_window(
-            symbol, spot,
-            setup.min_dte_override or int(self.cfg.get("contracts.min_dte", 7)),
-            setup.max_dte_override or int(self.cfg.get("contracts.max_dte", 14)))
-        return contract_filter.choose(symbol, chain, setup.direction, self.cfg,
-                                      setup=setup)
+        min_dte = setup.min_dte_override or int(self.cfg.get("contracts.min_dte", 7))
+        max_dte = setup.max_dte_override or int(self.cfg.get("contracts.max_dte", 14))
+        chain = await self.feed.chain_for_window(symbol, spot, min_dte, max_dte)
+        search = contract_filter.choose(symbol, chain, setup.direction,
+                                        self.cfg, setup=setup)
+
+        # An empty chain has two very different causes and one useless
+        # message. "No put contracts came back" reads as "the market has no
+        # puts today"; nine times in ten it means the request was refused, and
+        # the feed now knows which.
+        if not chain:
+            reason = getattr(self.feed, "options_error", "")
+            if reason:
+                search.note = (
+                    f"No contracts for {symbol} at {min_dte}-{max_dte} DTE — "
+                    f"{reason}")
+        return search
 
     # ------------------------------------------------------------------ #
     async def _manage(self, now: datetime) -> list[str]:

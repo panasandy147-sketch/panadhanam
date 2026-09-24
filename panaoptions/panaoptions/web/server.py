@@ -55,6 +55,14 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         out["config"] = _config_payload(cfg)
         out["universe"] = cfg.symbols
         out["profile"] = cfg.profile_label
+        # Charts and option chains are different Yahoo hosts and fail
+        # independently. A desk whose charts work can still be unable to
+        # price a single contract, and from the outside that looks exactly
+        # like a quiet market.
+        out["feed"] = {
+            "options_available": getattr(desk.feed, "options_available", None),
+            "options_error": getattr(desk.feed, "options_error", ""),
+        }
         out["session"] = {
             "timeframe": cfg.get("technical.timeframe"),
             "dte": f"{cfg.get('contracts.min_dte')}-{cfg.get('contracts.max_dte')}",
@@ -95,6 +103,11 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
             "trades": rows,
             "sessions": store.sessions(limit=days),
             "stats": desk.ledger.stats(),
+            # What is on RIGHT NOW. The panel used to count only closed
+            # trades, so a paper trade opened a minute ago left "Trades 0" on
+            # screen and read as though nothing had been bought at all.
+            "open": [t.model_dump(mode="json")
+                     for t in desk.ledger.open_trades.values()],
             # Why setups did not become trades. On a desk that is taking
             # nothing, this is the panel that explains it.
             "rejections": store.rejection_tally(since),

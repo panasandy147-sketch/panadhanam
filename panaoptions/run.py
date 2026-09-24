@@ -116,8 +116,36 @@ async def _check() -> bool:
                       f"prev close {quote.get('previous_close') or 0:,.2f}")
             else:
                 print(f"  {symbol:5s} no quote")
-        expiries = await feed.expiries(cfg.symbols[0])
-        print(f"  {cfg.symbols[0]} option expiries available: {len(expiries)}")
+        # Charts and option chains are different Yahoo hosts and fail
+        # independently. This app BUYS OPTIONS, so a green chart feed with a
+        # dead chain endpoint is not a working desk — it screens, charts and
+        # fires setups all day and can never place one paper trade.
+        print("\n=== OPTION CHAINS ===")
+        if feed.options_available is False:
+            print(f"  NOT AVAILABLE — {feed.options_error or 'empty response'}")
+            print("  Charts work, so the screen and the strategies will run "
+                  "normally and every setup will report 'no contract'.")
+            print("  Nothing can be bought until this endpoint answers.")
+            return False
+
+        symbol = cfg.symbols[0]
+        expiries = await feed.expiries(symbol)
+        print(f"  {symbol} expiries listed: {len(expiries)}")
+        if not expiries:
+            print(f"  {feed.options_error or 'no expiry list returned'}")
+            return False
+
+        min_dte = int(cfg.get("contracts.min_dte", 7))
+        max_dte = int(cfg.get("contracts.max_dte", 14))
+        quote = await feed.quote(symbol)
+        spot = (quote or {}).get("last_price") or 0.0
+        chain = await feed.chain_for_window(symbol, spot, min_dte, max_dte)
+        print(f"  {symbol} contracts at {min_dte}-{max_dte} DTE: {len(chain)}")
+        if not chain:
+            print(f"  {feed.options_error or 'the window matched no expiry'}")
+            return False
+        with_greeks = sum(1 for c in chain if c.delta)
+        print(f"  of those, {with_greeks} carry a usable delta")
     return True
 
 

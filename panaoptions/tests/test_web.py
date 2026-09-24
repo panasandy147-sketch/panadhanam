@@ -528,3 +528,45 @@ def test_the_page_offers_a_notification_toggle(client):
     assert "setup.pass" not in js.split("NOTIFY_KINDS")[1][:200]
     # Opening the page must not replay the day as a burst of alerts.
     assert "notifySeeded" in js
+
+
+def test_the_record_shows_a_position_the_moment_it_is_bought(client):
+    """Counting only closed trades left "Trades 0" on screen while a paper
+    trade was live, which reads as "nothing was bought"."""
+    body = client.get("/api/trades").json()
+    assert body["open"] == []
+
+    from datetime import UTC, datetime
+
+    from panaoptions.models import Direction, PaperTrade, SetupType
+
+    client.desk.ledger.open_trades["PT-1"] = PaperTrade(
+        id="PT-1", signal_id="S1", symbol="AVGO", direction=Direction.SHORT,
+        contract_label="AVGO 2026-10-16 350P",
+        opened_at=datetime(2026, 9, 24, 13, 50, tzinfo=UTC),
+        quantity=2, entry_price=3.20, stop_price=1.80, target_1=4.48,
+        target_2=5.44, remaining=2, strategy=SetupType.CANDLESTICK_AT_LEVEL)
+
+    body = client.get("/api/trades").json()
+    assert len(body["open"]) == 1
+    held = body["open"][0]
+    assert held["symbol"] == "AVGO" and held["remaining"] == 2
+    assert held["entry_price"] == 3.20
+
+
+def test_the_status_says_whether_option_chains_are_available(client):
+    """Charts and chains are different endpoints and fail independently.
+
+    A desk whose charts work can still be unable to price a single contract,
+    and from the outside that is indistinguishable from a quiet market.
+    """
+    body = client.get("/api/status").json()
+    assert "feed" in body
+    assert "options_available" in body["feed"]
+
+
+def test_the_page_can_warn_that_chains_are_down(client):
+    page = client.get("/").text
+    assert 'id="feed-health"' in page
+    js = client.get("/static/app.js").text
+    assert "Option chains are not available" in js
