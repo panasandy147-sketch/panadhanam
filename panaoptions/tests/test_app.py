@@ -493,3 +493,79 @@ async def test_the_panel_stops_naming_a_symbol_once_the_desk_is_full(desk,
     details = [e["detail"] for e in desk.activity.recent(30)
                if e["kind"] == "hunt.skip"]
     assert any("not looking for new trades" in d for d in details)
+
+
+# --------------------------------------------------------------------------- #
+# Before the strategy windows open
+# --------------------------------------------------------------------------- #
+def _truncate_feed(desk, monkeypatch, cutoff_et):
+    """Only bars up to `cutoff_et`, as a live feed would have at that moment.
+
+    A strategy's window is checked against the LAST BAR's time rather than
+    the wall clock — the rule is about the candle being judged, and at 09:46
+    with the last completed bar at 09:40 the opening range is not final yet.
+    So a test about "before 09:45" has to move the tape, not just the clock.
+    """
+    from zoneinfo import ZoneInfo
+
+    original = desk.feed.candles
+    cutoff = cutoff_et.astimezone(ZoneInfo("UTC"))
+
+    async def _capped(symbol, interval="5m", include_prepost=False):
+        bars = await original(symbol, interval, include_prepost)
+        return [b for b in bars if b.ts <= cutoff]
+
+    monkeypatch.setattr(desk.feed, "candles", _capped)
+
+
+@pytest.mark.asyncio
+async def test_passing_the_screen_before_0945_says_why_nothing_traded(desk,
+                                                                      monkeypatch):
+    """The 09:41 case: symbols pass, nothing trades, and the log was silent.
+
+    No strategy is asked before 09:45, so `evaluate_all` returns no attempts
+    at all — a completely different state from "they all looked and passed",
+    and logging nothing made the two identical on screen.
+    """
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 41))
+    _truncate_feed(desk, monkeypatch, _at(9, 41))
+    await desk.cycle()
+
+    assert not desk.ledger.open_trades
+    passed = [r for r in desk.screened if r.passed]
+    assert passed, "the fixture's symbols should pass the screen"
+
+    notes = [e["detail"] for e in desk.activity.recent(40)
+             if e["kind"] == "hunt.skip"]
+    assert notes, "a cycle that judged nothing must say why"
+    assert any("no strategy is in its window yet" in n for n in notes)
+    assert any("09:45" in n and "4 minute" in n for n in notes)
+
+
+@pytest.mark.asyncio
+async def test_the_window_note_is_written_once_not_once_per_symbol(desk,
+                                                                   monkeypatch):
+    """The window is the same for every symbol; five copies bury the log."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 41))
+    _truncate_feed(desk, monkeypatch, _at(9, 41))
+    await desk.cycle()
+    notes = [e for e in desk.activity.recent(40)
+             if e["kind"] == "hunt.skip" and "window yet" in e["detail"]]
+    assert len(notes) == 1
+
+
+@pytest.mark.asyncio
+async def test_after_the_last_window_the_note_says_so_instead(desk,
+                                                              monkeypatch):
+    """"Opens in N minutes" and "closed for today" must not read the same."""
+    # 10:00 is still inside the desk's entry window (session.entry_close is
+    # 10:30), but every strategy shut at 09:50 — so the desk is hunting and
+    # there is nothing left to ask.
+    monkeypatch.setattr(clock, "now", lambda tz: _at(10, 0))
+    for key in ("orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
+                "candlestick_at_level"):
+        desk.cfg.data["strategies"][key]["to"] = "09:50"
+    await desk.cycle()
+    notes = [e["detail"] for e in desk.activity.recent(40)
+             if e["kind"] == "hunt.skip"]
+    assert any("closed for today" in n for n in notes)

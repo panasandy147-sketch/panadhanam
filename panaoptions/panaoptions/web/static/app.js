@@ -408,8 +408,26 @@ async function refreshCandidate() {
 }
 
 /* ------------------------------------------------------------------ */
+/* "Outside window" is true at 09:41 and at 16:30 and means something
+   completely different. Four minutes before the open must not read like a
+   desk that has stopped working. */
+function windowLabel(s) {
+  if (!s.enabled) return "off";
+  if (s.live) return "live now";
+  if (s.state === "waiting") {
+    const m = s.opens_in_minutes;
+    return m <= 1 ? "opens in a minute" : `opens in ${m} min`;
+  }
+  return "done for today";
+}
+
 function renderStrategies(d) {
-  $("strat-meta").textContent = d.market_time || "";
+  const live = d.live || 0;
+  const next = d.next_open_minutes;
+  $("strat-meta").textContent = (d.market_time || "")
+    + (live ? ` · ${live} live` : next != null
+        ? ` · none live, first opens in ${next} min`
+        : " · none live");
   $("strategies-body").innerHTML = `
     <table>
       <thead><tr><th>Strategy</th><th>Window (ET)</th><th>Status</th></tr></thead>
@@ -417,12 +435,21 @@ function renderStrategies(d) {
         <tr>
           <td>${esc(s.name)}</td>
           <td class="num">${esc(s.from)} – ${esc(s.to)}</td>
-          <td><span class="pill ${s.live ? "pass" : "skip"}">${
-            !s.enabled ? "off" : s.live ? "live now" : "outside window"}</span></td>
+          <td><span class="pill ${
+            s.live ? "pass" : s.state === "waiting" ? "warn" : "skip"}">${
+            esc(windowLabel(s))}</span></td>
         </tr>`).join("")}</tbody>
     </table>
-    <div class="empty">Each runs only inside its own window. They all skip
-      09:30–09:45, where spreads are widest and the first prints are noise.</div>`;
+    <div class="empty">${live
+        ? `Each runs only inside its own window. They all skip 09:30–09:45,
+           where spreads are widest and the first prints are noise.`
+        : next != null
+          ? `Nothing can trade yet — every strategy skips 09:30–09:45, where
+             spreads are widest and the first prints are noise. Symbols that
+             passed the screen are already queued; the first strategy opens in
+             ${next} minute${next === 1 ? "" : "s"}.`
+          : `The entry windows have closed for today. Open positions are still
+             managed and squared off at the force-exit time.`}</div>`;
 }
 
 function renderJournal(d) {

@@ -306,6 +306,17 @@ profile in force is printed by `--check-config` and shown on the dashboard.
 
 Work down the gates in order; each one is visible somewhere:
 
+0. **The clock.** Every strategy skips **09:30–09:45**, where spreads are
+   widest and the first prints are noise, so nothing can trade before 09:45
+   however many symbols passed the screen. The Strategies panel says which
+   state each one is in — `live now`, `opens in 4 min`, `done for today` —
+   rather than a flat "outside window", which is equally true at 09:41 and at
+   16:30 and means the opposite thing. The activity log says it too.
+
+   Note that a strategy's window is checked against the **last bar's** time,
+   not the wall clock: the rule is about the candle being judged, and at
+   09:46 with the last completed 5m bar at 09:40 the opening range is not
+   final yet.
 1. **The pre-market screen.** Nothing that fails it is ever looked at again.
    `python run.py --screen` shows every symbol with its gap, its RVOL and the
    reason. A quiet index ETF fails the default screen on most days by design:

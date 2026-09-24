@@ -300,19 +300,46 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         """Every strategy, its window, and whether it is live now."""
         from panaoptions.engine.strategies import ALL
 
-        now = clock.now(cfg.timezone).time()
+        moment = clock.now(cfg.timezone)
+        now = moment.time()
+        minutes = now.hour * 60 + now.minute
+
         out = []
         for factory in ALL:
             strategy = factory(cfg)
+            opens_at = strategy.opens.hour * 60 + strategy.opens.minute
+            live = strategy.enabled and strategy.opens <= now < strategy.closes
+
+            # "Outside window" is true at 09:41 and at 16:30 and means
+            # something completely different. Four minutes before the open
+            # reads as a broken desk unless the panel says so.
+            if not strategy.enabled:
+                state, opens_in = "off", None
+            elif live:
+                state, opens_in = "live", None
+            elif minutes < opens_at:
+                state, opens_in = "waiting", opens_at - minutes
+            else:
+                state, opens_in = "done", None
+
             out.append({
                 "name": strategy.name.value,
                 "enabled": strategy.enabled,
                 "from": strategy.opens.strftime("%H:%M"),
                 "to": strategy.closes.strftime("%H:%M"),
-                "live": strategy.enabled and strategy.opens <= now < strategy.closes,
+                "live": live,
+                "state": state,
+                "opens_in_minutes": opens_in,
             })
+
+        live_count = sum(1 for row in out if row["live"])
+        waiting = [row for row in out if row["state"] == "waiting"]
+        next_open = min((row["opens_in_minutes"] for row in waiting),
+                        default=None)
         return {"strategies": out,
-                "market_time": clock.now(cfg.timezone).strftime("%H:%M %Z")}
+                "live": live_count,
+                "next_open_minutes": next_open,
+                "market_time": moment.strftime("%H:%M %Z")}
 
     # ---------------------------------------------------------------- #
     app.mount("/static", _VersionedStatic(directory=str(STATIC)), name="static")

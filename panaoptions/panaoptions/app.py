@@ -280,6 +280,9 @@ class OptionsDesk:
             return_exceptions=True)
 
         actions: list[str] = []
+        # Said once per cycle, not once per symbol: the window is the same for
+        # all of them, and five copies of it would bury everything else.
+        window_reported = False
         for symbol, tape in zip(candidates, tapes, strict=False):
             if isinstance(tape, Exception):
                 log.warning("could not read %s this cycle: %s", symbol, tape)
@@ -303,6 +306,18 @@ class OptionsDesk:
             setup, attempts = strategies.evaluate_all(
                 symbol, candles, session_levels, self.cfg)
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
+
+            # No attempts at all means no strategy was even asked — every one
+            # of them is outside its own window. That is a completely
+            # different state from "they all looked and passed", and logging
+            # nothing makes the two identical on screen: symbols pass the
+            # screen, nothing trades, and the log is silent.
+            if not attempts:
+                if not window_reported:
+                    window_reported = True
+                    self.activity.add("hunt.skip", self._window_note(now),
+                                      ts=now)
+                continue
 
             if setup is None:
                 for attempt in attempts:
@@ -390,6 +405,25 @@ class OptionsDesk:
 
         self.scanning = ""
         return actions
+
+    def _window_note(self, now: datetime) -> str:
+        """Why nothing was judged, and when that changes."""
+        current = now.hour * 60 + now.minute
+        soonest, name = None, ""
+        for factory in strategies.ALL:
+            strategy = factory(self.cfg)
+            if not strategy.enabled:
+                continue
+            opens = strategy.opens.hour * 60 + strategy.opens.minute
+            if opens > current and (soonest is None or opens < soonest):
+                soonest, name = opens, strategy.name.value
+        if soonest is None:
+            return ("every strategy window has closed for today — managing "
+                    "open positions only")
+        wait = soonest - current
+        return (f"no strategy is in its window yet — {name} opens at "
+                f"{soonest // 60:02d}:{soonest % 60:02d}, in "
+                f"{wait} minute{'s' if wait != 1 else ''}")
 
     async def _tape(self, symbol: str, now: datetime):
         """One symbol's candles and session levels, fetched together."""
