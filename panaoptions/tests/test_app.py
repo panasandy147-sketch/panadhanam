@@ -616,3 +616,23 @@ async def test_after_the_last_window_the_note_says_so_instead(desk,
     notes = [e["detail"] for e in desk.activity.recent(40)
              if e["kind"] == "hunt.skip"]
     assert any("closed for today" in n for n in notes)
+
+
+def test_an_empty_screen_says_why_and_who_came_closest(desk):
+    """"0/20 passed" read as a stuck desk. With nothing passed no strategy
+    is asked about anything, so the log line has to say so and give the
+    numbers."""
+    desk.screened = [
+        PreMarketRead(symbol="SPY", previous_close=500, gap_pct=0.2, rvol=0.9),
+        PreMarketRead(symbol="NVDA", previous_close=100, gap_pct=0.9, rvol=1.4),
+        PreMarketRead(symbol="TSLA", previous_close=200, gap_pct=-2.5, rvol=0.3),
+    ]
+    line = desk._screen_summary([])
+    assert line.startswith("0/3 passed — no symbol to hunt")
+    assert "closest: NVDA gap +0.9% RVOL 1.4x" in line
+    assert "AND" in line
+
+
+def test_a_screen_that_passes_names_what_is_hunted(desk):
+    desk.screened = [PreMarketRead(symbol="SPY", passed=True)]
+    assert desk._screen_summary(["SPY"]) == "1/1 passed — hunting SPY"

@@ -218,9 +218,7 @@ class OptionsDesk:
             self._screened_at = now
             passed = [r.symbol for r in self.screened if r.passed]
             self.activity.add(
-                "screen.done",
-                f"{len(passed)}/{len(self.screened)} passed"
-                + (f" — {', '.join(passed)}" if passed else ""),
+                "screen.done", self._screen_summary(passed),
                 level="good" if passed else "info", ts=now)
 
         # 3. Tightening is a clock event, not a phase one. The entry window now
@@ -457,6 +455,31 @@ class OptionsDesk:
             "underlying": setup.indicators.close,
             "taken": False,
         }
+
+    def _screen_summary(self, passed: list[str]) -> str:
+        """One line for the log: who passed, or why nobody did.
+
+        "0/20 passed" alone reads as a desk that is stuck. With nothing
+        passed no strategy is asked about any symbol, so the line has to say
+        that, and how near the nearest names came.
+        """
+        head = f"{len(passed)}/{len(self.screened)} passed"
+        if passed:
+            return f"{head} — hunting {', '.join(passed)}"
+        min_gap = float(self.cfg.get("premarket.min_gap_pct", 1.0)) or 1.0
+        min_rvol = float(self.cfg.get("premarket.min_rvol", 1.5)) or 1.5
+
+        def nearness(r) -> float:
+            # The weaker of the two, as a share of what it needs: both must pass.
+            return min(abs(r.gap_pct or 0.0) / min_gap, (r.rvol or 0.0) / min_rvol)
+
+        closest = sorted((r for r in self.screened if r.previous_close),
+                         key=nearness, reverse=True)[:3]
+        near = ", ".join(f"{r.symbol} gap {r.gap_pct:+.1f}% RVOL {r.rvol:.1f}x"
+                         for r in closest)
+        return (f"{head} — no symbol to hunt. The screen needs a gap of "
+                f"|{min_gap:g}|% AND RVOL {min_rvol:g}x; closest: {near or 'none'}. "
+                f"Re-checking every {self.cfg.get('premarket.rescreen_minutes', 5)} min")
 
     def _should_screen(self, phase: str, today: str, now: datetime) -> bool:
         """Is it worth running the pre-market screen right now?
