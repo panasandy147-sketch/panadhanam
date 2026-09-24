@@ -933,3 +933,31 @@ button.primary {
 .weekly-trade > div { padding: 0 10px 8px; }
 .weekly-trade .k { margin-top: 8px; }
 .weekly-trade ul { margin: 4px 0; padding-left: 18px; font-size: 12px; line-height: 1.55; }
+
+/* ----------------------------------------------------------- lean layout */
+/* Six panels rather than seventeen: account, chart, positions beside signals,
+   the reviews on demand, and the log. Two columns is enough for that; three
+   left an empty column beside the pair. */
+main.lean { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1000px) { main.lean { grid-template-columns: 1fr; } }
+
+.header-actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+
+/* The trend, in words, beside the chart title. Coloured AND labelled, so it
+   reads without the colour. */
+.card > h2 .trend {
+  font-size: 11px; font-weight: 650; letter-spacing: 0.02em;
+  text-transform: none; padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.card > h2 .trend:empty { display: none; }
+.card > h2 .trend.up   { color: var(--good);     border-color: var(--good); }
+.card > h2 .trend.down { color: var(--critical); border-color: var(--critical); }
+.card > h2 .trend.flat { color: var(--text-muted); }
+
+.log.good .topic { color: var(--good); }
+
+@media (max-width: 720px) {
+  header { gap: 10px; }
+  .header-actions { margin-left: 0; width: 100%; }
+}

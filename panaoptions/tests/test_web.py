@@ -672,3 +672,12 @@ def test_the_chart_is_told_which_clock_the_session_is_on(client, monkeypatch):
     assert "exchangeDay(c.time)" in js
     # The old local-clock version, which must not come back.
     assert "new Date(c.time * 1000).toDateString()" not in js
+
+
+def test_the_chart_gets_warm_up_bars_for_its_lines(client, monkeypatch):
+    """An EMA 50 started from nine bars of today is not an EMA 50, so the
+    bars before the session come back separately for the lines to use."""
+    _three_days(monkeypatch, client)
+    body = client.get("/api/candles/AAPL?warmup=60").json()
+    assert len(body["warmup"]) == 60
+    assert body["warmup"][-1]["time"] < body["candles"][0]["time"]

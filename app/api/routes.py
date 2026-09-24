@@ -158,12 +158,53 @@ async def stats() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @router.get("/market/{symbol}/candles")
 async def candles(request: Request, symbol: str, timeframe: str = "5m",
-                  count: int = 200) -> dict[str, Any]:
+                  count: int = 200, session: bool = True,
+                  warmup: int = 60) -> dict[str, Any]:
+    """Bars for the chart: today's session, plus the bars the lines need.
+
+    Several days of 5m bars on one axis squeeze the current session into the
+    right-hand edge — the part that shows the trend the desk is acting on. So
+    intraday timeframes return the LATEST session in `candles`, and the bars
+    immediately before it in `warmup`. The chart draws only `candles` but
+    computes its EMAs over both: an EMA 50 started from nine bars of today is
+    not an EMA 50, and drawing one would put a wrong line on a right chart.
+
+    "Latest session" is the last bar's date in the MARKET's own timezone, not
+    the wall clock and not the viewer's: before the open, after the close and
+    at a weekend the chart still shows a whole session, and watching New York
+    from India does not split one session across two dates.
+
+    Daily bars are returned as they are — across days is the point of them.
+    """
+    from zoneinfo import ZoneInfo
+
     engine = _engine(request)
-    data = await engine.broker.get_candles(symbol, timeframe, count)
+    cfg = get_config()
+    tz_name = cfg.market.timezone
+    data = await engine.broker.get_candles(symbol, timeframe, max(count, 250))
+
+    today: list = list(data)
+    before: list = []
+    trimmed = session and timeframe != "1d" and bool(data)
+    if trimmed:
+        zone = ZoneInfo(tz_name)
+        day = data[-1].ts.astimezone(zone).date()
+        today = [c for c in data if c.ts.astimezone(zone).date() == day]
+        before = [c for c in data if c.ts.astimezone(zone).date() < day][-warmup:]
+    else:
+        today = today[-count:]
+
+    def bar(c) -> dict[str, Any]:
+        return {"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
+                "low": c.low, "close": c.close, "volume": c.volume}
+
     return {"symbol": symbol, "timeframe": timeframe,
-            "candles": [{"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
-                         "low": c.low, "close": c.close, "volume": c.volume} for c in data]}
+            # The chart library renders epochs in UTC; it has to be told which
+            # clock the session runs on, or 09:15 IST is labelled 03:45.
+            "timezone": tz_name,
+            "session_only": trimmed,
+            "candles": [bar(c) for c in today],
+            "warmup": [bar(c) for c in before]}
 
 
 @router.get("/market/{symbol}/quote")

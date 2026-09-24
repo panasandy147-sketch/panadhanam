@@ -61,8 +61,23 @@ class Dispatcher:
                 log.info("order placed for %s → %s", signal.id, order.order_id)
             else:
                 log.error("order FAILED for %s: %s", signal.id, order.message)
-            await bus.publish(Topic.POSITION_UPDATE,
-                              {"signal_id": signal.id, "order": order.dict()})
+            # Everything a person needs to know what just happened, in the
+            # event itself. The id alone made "an order was placed" the most
+            # a notification or a log line could ever say.
+            await bus.publish(Topic.POSITION_UPDATE, {
+                "event": "opened" if order.ok else "order_failed",
+                "signal_id": signal.id,
+                "symbol": signal.instrument.symbol,
+                "tradingsymbol": signal.instrument.tradingsymbol,
+                "side": signal.side.value if hasattr(signal.side, "value") else str(signal.side),
+                "entry": signal.entry,
+                "stop_loss": signal.stop_loss,
+                "target": signal.target,
+                "quantity": signal.quantity,
+                "alert_line": signal.alert_line(),
+                "paper": bool(getattr(self.broker, "is_paper_account", True)),
+                "order": order.dict(),
+            })
         else:
             log.info("alert-only mode — no order placed for %s", signal.id)
             result["order"] = {"ok": False, "message": "alert-only mode (no order placed)"}

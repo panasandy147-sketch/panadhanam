@@ -176,6 +176,49 @@ def _set_env(assignments: list[str]) -> int:
     return 0
 
 
+# Brokers that are real money by definition. Alpaca is real money only when
+# ALPACA_PAPER is explicitly false; everything else here is a simulator.
+_REAL_MONEY_BROKERS = {"zerodha", "upstox", "angelone"}
+
+
+def _ensure_paper_orders() -> int:
+    """Keep simulated order placement on for a PAPER account. Never real money.
+
+    AUTO_PLACE_ORDERS in .env wins over settings.yaml by design — and
+    .env.example used to ship it as false, so anyone whose .env was created
+    from the template got a desk that analysed every signal, approved the good
+    ones and placed nothing, while settings.yaml said it would trade. Paper
+    trading is the whole point of a paper account, so on one this turns it
+    on. On anything that can touch real money it does nothing at all; those
+    still need TRADING_MODE=live and ENABLE_LIVE_ORDERS=true as well, and are
+    never armed automatically.
+    """
+    from pathlib import Path
+
+    from app.core.config import get_config
+    from app.core.envfile import set_values
+
+    cfg = get_config()
+    broker = str(cfg.get("execution.broker", "paper")).strip().lower()
+    alpaca_real = (broker == "alpaca" and os.getenv("ALPACA_PAPER", "true")
+                   .strip().lower() in {"false", "0", "no", "off"})
+    if broker in _REAL_MONEY_BROKERS or alpaca_real:
+        print(f"- Orders: broker '{broker}' can reach real money — leaving "
+              f"AUTO_PLACE_ORDERS exactly as it is.")
+        return 0
+
+    if bool(cfg.get("execution.auto_place_orders", False)):
+        print(f"- Paper trading: ON ({broker} — simulated fills, no real money)")
+        return 0
+
+    root = Path(__file__).resolve().parent
+    set_values(root / ".env", {"AUTO_PLACE_ORDERS": "true"},
+               template=root / ".env.example")
+    print(f"- Paper trading: was OFF in .env — turned ON ({broker} is a "
+          f"simulator, so fills are simulated and no real money moves)")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="panadhanam trading intelligence")
     parser.add_argument("--cycle", action="store_true", help="run one cycle and exit")
@@ -198,8 +241,13 @@ def main() -> None:
                         dest="set_env",
                         help="write settings into .env; repeatable "
                              "(e.g. --set TOTAL_CAPITAL=10000 --set LLM_PROVIDER=ollama)")
+    parser.add_argument("--ensure-paper-orders", action="store_true",
+                        help="turn simulated order placement on for a paper "
+                             "account (never touches a real-money broker)")
     args = parser.parse_args()
 
+    if args.ensure_paper_orders:
+        raise SystemExit(_ensure_paper_orders())
     if args.set_env:
         raise SystemExit(_set_env(args.set_env))
 

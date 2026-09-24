@@ -33,6 +33,10 @@ echo "- Checking dependencies..."
 "$PY" -m pip install -r requirements.txt --quiet --disable-pip-version-check
 
 echo
+# Paper trading is the point of a paper account. A .env created from an older
+# template can hold AUTO_PLACE_ORDERS=false, which quietly turns the desk into
+# alerts-only — this keeps it on for a simulator and never touches real money.
+"$PY" run.py --ensure-paper-orders
 "$PY" run.py --check-data
 "$PY" run.py --check-broker
 "$PY" run.py --check-llm

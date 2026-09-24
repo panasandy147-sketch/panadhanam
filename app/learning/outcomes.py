@@ -73,7 +73,9 @@ class OutcomeTracker:
 
                 db.update_outcome(row["id"], round(exit_price, 2), round(pnl, 2),
                                   round(r_multiple, 3), status.value)
-                closed.append({"signal_id": row["id"], "symbol": row["symbol"],
+                closed.append({"event": "closed",
+                               "signal_id": row["id"], "symbol": row["symbol"],
+                               "side": row["side"],
                                "status": status.value, "pnl": round(pnl, 2),
                                "r_multiple": round(r_multiple, 3),
                                "exit_price": round(exit_price, 2)})

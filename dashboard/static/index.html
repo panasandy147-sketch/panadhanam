@@ -18,10 +18,13 @@
 </head>
 <body>
 
+<!-- The header is status and review, nothing else. The desk cycles, scans and
+     arms itself; buttons that do those by hand were a way to get it into a
+     state nobody remembered choosing. -->
 <header>
   <div class="brand">
     <h1>panadhanam</h1>
-    <span class="tag">Multi-Agent Trading Intelligence</span>
+    <span class="tag">Paper trading desk</span>
   </div>
 
   <div class="market-switch" id="market-switch" role="group" aria-label="Select market">
@@ -36,170 +39,32 @@
   <span class="badge market" id="market-clock" title="Current time in the market's own timezone"></span>
   <span class="badge" id="conn"><span class="dot off" id="conn-dot"></span><span id="conn-text">connecting</span></span>
   <span class="badge" id="mode-badge">mode</span>
-  <span class="badge" id="phase-badge">phase</span>
-  <span class="badge" id="broker-badge">broker</span>
-  <span class="badge" id="brain-badge">reasoning</span>
+  <span class="badge" id="td-badge">not armed</span>
+  <!-- Only while the desk is not armed: a paper account arms itself at the
+       open, so this is for starting it by hand after a Stop or a late boot. -->
+  <button id="btn-td-start" class="primary" hidden>▶ Start trading day</button>
 
-  <button id="btn-cycle" class="primary">Run cycle</button>
-  <button id="btn-premarket">Pre-market scan</button>
-  <button id="btn-pause">Pause</button>
-  <button id="btn-theme" title="Toggle light/dark">◐</button>
+  <div class="header-actions">
+    <button id="btn-day-review">Today's review</button>
+    <button id="btn-weekly">Weekly review</button>
+    <button id="btn-theme" title="Toggle light/dark">◐</button>
+  </div>
 </header>
 
 <div id="banners"></div>
 
-<main>
+<main class="lean">
 
   <!-- ============================ RISK ============================ -->
   <section class="card span-all">
-    <h2>Risk &amp; Capital <span class="count" id="risk-updated"></span></h2>
+    <h2>Account <span class="count" id="risk-updated"></span></h2>
     <div class="stats" id="risk-stats"></div>
-  </section>
-
-  <!-- ====================== OPPORTUNITY BOARD ===================== -->
-  <section class="card span-all">
-    <h2>Trade Opportunities
-      <span class="count" id="opp-meta"></span>
-    </h2>
-    <div class="chart-toolbar">
-      <button id="btn-scan" class="primary">Scan watchlist</button>
-      <span id="opp-source" class="badge"></span>
-      <span style="font-size:11.5px;color:var(--text-muted)">
-        Tier = how much can go wrong structurally, not how much you'll make.
-        The money at risk is already equalised by position sizing.
-      </span>
-    </div>
-    <div class="tiers" id="opp-tiers">
-      <div class="empty" style="grid-column:1/-1">
-        Hit <b>Scan watchlist</b> to rank every symbol into low / medium / high risk.
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== TRADING DAY =========================== -->
-  <section class="card span-all">
-    <h2>Trading Day <span class="count" id="td-meta"></span></h2>
-    <div class="chart-toolbar">
-      <button id="btn-td-start" class="primary">▶ Start trading day</button>
-      <button id="btn-td-stop" disabled>Stop</button>
-      <button id="btn-td-report">Day report</button>
-      <span class="badge" id="td-badge">not armed</span>
-      <span class="badge" id="td-autoarm" hidden>auto-arms at the open</span>
-      <span style="font-size:11.5px;color:var(--text-muted)">
-        Arms order placement for <b>today only</b>. The desk keeps analysing
-        either way — disarmed means alerts, not orders.
-      </span>
-    </div>
-    <div id="td-body">
-      <div class="empty">
-        The desk arms itself when the session opens and cycles every minute
-        from then on. The button is there for the mornings you want to start
-        it yourself, or restart it after a Stop.
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== END OF DAY ============================ -->
-  <section class="card span-all" id="s-day-summary" hidden>
-    <h2>Today <span class="count" id="ds-meta"></span></h2>
-    <div id="ds-body"></div>
-  </section>
-
-  <!-- ====================== WEEKLY REVIEW ========================= -->
-  <section class="card span-all">
-    <h2>Weekly Review <span class="count" id="weekly-meta"></span></h2>
-
-    <div class="chart-toolbar">
-      <button id="btn-weekly" class="primary">Build this week's review</button>
-
-      <label class="sr-only" for="w-date">Week</label>
-      <input type="date" id="w-date" style="width:auto"
-             title="Any day in the week you want — leave blank for this week">
-
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
-        <input type="checkbox" id="w-coach" checked style="width:auto">
-        Ask the model for a strategy read (slower)
-      </label>
-
-      <button id="btn-weekly-md" disabled>Download .md</button>
-      <button id="btn-weekly-json" disabled>Download .json</button>
-      <button id="btn-weekly-save" disabled
-              title="Write it into journal/weekly/ so you can commit it">Save to repo</button>
-      <span id="weekly-status" style="font-size:11.5px;color:var(--text-muted)"></span>
-    </div>
-
-    <div id="weekly-body">
-      <div class="empty">
-        Every trade of the week with <b>the reasoning behind it</b> — each
-        analyst's vote and score at the moment of entry, what the CMIO weighed,
-        and the counter-argument recorded before the outcome was known. Then a
-        coach's read: what worked, what indiscipline cost, and which rules to
-        tighten. Best run after Friday's close.
-      </div>
-    </div>
-  </section>
-
-  <!-- ========================== COLUMN 1 ========================== -->
-  <section class="card">
-    <h2>Agent Desk <span class="count" id="agent-symbol"></span></h2>
-    <div class="agent-grid" id="agents">
-      <div class="empty">Waiting for the first analysis cycle…</div>
-    </div>
-    <div class="legend">
-      <span><i style="background:var(--good)"></i>bullish</span>
-      <span><i style="background:var(--critical)"></i>bearish</span>
-      <span><i style="background:var(--baseline)"></i>neutral / abstained</span>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Position Sizing Calculator</h2>
-    <div class="card-body">
-      <div class="calc-grid">
-        <label><span>Capital <span id="cap-cur">₹</span></span><input type="number" id="c-capital" value="100000" step="1000"></label>
-        <label><span>Risk %</span><input type="number" id="c-risk" value="1" step="0.1" min="0.1" max="2"></label>
-        <label><span>Entry</span><input type="number" id="c-entry" value="24500" step="0.05"></label>
-        <label><span>Stop loss</span><input type="number" id="c-stop" value="24450" step="0.05"></label>
-        <label><span>Lot size</span><input type="number" id="c-lot" value="75" step="1" min="1"></label>
-        <label><span>R:R</span><input type="number" id="c-rr" value="2" step="0.5" min="1"></label>
-      </div>
-      <div class="calc-out" id="calc-out"></div>
-    </div>
-  </section>
-
-  <!-- ========================== COLUMN 2 ========================== -->
-  <section class="card">
-    <h2>Signals <span class="count" id="signal-count"></span></h2>
-    <div class="scroll" id="signals">
-      <div class="empty">No signals yet. Approved setups and the reasons for rejections appear here.</div>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Open Positions</h2>
-    <div class="scroll flush" id="positions">
-      <div class="empty">No open positions.</div>
-    </div>
-  </section>
-
-  <!-- ========================== COLUMN 3 ========================== -->
-  <section class="card">
-    <h2>News &amp; Sentiment <span class="count" id="news-count"></span></h2>
-    <div class="scroll" id="news">
-      <div class="empty">No headlines in the lookback window.</div>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Macro Backdrop</h2>
-    <div class="card-body" id="macro">
-      <div class="empty">Macro feed not yet loaded.</div>
-    </div>
   </section>
 
   <!-- ============================ CHART =========================== -->
   <section class="card span-all">
-    <h2>Price Action <span class="count" id="chart-freshness"></span></h2>
+    <h2>Price Action <span class="trend" id="chart-trend"></span>
+      <span class="count" id="chart-freshness"></span></h2>
     <div class="chart-toolbar">
       <label class="sr-only" for="chart-symbol">Symbol</label>
       <select id="chart-symbol"></select>
@@ -224,95 +89,53 @@
     </div>
   </section>
 
-  <!-- ====================== CHAIN + LEARNING ====================== -->
+  <!-- ====================== POSITIONS + SIGNALS =================== -->
   <section class="card">
-    <h2>Option Chain <span class="count" id="chain-meta"></span></h2>
-    <div class="card-body" id="chain-metrics"></div>
-    <div class="scroll flush" id="chain-table"></div>
-  </section>
-
-  <section class="card">
-    <h2>Agent Scorecard <span class="count">learned from outcomes</span></h2>
-    <div class="scroll flush" id="scorecard">
-      <div class="empty">The desk re-weights agents once enough trades have been graded.</div>
+    <h2>Open Positions <span class="count" id="positions-meta"></span></h2>
+    <div class="scroll flush" id="positions">
+      <div class="empty">No open positions.</div>
     </div>
   </section>
 
-  <!-- ====================== TRADE JOURNAL ========================= -->
-  <section class="card span-all">
-    <h2>Trade Journal &amp; Post-Mortem
-      <span class="count" id="journal-meta"></span>
-    </h2>
-
-    <div class="journal-grid">
-      <form id="journal-form" class="journal-form">
-        <div class="calc-grid">
-          <label><span>Symbol</span><input id="j-symbol" placeholder="RELIANCE" required></label>
-          <label><span>Setup *</span><select id="j-setup" required></select></label>
-          <label><span>Side</span>
-            <select id="j-side"><option>BUY</option><option>SELL</option></select></label>
-          <label><span>Planned entry</span><input type="number" step="0.01" id="j-pentry" required></label>
-          <label><span>Planned stop</span><input type="number" step="0.01" id="j-pstop" required></label>
-          <label><span>Planned target</span><input type="number" step="0.01" id="j-ptarget" required></label>
-          <label><span>Quantity</span><input type="number" id="j-qty" value="0"></label>
-          <label><span>Actual entry</span><input type="number" step="0.01" id="j-aentry"></label>
-          <label><span>Actual exit</span><input type="number" step="0.01" id="j-aexit"></label>
-          <label><span>Hold (min)</span><input type="number" id="j-hold" value="0"></label>
-          <label><span>Stop actually used</span><input type="number" step="0.01" id="j-astop"
-                 title="Leave blank if you never moved it"></label>
-          <label><span>Volume vs avg</span><input type="number" step="0.1" id="j-vol"
-                 placeholder="2.5" title="Relative volume on the entry bar"></label>
-        </div>
-
-        <div style="margin:10px 0">
-          <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)">
-            Mistakes you already know you made (the engine detects the rest)
-          </span>
-          <div class="mistake-tags" id="j-mistakes"></div>
-        </div>
-
-        <label><span>Notes</span>
-          <input id="j-notes" placeholder="What were you thinking at entry?"></label>
-
-        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-          <button type="submit" class="primary">Generate Mistake Card</button>
-          <button type="button" id="btn-journal-export">Export to git</button>
-          <span id="journal-status" style="font-size:11.5px;color:var(--text-muted)"></span>
-        </div>
-      </form>
-
-      <div class="journal-side">
-        <div id="journal-stats"></div>
-        <div id="journal-card" class="mistake-card"></div>
-      </div>
+  <section class="card">
+    <h2>Signals <span class="count" id="signal-count"></span></h2>
+    <div class="scroll" id="signals">
+      <div class="empty">No signals yet. Approved setups and the reasons for rejections appear here.</div>
     </div>
-
-    <div class="scroll flush" id="journal-log"></div>
   </section>
 
-  <section class="card span-all">
-    <h2>Historical Replay <span class="count" id="replay-meta"></span></h2>
+  <!-- ====================== REVIEWS (on demand) =================== -->
+  <section class="card span-all" id="s-today" hidden>
+    <h2>Today <span class="count" id="today-meta"></span></h2>
+    <div id="today-body"></div>
+  </section>
+
+  <section class="card span-all" id="s-weekly" hidden>
+    <h2>Weekly Review <span class="count" id="weekly-meta"></span></h2>
     <div class="chart-toolbar">
-      <button id="btn-replay">Replay last 5 sessions</button>
-      <label class="sr-only" for="replay-days">Sessions</label>
-      <select id="replay-days">
-        <option value="1">1 session</option>
-        <option value="5" selected>5 sessions (1 week)</option>
-        <option value="10">10 sessions (2 weeks)</option>
-        <option value="20">20 sessions (1 month)</option>
-      </select>
-      <span id="replay-source" class="badge"></span>
+      <button id="btn-weekly-md" disabled>Download .md</button>
+      <button id="btn-weekly-json" disabled>Download .json</button>
+      <button id="btn-weekly-save" disabled
+              title="Write it into journal/weekly/ so you can commit it">Save to repo</button>
+      <span id="weekly-status" style="font-size:11.5px;color:var(--text-muted)"></span>
     </div>
-    <div id="replay-body">
-      <div class="empty">
-        Replays the rules bar-by-bar over recent history and grades every setup
-        that fired. Shows what the system <em>would</em> have caught.
-      </div>
-    </div>
+    <div id="weekly-body"></div>
   </section>
 
-  <section class="card">
-    <h2>Activity Log</h2>
+  <!-- ============================ ACTIVITY ======================== -->
+  <section class="card span-all">
+    <h2>Activity Log <span class="count" id="log-meta"></span></h2>
+    <div class="chart-toolbar">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+        <input type="checkbox" id="log-decisions" checked style="width:auto">
+        Trades and decisions only
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+        <input type="checkbox" id="notify-trades" style="width:auto">
+        Notify me when a trade is taken
+      </label>
+      <span id="log-hint" style="font-size:11.5px;color:var(--text-muted)"></span>
+    </div>
     <div class="scroll flush" id="log"></div>
   </section>
 

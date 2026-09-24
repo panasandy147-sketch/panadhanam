@@ -49,6 +49,11 @@ REM --- 3. what is actually working -------------------------------------------
 echo.
 echo - Checking your data feed, broker and LLM...
 echo.
+REM Paper trading is the point of a paper account. A .env created from an
+REM older template can hold AUTO_PLACE_ORDERS=false, which quietly turns the
+REM desk into alerts-only. This keeps it on for a simulator and never touches
+REM a real-money broker.
+"%PY%" run.py --ensure-paper-orders
 "%PY%" run.py --check-data
 "%PY%" run.py --check-broker
 "%PY%" run.py --check-llm

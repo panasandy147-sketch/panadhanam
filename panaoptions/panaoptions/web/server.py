@@ -171,7 +171,7 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
     @app.get("/api/candles/{symbol}")
     async def candles(symbol: str, timeframe: str = "5m", count: int = 180,
-                      session: bool = True) -> dict[str, Any]:
+                      session: bool = True, warmup: int = 60) -> dict[str, Any]:
         """OHLCV for the chart. Lightweight-charts wants seconds, not ISO.
 
         `session=true` (the default) returns only the LATEST trading day.
@@ -188,8 +188,14 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         bars = await desk.feed.candles(symbol.upper(), timeframe)
         exchange = ZoneInfo(cfg.timezone)
 
+        before: list = []
         if session and bars:
             day = bars[-1].ts.astimezone(exchange).date()
+            # The bars before today come back separately: the chart draws only
+            # today but computes its lines over both, because an EMA 50
+            # started from nine bars of today is not an EMA 50.
+            before = [b for b in bars
+                      if b.ts.astimezone(exchange).date() < day][-warmup:]
             bars = [b for b in bars if b.ts.astimezone(exchange).date() == day]
 
         return {
@@ -204,6 +210,11 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
                 {"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
                  "low": c.low, "close": c.close, "volume": c.volume}
                 for c in bars[-count:]
+            ],
+            "warmup": [
+                {"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
+                 "low": c.low, "close": c.close, "volume": c.volume}
+                for c in before
             ],
         }
 

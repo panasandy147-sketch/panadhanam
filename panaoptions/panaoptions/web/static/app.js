@@ -383,16 +383,26 @@ async function loadCandChart(symbol) {
 
   // Sorted and de-duplicated: the charting library silently blanks on a
   // non-monotonic series, which looks like "no data" rather than bad data.
-  const seen = new Set();
-  const bars = (d.candles || [])
-    .filter((c) => (seen.has(c.time) ? false : seen.add(c.time)))
-    .sort((a, b) => a.time - b.time);
+  const clean = (list) => {
+    const seen = new Set();
+    return (list || [])
+      .filter((c) => (seen.has(c.time) ? false : seen.add(c.time)))
+      .sort((a, b) => a.time - b.time);
+  };
+  const bars = clean(d.candles);
   if (!bars.length) return;
 
+  // Today is drawn; the bars before it are there so the lines are right. An
+  // EMA 50 started from nine bars of today is not an EMA 50.
+  const all = clean([...(d.warmup || []), ...bars]);
+  const firstShown = bars[0].time;
+  const closes = all.map((c) => c.close);
+  const times = all.map((c) => c.time);
+  const asLine = (arr) => times
+    .map((t, i) => ({ time: t, value: arr[i] }))
+    .filter((p) => p.time >= firstShown);
+
   candSeries.candles.setData(bars);
-  const closes = bars.map((c) => c.close);
-  const times = bars.map((c) => c.time);
-  const asLine = (arr) => times.map((t, i) => ({ time: t, value: arr[i] }));
   candSeries.ema9.setData(asLine(ema(closes, 9)));
   candSeries.ema21.setData(asLine(ema(closes, 21)));
   candSeries.ema50.setData(asLine(ema(closes, 50)));
@@ -401,14 +411,14 @@ async function loadCandChart(symbol) {
   // lean on. Keyed on the viewer's local day it would reset mid-session for
   // anyone outside the Americas.
   let pv = 0, vol = 0, day = null;
-  candSeries.vwap.setData(bars.map((c) => {
+  candSeries.vwap.setData(asLine(all.map((c) => {
     const d2 = exchangeDay(c.time);
     if (d2 !== day) { pv = 0; vol = 0; day = d2; }
     const typical = (c.high + c.low + c.close) / 3;
     const v = c.volume || 1;
     pv += typical * v; vol += v;
-    return { time: c.time, value: pv / vol };
-  }));
+    return pv / vol;
+  })));
   candChart.timeScale().fitContent();
 
   $("cand-symbol").textContent =
