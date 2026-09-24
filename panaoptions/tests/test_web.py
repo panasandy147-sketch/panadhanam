@@ -578,3 +578,17 @@ def test_the_dashboard_names_the_data_provider(client):
     feed = client.get("/api/status").json()["feed"]
     assert feed["provider"] in ("yahoo", "tradier")
     assert feed["note"]
+
+
+def test_check_distinguishes_no_feed_from_no_chains():
+    """start.sh keys off these, and only one of them is fatal.
+
+    A desk that can screen, chart and show WHY nothing is being bought is
+    worth having on screen; refusing to start would hide the banner that
+    explains it.
+    """
+    import run
+
+    assert run.CHECK_OK == 0
+    assert run.CHECK_NO_FEED == 1
+    assert run.CHECK_NO_CHAINS == 2

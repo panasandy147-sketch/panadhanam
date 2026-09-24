@@ -53,7 +53,26 @@ echo
   esac
 }
 
-"$PY" run.py --check || exit 1
+# --check exit codes: 0 fine, 1 no data feed at all, 2 charts work but option
+# chains do not. Only the first is fatal. A desk that can screen, chart and
+# show WHY nothing is being bought is worth having on screen — refusing to
+# start would hide the very banner that explains it.
+"$PY" run.py --check
+case $? in
+  0) ;;
+  2)
+    echo
+    echo "[!] Starting anyway — the desk will screen, chart and fire setups,"
+    echo "    but it cannot buy anything until option chains work."
+    echo "    The dashboard shows this in red at the top."
+    echo
+    ;;
+  *)
+    echo
+    echo "[!] Not starting: no market data at all."
+    exit 1
+    ;;
+esac
 
 PORT="${PANAOPTIONS_PORT:-8100}"
 URL="http://127.0.0.1:$PORT"

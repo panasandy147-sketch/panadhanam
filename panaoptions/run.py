@@ -96,7 +96,16 @@ async def _desk():
     return OptionsDesk()
 
 
-async def _check() -> bool:
+# --check exit codes. The difference matters to start.sh: a desk that cannot
+# see prices must not start, but a desk that can chart and screen and simply
+# cannot buy is still worth having on screen — the dashboard is where the
+# explanation lives, and refusing to start hides it.
+CHECK_OK = 0
+CHECK_NO_FEED = 1        # cannot reach the data source at all
+CHECK_NO_CHAINS = 2      # charts work, option chains do not
+
+
+async def _check() -> int:
     from panaoptions.data.provider import make_feed
     cfg = get_config()
     from panaoptions.data.provider import describe
@@ -108,7 +117,7 @@ async def _check() -> bool:
         print(f"                    {who['note']}")
     if not who["ready"]:
         print(f"\n  NOT READY — {who['note']}")
-        return False
+        return CHECK_NO_FEED
     # The context manager connects on entry; calling connect() again here
     # would open a second client and print every failure twice.
     async with make_feed(cfg) as feed:
@@ -116,7 +125,7 @@ async def _check() -> bool:
         if not ok:
             print(f"  {who['provider']} UNREACHABLE — check your "
                   f"connection, a VPN, a corporate proxy, or the token.")
-            return False
+            return CHECK_NO_FEED
         print(f"  {who['provider']} connected.")
         for symbol in cfg.symbols[:3]:
             quote = await feed.quote(symbol)
@@ -135,14 +144,16 @@ async def _check() -> bool:
             print("  Charts work, so the screen and the strategies will run "
                   "normally and every setup will report 'no contract'.")
             print("  Nothing can be bought until this endpoint answers.")
-            return False
+            _print_chain_fix(who["provider"])
+            return CHECK_NO_CHAINS
 
         symbol = cfg.symbols[0]
         expiries = await feed.expiries(symbol)
         print(f"  {symbol} expiries listed: {len(expiries)}")
         if not expiries:
             print(f"  {feed.options_error or 'no expiry list returned'}")
-            return False
+            _print_chain_fix(who["provider"])
+            return CHECK_NO_CHAINS
 
         min_dte = int(cfg.get("contracts.min_dte", 7))
         max_dte = int(cfg.get("contracts.max_dte", 14))
@@ -152,10 +163,31 @@ async def _check() -> bool:
         print(f"  {symbol} contracts at {min_dte}-{max_dte} DTE: {len(chain)}")
         if not chain:
             print(f"  {feed.options_error or 'the window matched no expiry'}")
-            return False
+            _print_chain_fix(who["provider"])
+            return CHECK_NO_CHAINS
         with_greeks = sum(1 for c in chain if c.delta)
         print(f"  of those, {with_greeks} carry a usable delta")
-    return True
+    return CHECK_OK
+
+
+def _print_chain_fix(provider: str) -> None:
+    """The next action, spelled out. Naming a problem is half the job."""
+    if provider == "tradier":
+        print("\n  Check TRADIER_TOKEN in panaoptions/.env, and that "
+              "data.tradier_env matches where the token came from — a "
+              "sandbox token does not work against production.")
+        return
+    print("""
+  Yahoo serves option chains from a different host than charts, and that
+  endpoint has been refusing requests. Switching data source fixes it:
+
+    1. Free token at  https://developer.tradier.com
+    2. In panaoptions/.env:      TRADIER_TOKEN=your-token-here
+    3. In config/settings.yaml:  data:
+                                   provider: "tradier"
+    4. python run.py --check
+
+  Tradier also returns real greeks, so the delta bands stop being estimates.""")
 
 
 async def _explain_contracts() -> None:
@@ -563,7 +595,7 @@ def main() -> None:
     if args.check_llm:
         raise SystemExit(asyncio.run(_check_llm()))
     if args.check:
-        raise SystemExit(0 if asyncio.run(_check()) else 1)
+        raise SystemExit(asyncio.run(_check()))
     if args.explain_contracts:
         asyncio.run(_explain_contracts())
         return

@@ -36,8 +36,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --check exit codes: 0 fine, 1 no data feed at all, 2 charts work but
+REM option chains do not. Only the first is fatal — a desk that can screen,
+REM chart and show WHY nothing is being bought is worth having on screen.
+REM `errorlevel N` is true for N OR HIGHER, so test 2 before 1.
 "%PY%" run.py --check
-if errorlevel 1 (
+if errorlevel 2 (
+  echo.
+  echo [!] Starting anyway - the desk will screen, chart and fire setups,
+  echo     but it cannot buy anything until option chains work.
+  echo     The dashboard shows this in red at the top.
+  echo.
+) else if errorlevel 1 (
+  echo.
+  echo [!] Not starting: no market data at all.
   pause
   exit /b 1
 )
