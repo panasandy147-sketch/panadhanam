@@ -12,6 +12,12 @@ import app.core.config as config_mod  # noqa: E402
 
 config_mod.DATA_DIR = Path(_tmp)
 
+# Closed trades write markdown cards; without this the suite filled the repo's
+# own journal/ with cards for trades that never happened.
+import app.journal.store as journal_store  # noqa: E402
+
+journal_store.JOURNAL_DIR = Path(_tmp) / "journal"
+
 
 @pytest.fixture(autouse=True)
 def pinned_simulator_clock(monkeypatch):

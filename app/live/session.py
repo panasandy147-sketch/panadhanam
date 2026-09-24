@@ -15,7 +15,7 @@ alerts instead of orders.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core import clock
@@ -176,25 +176,35 @@ class TradingDay:
     # ------------------------------------------------------------------ #
     def report(self) -> dict[str, Any]:
         """Everything that happened this session, for the end-of-day read."""
+        from app.core.explain import why_bought, why_sold
         from app.journal.analytics import compute_analytics
         from app.storage import db
 
         today = self.today
         signals = [s for s in db.recent_signals(limit=300)
-                   if (s.get("ts") or "").startswith(today)]
+                   if self._local(s.get("ts"))[:10] == today]
 
         taken = [s for s in signals if s["status"] != "REJECTED"]
         closed = [s for s in taken if s.get("r_multiple") is not None]
         rejected = [s for s in signals if s["status"] == "REJECTED"]
 
-        # Why the desk stayed out, bucketed so the tally stays readable.
-        reasons: dict[str, int] = {}
+        # Why the desk stayed out, bucketed so the tally stays readable. Two
+        # places say no: the risk manager (a REJECTED signal) and, far more
+        # often, the CMIO's vote — which never becomes a signal at all, so a
+        # day of "not enough confirmations" used to leave this list empty.
+        passes = [c for c in db.recent_cycles()
+                  if self._local(c.get("ts"))[:10] == today]
+        firsts: list[str] = []
         for s in rejected:
             try:
                 import json
-                first = (json.loads(s.get("rejection_reasons") or "[]") or [""])[0]
+                firsts.append((json.loads(s.get("rejection_reasons") or "[]") or [""])[0])
             except (ValueError, TypeError):
-                first = ""
+                firsts.append("")
+        firsts += [self._cmio_reason((c.get("rejected") or [""])[0])
+                   for c in passes if not c.get("proceeded")]
+        reasons: dict[str, int] = {}
+        for first in firsts:
             key = self._bucket(first)
             reasons[key] = reasons.get(key, 0) + 1
 
@@ -208,6 +218,7 @@ class TradingDay:
             "broker": self.engine.broker.name,
             "is_paper_account": getattr(self.engine.broker, "is_paper_account", True),
             "data_source": self.engine.data_provenance(),
+            "symbols_judged": len(passes),
             "signals_generated": len(signals),
             "trades_taken": len(taken),
             "trades_closed": len(closed),
@@ -217,13 +228,14 @@ class TradingDay:
             "total_r": round(total_r, 2),
             "pnl": round(sum(s["pnl"] or 0.0 for s in closed), 2),
             "still_open": len(taken) - len(closed),
-            "rejected": len(rejected),
+            "rejected": len(firsts),
             "top_rejections": sorted(
                 ({"reason": k, "count": v} for k, v in reasons.items()),
                 key=lambda x: x["count"], reverse=True)[:6],
             "trades": [
                 {
-                    "time": (s.get("ts") or "")[11:16],
+                    "id": s["id"],
+                    "time": self._local(s.get("ts"))[11:16],
                     "symbol": s["symbol"],
                     "instrument": s.get("tradingsymbol"),
                     "side": s["side"],
@@ -235,12 +247,37 @@ class TradingDay:
                     "status": s["status"],
                     "r_multiple": s.get("r_multiple"),
                     "pnl": s.get("pnl"),
+                    "why": why_bought(s),
+                    "exit_reason": why_sold(s),
                 }
                 for s in taken
             ],
             "journal": compute_analytics(),
             "risk": self.engine.risk.snapshot(),
         }
+
+    def _local(self, ts: str | None) -> str:
+        """A stored UTC timestamp in the market's own zone, as ISO text.
+
+        Rows are written in UTC. Matching them against the market's date by
+        the text prefix dropped every trade from the review once the UTC and
+        market dates differed — past midnight IST, that was all of them.
+        """
+        if not ts:
+            return ""
+        try:
+            moment = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            return str(ts)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        return moment.astimezone(clock.zone(self.timezone)).isoformat()
+
+    @staticmethod
+    def _cmio_reason(rationale: str) -> str:
+        """The CMIO's rationale is the whole vote; the reason is the tail."""
+        _, found, tail = (rationale or "").partition("Not proceeding: ")
+        return tail if found else rationale
 
     @staticmethod
     def _bucket(reason: str) -> str:

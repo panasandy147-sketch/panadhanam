@@ -13,6 +13,7 @@ from typing import Any
 from app.brokers.base import BrokerAdapter
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
+from app.core.explain import why_sold
 from app.core.logging import get_logger
 from app.core.models import SignalStatus
 from app.storage import db
@@ -78,7 +79,13 @@ class OutcomeTracker:
                                "side": row["side"],
                                "status": status.value, "pnl": round(pnl, 2),
                                "r_multiple": round(r_multiple, 3),
-                               "exit_price": round(exit_price, 2)})
+                               "exit_price": round(exit_price, 2),
+                               "exit_reason": why_sold({
+                                   **row, "status": status.value,
+                                   "exit_detail": ("square_off" if timed_out
+                                                   else "time_stop"),
+                                   "exit_price": round(exit_price, 2),
+                                   "r_multiple": round(r_multiple, 3)})})
 
                 if self.risk:
                     from app.core.models import TradeSignal

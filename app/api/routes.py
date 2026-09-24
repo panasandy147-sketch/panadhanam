@@ -128,7 +128,17 @@ async def premarket(request: Request) -> dict[str, Any]:
 @router.get("/signals")
 async def signals(limit: int = 50, symbol: str | None = None,
                   status: str | None = None) -> dict[str, Any]:
-    return {"signals": db.recent_signals(limit=limit, symbol=symbol, status=status)}
+    return {"signals": [_explained(s) for s in
+                        db.recent_signals(limit=limit, symbol=symbol, status=status)]}
+
+
+def _explained(row: dict[str, Any]) -> dict[str, Any]:
+    """A signal row plus, in words, why it was bought and how it sold."""
+    from app.core.explain import why_bought, why_sold
+
+    if row.get("status") == "REJECTED":
+        return row
+    return {**row, "why": why_bought(row), "exit_reason": why_sold(row)}
 
 
 @router.get("/signals/{signal_id}")
@@ -136,14 +146,15 @@ async def signal_detail(signal_id: str) -> dict[str, Any]:
     signal = db.get_signal(signal_id)
     if not signal:
         raise HTTPException(404, "signal not found")
-    return {"signal": signal, "reports": db.reports_for_signal(signal_id)}
+    return {"signal": _explained(signal),
+            "reports": db.reports_for_signal(signal_id)}
 
 
 @router.get("/positions")
 async def positions(request: Request) -> dict[str, Any]:
     engine = _engine(request)
     return {
-        "open_signals": db.open_signals(),
+        "open_signals": [_explained(s) for s in db.open_signals()],
         "broker_positions": await engine.broker.get_positions(),
     }
 

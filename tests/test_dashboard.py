@@ -277,3 +277,10 @@ def test_notifications_fire_on_trades_only():
     body = body[:body.index("\n}\n")]
     assert '"opened", "closed"' in body
     assert "signal.approved" not in body
+
+
+def test_the_decisions_log_shows_why_a_symbol_was_passed_over():
+    """A quiet day must not look like a desk that is not running."""
+    script = (STATIC / "app.js").read_text()
+    assert "function isNewPass" in script
+    assert "no trade:" in script

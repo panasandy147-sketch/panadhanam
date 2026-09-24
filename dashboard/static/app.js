@@ -55,6 +55,7 @@ const state = {
   timeframe: "5m",
   weekly: null,
   log: { all: [], decisions: [] },
+  lastPass: {},          // symbol -> the last "no trade" reason logged
 };
 
 /* ====================================================================== */
@@ -118,6 +119,7 @@ function handle(event) {
     case "trading_day.summary": renderDayReport(data, "after square-off"); break;
     case "position.update":
       loadPositions();
+      loadHistory();
       notifyTrade(data);
       break;
   }
@@ -368,6 +370,28 @@ function buildAlertLine(s) {
          `[SL ${fmt(s.stop_loss)}] [TGT ${fmt(s.target)} (${fmt(s.risk_reward, 1)}R)]`;
 }
 
+/* Why it was bought and how it sells — the server writes the sentences
+   (app/core/explain.py), so the panel, the day review and the notification
+   all say the same thing. */
+function whyHtml(s, open = false) {
+  const w = s.why || {};
+  if (!w.headline && !w.plan && !s.exit_reason) return "";
+  const items = [
+    w.confirmations?.length
+      ? `<li><b>Analysts agreeing:</b> ${w.confirmations.map(esc).join(" · ")}</li>` : "",
+    w.vote ? `<li><b>Vote:</b> ${esc(w.vote)}</li>` : "",
+    w.stop_basis ? `<li><b>Stop and size:</b> ${esc(w.stop_basis)}</li>` : "",
+    w.plan ? `<li><b>Plan:</b> ${esc(w.plan)}</li>` : "",
+    w.counter_argument ? `<li><b>What would make it wrong:</b> ${esc(w.counter_argument)}</li>` : "",
+  ].join("");
+  return `<details class="why"${open ? " open" : ""}>
+      <summary>Why it bought${w.headline ? ` — ${esc(w.headline)}` : ""}</summary>
+      ${items ? `<ul>${items}</ul>` : ""}
+    </details>
+    ${s.exit_reason ? `<div class="exit-why"><b>${
+      /^Still held/.test(s.exit_reason) ? "How it sells" : "Why it sold"}:</b> ${esc(s.exit_reason)}</div>` : ""}`;
+}
+
 function renderSignals() {
   if (!state.signals.length) return;
   $("signal-count").textContent = `${state.signals.length} recent`;
@@ -390,7 +414,7 @@ function renderSignals() {
         ${confirmations ? `<div style="margin-top:6px">${confirmations}</div>` : ""}
         ${rejected
           ? `<div class="note"><b>Rejected:</b> ${esc((s.rejection_reasons || []).join(" · "))}</div>`
-          : `<div class="note">${esc((s.rationale || "").slice(0, 260))}</div>`}
+          : whyHtml(s) || `<div class="note">${esc((s.rationale || "").slice(0, 260))}</div>`}
       </div>`;
   }).join("");
 }
@@ -421,7 +445,8 @@ async function loadPositions() {
       <td class="num pos">${fmt(p.target)}</td>
       <td class="num">${fmtInt(p.quantity)}</td>
       <td class="num">${money(Math.round(p.total_risk))}</td>
-    </tr>`).join("")}</tbody></table>`;
+    </tr>
+    <tr class="why-row"><td colspan="7">${whyHtml(p)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 /* ====================================================================== */
@@ -657,13 +682,15 @@ function renderDayReport(r, when) {
       <td class="num ${signClass(t.r_multiple)}">${t.r_multiple != null
         ? signed(t.r_multiple) + "R" : "open"}</td>
       <td class="num ${signClass(t.pnl)}">${t.pnl != null ? money(Math.round(t.pnl)) : "—"}</td>
-    </tr>`).join("");
+    </tr>
+    <tr class="why-row"><td colspan="10">${whyHtml(t)}</td></tr>`).join("");
 
   const why = (r.top_rejections || []).map((x) =>
     `<li><b>${fmtInt(x.count)}×</b> ${esc(x.reason)}</li>`).join("");
 
   $("today-body").innerHTML = `
     <div class="calc-out">
+      <div><div class="k">Symbols judged</div><div class="v">${fmtInt(r.symbols_judged || 0)}</div></div>
       <div><div class="k">Signals</div><div class="v">${fmtInt(r.signals_generated)}</div></div>
       <div><div class="k">Trades taken</div><div class="v">${fmtInt(r.trades_taken)}</div></div>
       <div><div class="k">Closed</div><div class="v">${fmtInt(r.trades_closed)}</div>
@@ -848,11 +875,13 @@ function describe(topic, d) {
     case "position.update":
       if (d.event === "opened") {
         return { text: `PAPER ${d.side} ${fmtInt(d.quantity)} ${d.tradingsymbol || d.symbol}`
-          + ` @ ${fmt(d.entry)} · SL ${fmt(d.stop_loss)} · TGT ${fmt(d.target)}`, level: "good" };
+          + ` @ ${fmt(d.entry)} · SL ${fmt(d.stop_loss)} · TGT ${fmt(d.target)}`
+          + (d.why?.headline ? ` — ${d.why.headline}` : ""), level: "good" };
       }
       if (d.event === "closed") {
         return { text: `CLOSED ${d.symbol} ${d.side || ""} @ ${fmt(d.exit_price)} · `
-          + `${d.status} · ${signed(d.r_multiple)}R · ${money(Math.round(d.pnl))}`,
+          + `${d.status} · ${signed(d.r_multiple)}R · ${money(Math.round(d.pnl))}`
+          + (d.exit_reason ? ` — ${d.exit_reason}` : ""),
                  level: d.pnl >= 0 ? "good" : "bad" };
       }
       if (d.event === "order_failed") {
@@ -874,8 +903,15 @@ function describe(topic, d) {
       return { text: d.error || JSON.stringify(d).slice(0, 160), level: "bad" };
     case "agent.report":
       return { text: `${d.agent_id} ${d.symbol} ${signed(d.score ?? 0)}`, level: "" };
-    case "cycle.done":
-      return { text: `${d.symbol} → ${d.bias} (${signed(d.composite_score ?? 0)})`, level: "" };
+    case "cycle.done": {
+      if (d.proceed) {
+        return { text: `${d.symbol} → ${d.bias} (${signed(d.composite_score ?? 0)}) · to risk`, level: "" };
+      }
+      const why = (d.rationale || "").split("Not proceeding: ")[1] || "no edge";
+      const agreeing = (d.confirmations || []).join(", ");
+      return { text: `${d.symbol} — no trade: ${why.replace(/\.$/, "")}`
+          + (agreeing ? ` (agreeing: ${agreeing})` : ""), level: "" };
+    }
     case "cycle.start":
       return { text: `judging ${d.symbol}`, level: "" };
     default:
@@ -883,12 +919,27 @@ function describe(topic, d) {
   }
 }
 
+/* The CMIO saying "no" is the commonest decision of all, and it was the one
+   the decisions log never showed — a quiet day looked like a desk that was
+   not running. Each symbol's "no" is shown once, and again only when the
+   reason changes, so a minute-by-minute cycle does not bury the trades. */
+function isNewPass(topic, d) {
+  if (topic !== "cycle.done" || !d || d.proceed) return false;
+  const reason = ((d.rationale || "").split("Not proceeding: ")[1] || "")
+    .replace(/[-+]?\d+\.\d+/g, "#");         // ignore score wiggle
+  if (state.lastPass[d.symbol] === reason) return false;
+  state.lastPass[d.symbol] = reason;
+  return true;
+}
+
 function logEvent(topic, data, ts) {
   const { text, level } = describe(topic, data);
   const item = { time: ts ? new Date(ts) : new Date(), topic, text, level };
   const push = (list, max) => { list.unshift(item); if (list.length > max) list.length = max; };
   push(state.log.all, LOG_LIMIT.all);
-  if (DECISION_TOPICS.has(topic)) push(state.log.decisions, LOG_LIMIT.decisions);
+  if (DECISION_TOPICS.has(topic) || isNewPass(topic, data)) {
+    push(state.log.decisions, LOG_LIMIT.decisions);
+  }
   renderLog();
 }
 
@@ -958,7 +1009,8 @@ function notifyTrade(d) {
     : `Closed ${d.symbol}: ${money(Math.round(d.pnl))}`;
   const body = opened
     ? `${fmtInt(d.quantity)} @ ${fmt(d.entry)} · SL ${fmt(d.stop_loss)} · TGT ${fmt(d.target)}`
-    : `${d.status} · ${signed(d.r_multiple)}R at ${fmt(d.exit_price)}`;
+      + (d.why?.headline ? `\n${d.why.headline}` : "")
+    : d.exit_reason || `${d.status} · ${signed(d.r_multiple)}R at ${fmt(d.exit_price)}`;
   try {
     new Notification(title, { body, tag: `${d.event}-${d.signal_id}` });
   } catch { /* a notification failing is never worth breaking the page */ }

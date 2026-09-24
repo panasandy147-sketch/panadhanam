@@ -17,6 +17,7 @@ import httpx
 from app.brokers.base import BrokerAdapter
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
+from app.core.explain import why_bought
 from app.core.logging import get_logger
 from app.core.models import SignalStatus, TradeSignal
 from app.core.registry import register_agent
@@ -75,6 +76,14 @@ class Dispatcher:
                 "target": signal.target,
                 "quantity": signal.quantity,
                 "alert_line": signal.alert_line(),
+                "why": why_bought({
+                    "side": signal.side.value if hasattr(signal.side, "value") else str(signal.side),
+                    "entry": signal.entry, "stop_loss": signal.stop_loss,
+                    "target": signal.target, "risk_reward": signal.risk_reward,
+                    "confirmations": signal.confirmations,
+                    "rationale": signal.rationale,
+                    "counter_argument": signal.counter_argument,
+                }),
                 "paper": bool(getattr(self.broker, "is_paper_account", True)),
                 "order": order.dict(),
             })

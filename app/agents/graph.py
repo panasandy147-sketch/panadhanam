@@ -37,10 +37,19 @@ from app.brokers.base import BrokerAdapter
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
 from app.core.logging import get_logger
-from app.core.models import AgentReport, Bias, CycleResult, MarketContext
+from app.core.models import (
+    AgentReport,
+    Bias,
+    CycleResult,
+    MarketContext,
+    SignalStatus,
+)
 from app.core.registry import autodiscover, get_agent_class
 
 log = get_logger("graph")
+
+# A signal the desk has decided to take: approved by risk, or already filled.
+_TAKEN = {SignalStatus.APPROVED, SignalStatus.OPEN}
 
 try:
     from langgraph.graph import END, START, StateGraph
@@ -158,6 +167,10 @@ class TradingDesk:
         signal = state.get("signal")
         if signal is None:
             return {"dispatch": {"dispatched": False, "reason": "no signal"}}
+        if not state.get("may_dispatch", True):
+            # An evaluation-only cycle: say what WOULD be traded, place nothing.
+            return {"dispatch": {"dispatched": False,
+                                 "reason": "evaluation only — nothing sent"}}
         result = await self.dispatcher.dispatch(signal)
         return {"dispatch": result}
 
@@ -193,12 +206,19 @@ class TradingDesk:
     # ------------------------------------------------------------------ #
     # Execution
     # ------------------------------------------------------------------ #
-    async def run_cycle(self, ctx: MarketContext, cycle_id: str | None = None) -> CycleResult:
+    async def run_cycle(self, ctx: MarketContext, cycle_id: str | None = None,
+                        dispatch: bool = True) -> CycleResult:
+        """Run the desk once for one symbol.
+
+        `dispatch=False` evaluates without sending anything to the broker. The
+        opportunity board uses it: a scan is a question, and answering it must
+        never place an order — which, on an armed paper day, it used to.
+        """
         cycle_id = cycle_id or f"CY-{uuid.uuid4().hex[:8]}"
         started = time.perf_counter()
         await bus.publish(Topic.CYCLE_START, {"cycle_id": cycle_id, "symbol": ctx.symbol})
 
-        state = new_state(cycle_id, ctx.symbol, ctx)
+        state = new_state(cycle_id, ctx.symbol, ctx, may_dispatch=dispatch)
 
         if self._graph is not None:
             final = await self._graph.ainvoke(state)
@@ -219,7 +239,12 @@ class TradingDesk:
             cycle_id=cycle_id, symbol=ctx.symbol, bias=bias,
             composite_score=decision.get("composite_score", 0.0),
             reports=final.get("reports", []),
-            signal=signal if signal and signal.status.value == "APPROVED" else None,
+            # APPROVED or OPEN. The dispatcher moves a signal to OPEN the
+            # moment the broker fills it, so keeping only APPROVED dropped
+            # exactly the trades that had been placed: the scheduler never
+            # saved them, the risk manager never counted them, and the outcome
+            # tracker never saw them to sell. The trade happened and vanished.
+            signal=signal if signal and signal.status in _TAKEN else None,
             rejected=rejected,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )

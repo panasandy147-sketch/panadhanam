@@ -961,3 +961,12 @@ main.lean { grid-template-columns: 1fr 1fr; }
   header { gap: 10px; }
   .header-actions { margin-left: 0; width: 100%; }
 }
+
+/* Why it bought / why it sold */
+details.why { margin-top: 6px; font-size: 11.5px; line-height: 1.5; }
+details.why summary { cursor: pointer; color: var(--text); font-weight: 600; }
+details.why ul { margin: 4px 0 0; padding-left: 18px; color: var(--text-muted); }
+details.why li { margin: 2px 0; }
+.exit-why { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.exit-why b { color: var(--text); }
+tr.why-row td { padding-top: 0; border-top: 0; white-space: normal; }

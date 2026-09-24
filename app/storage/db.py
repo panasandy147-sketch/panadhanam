@@ -177,6 +177,21 @@ def save_cycle(result: Any, proceeded: bool) -> None:
               result.duration_ms, _dump({"rejected": result.rejected})))
 
 
+def recent_cycles(limit: int = 2000) -> list[dict[str, Any]]:
+    """The CMIO's verdicts, newest first — including every "no trade"."""
+    rows = get_conn().execute(
+        "SELECT * FROM cycles ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["rejected"] = json.loads(d.pop("payload") or "{}").get("rejected", [])
+        except (TypeError, ValueError):
+            d["rejected"] = []
+        out.append(d)
+    return out
+
+
 def recent_signals(limit: int = 50, symbol: str | None = None,
                    status: str | None = None) -> list[dict[str, Any]]:
     q = "SELECT * FROM signals"

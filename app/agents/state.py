@@ -17,12 +17,16 @@ class DeskState(TypedDict, total=False):
     dispatch: dict[str, Any]
     errors: list[str]
     started_at: float
+    # False for a cycle that only EVALUATES — the opportunity board, a replay.
+    # Those must never reach the broker, armed day or not.
+    may_dispatch: bool
 
 
-def new_state(cycle_id: str, symbol: str, context: MarketContext) -> DeskState:
+def new_state(cycle_id: str, symbol: str, context: MarketContext,
+              may_dispatch: bool = True) -> DeskState:
     import time
     return DeskState(
         cycle_id=cycle_id, symbol=symbol, context=context,
         reports=[], decision={}, signal=None, dispatch={}, errors=[],
-        started_at=time.perf_counter(),
+        started_at=time.perf_counter(), may_dispatch=may_dispatch,
     )

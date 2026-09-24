@@ -176,8 +176,10 @@ class OpportunityScanner:
             recall=self.engine.feedback.recall_for(symbol),
         )
 
+        # Evaluate only. A scan is a question; on an armed paper day the full
+        # cycle would have placed an order for every tradeable setup it found.
         result: CycleResult = await self.engine.desk.run_cycle(
-            ctx, cycle_id=f"{cycle_id}-{symbol}")
+            ctx, cycle_id=f"{cycle_id}-{symbol}", dispatch=False)
 
         floor = float(self.cfg.get("opportunities.min_conviction", 0.15))
 
