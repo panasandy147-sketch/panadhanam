@@ -13,6 +13,7 @@ setting, the number that makes it impossible, and what would fix it.
 from __future__ import annotations
 
 import math
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +78,18 @@ def _python() -> str:
         if (base / ".venv" / folder / exe).exists():
             return f"{label}{sep}.venv{sep}{folder}{sep}{exe}"
     return "python"
+
+
+def _shipped_capital(cfg) -> float:
+    """What settings.yaml asks for, ignoring the .env override."""
+    import yaml
+
+    try:
+        with open(cfg.path, encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+        return float((raw.get("account") or {}).get("starting_capital") or 0.0)
+    except (OSError, ValueError, yaml.YAMLError):
+        return 0.0
 
 
 def _atm_cost(symbol: str, dte: int, multiplier: int) -> float | None:
@@ -170,6 +183,29 @@ def check(cfg) -> list[Finding]:
                 f"watchlist is tradeable at this account size.",
                 fix,
                 command=f"{_python()} run.py --set PANAOPTIONS_CAPITAL={suggested}"))
+
+    # 3b. Is a per-machine override holding capital below the shipped value?
+    #
+    # PANAOPTIONS_CAPITAL in .env wins over settings.yaml, by design — but it
+    # is written once and then forgotten, so raising the figure in the repo
+    # changes nothing for anyone who has one. Silently keeping the old number
+    # after an upgrade that was meant to raise it is the kind of stale state
+    # nobody goes looking for.
+    pinned = os.getenv("PANAOPTIONS_CAPITAL")
+    shipped = _shipped_capital(cfg)
+    if pinned and shipped and capital < shipped:
+        findings.append(Finding(
+            "warning", "PANAOPTIONS_CAPITAL",
+            f"Your .env pins capital at ${capital:,.0f}, below the "
+            f"${shipped:,.0f} this version ships with. That is "
+            f"${capital * deployed_pct / 100:,.0f} a trade instead of "
+            f"${shipped * deployed_pct / 100:,.0f}, which is what the pattern "
+            f"delta bands were sized against.",
+            "Raise it to match, or keep yours if the smaller figure is "
+            "deliberate — it is your machine's setting and nothing will "
+            "overwrite it.",
+            command=f"{_python()} run.py --set PANAOPTIONS_CAPITAL="
+                    f"{int(shipped)}"))
 
     # 4. Would a single stop-out blow more than the whole day's budget?
     stop_pct = float(cfg.get("risk.stop_loss_pct", 20.0))

@@ -22,10 +22,49 @@ def _settings(cfg, **kw):
 
 
 # --------------------------------------------------------------------------- #
-def test_the_shipped_config_is_flagged_because_500_cannot_buy_at_the_money(cfg):
+def test_an_account_too_small_for_the_universe_is_blocked(cfg):
+    """The cfg fixture pins $500 — see conftest. A mega-cap at-the-money
+    contract costs several hundred dollars, so 20% of $500 cannot buy one."""
     blockers = _blockers(cfg)
     assert blockers, "a $500 account cannot buy an ATM mega-cap contract"
     assert any("starting_capital" in f.setting for f in blockers)
+
+
+def test_the_shipped_capital_can_actually_buy_the_shipped_universe(shipped):
+    """The figure in settings.yaml, not the test baseline.
+
+    Shipping a default that blocks on its own universe is the first thing
+    anyone hits, and it used to: $500 could not buy a single contract in the
+    large-cap list. This reads the real file so raising one without checking
+    the other fails here rather than on somebody's first morning.
+    """
+    from panaoptions.preflight import check
+
+    assert shipped.capital >= 4000.0
+    blockers = [f for f in check(shipped) if f.level == "blocker"]
+    assert not blockers, f"the shipped config blocks itself: {blockers}"
+
+
+def test_the_shipped_capital_funds_most_of_the_pattern_bands(shipped):
+    """$800 a trade is the point of the figure.
+
+    It reaches every pattern band except the two three-line strikes, which
+    ask for 0.65 delta at 30 DTE and cost around $973 on the cheapest
+    large-cap name.
+    """
+    from panaoptions.preflight import check
+
+    budget = shipped.capital * float(
+        shipped.get("risk.max_capital_deployed_pct")) / 100
+    assert budget == 800.0
+
+    unaffordable = [f for f in check(shipped)
+                    if f.setting == "strategies.candlestick_at_level.patterns"]
+    if unaffordable:
+        # Whatever is left out, it must be the expensive tail rather than
+        # most of the list.
+        assert "three line strike" in unaffordable[0].problem
+        assert "hammer" not in unaffordable[0].problem
 
 
 def test_the_message_names_the_capital_actually_needed(cfg):
@@ -261,3 +300,40 @@ def test_a_disabled_candlestick_strategy_raises_no_pattern_warning(cfg):
                     if f.setting == "strategies.candlestick_at_level.patterns"]
     finally:
         cfg.data["strategies"]["candlestick_at_level"]["enabled"] = True
+
+
+def test_a_stale_env_capital_is_noticed_after_an_upgrade(cfg, monkeypatch):
+    """PANAOPTIONS_CAPITAL wins over settings.yaml by design.
+
+    It is also written once and then forgotten, so raising the shipped figure
+    changes nothing for anyone who has one — and silently keeping the old
+    number after an upgrade meant to raise it is exactly the stale state
+    nobody goes looking for.
+    """
+    from panaoptions import preflight
+
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "2000")
+    cfg.data["account"]["starting_capital"] = 2000.0
+    found = [f for f in preflight.check(cfg) if f.setting == "PANAOPTIONS_CAPITAL"]
+    assert found, "an override below the shipped figure must be reported"
+    assert "$2,000" in found[0].problem and "$4,000" in found[0].problem
+    # And it hands over a command rather than a description of one.
+    assert "PANAOPTIONS_CAPITAL=4000" in found[0].command
+
+
+def test_matching_or_higher_capital_raises_nothing(cfg, monkeypatch):
+    from panaoptions import preflight
+
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "10000")
+    cfg.data["account"]["starting_capital"] = 10_000.0
+    assert not [f for f in preflight.check(cfg)
+                if f.setting == "PANAOPTIONS_CAPITAL"]
+
+
+def test_no_override_at_all_raises_nothing(cfg, monkeypatch):
+    from panaoptions import preflight
+
+    monkeypatch.delenv("PANAOPTIONS_CAPITAL", raising=False)
+    cfg.data["account"]["starting_capital"] = 500.0
+    assert not [f for f in preflight.check(cfg)
+                if f.setting == "PANAOPTIONS_CAPITAL"]

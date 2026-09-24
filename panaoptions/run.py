@@ -252,6 +252,26 @@ async def _probe_sources() -> int:
     return 0
 
 
+def _suggest_fix() -> int:
+    """Print the one command that resolves the first finding carrying one.
+
+    start.sh used to hardcode `--set PANAOPTIONS_CAPITAL=2000`, which went
+    stale the moment the shipped figure changed and then silently offered the
+    wrong number. Asking preflight what it would suggest keeps the two in
+    step by construction.
+
+    Prints nothing and exits 1 when there is no one-line fix to offer, so a
+    shell can test it without parsing anything.
+    """
+    from panaoptions import preflight
+
+    for finding in preflight.check(get_config()):
+        if finding.command:
+            print(finding.command)
+            return 0
+    return 1
+
+
 def _print_chain_fix(provider: str) -> None:
     """The next action, spelled out. Naming a problem is half the job."""
     if provider == "tradier":
@@ -643,6 +663,9 @@ def main() -> None:
     parser.add_argument("--profile", metavar="NAME",
                         help="config profile to layer over settings.yaml "
                              "(e.g. scalp — a 1-minute, 0-DTE desk)")
+    parser.add_argument("--suggest-fix", action="store_true",
+                        help="print the one command that resolves the first "
+                             "finding that has one, or exit 1")
     parser.add_argument("--probe-sources", action="store_true",
                         help="try every option-chain source from this machine "
                              "and say which one works")
@@ -683,6 +706,8 @@ def main() -> None:
         raise SystemExit(_check_config())
     if args.check_llm:
         raise SystemExit(asyncio.run(_check_llm()))
+    if args.suggest_fix:
+        raise SystemExit(_suggest_fix())
     if args.probe_sources:
         raise SystemExit(asyncio.run(_probe_sources()))
     if args.check:

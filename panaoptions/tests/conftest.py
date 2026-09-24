@@ -20,10 +20,19 @@ def cfg(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
-    for key in ("PANAOPTIONS_CAPITAL", "DISCORD_WEBHOOK_URL",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+    for key in ("PANAOPTIONS_CAPITAL", "PANAOPTIONS_PROVIDER",
+                "DISCORD_WEBHOOK_URL", "TELEGRAM_BOT_TOKEN",
+                "TELEGRAM_CHAT_ID"):
         monkeypatch.delenv(key, raising=False)
-    return config_mod.Config()
+
+    cfg = config_mod.Config()
+    # A fixed, deliberately small account. Twenty-odd tests assert exact
+    # dollar figures — position sizes, the daily limit, what the budget can
+    # buy — and pinning the baseline here keeps a change to the SHIPPED
+    # capital from rewriting all of them. Tests about the shipped figure read
+    # it from the file instead; see test_preflight.
+    cfg.data["account"]["starting_capital"] = 500.0
+    return cfg
 
 
 @pytest.fixture(autouse=True)
@@ -56,3 +65,21 @@ def bars():
                           high=price * 1.003, low=price * 0.997, close=price,
                           volume=1000.0))
     return out
+
+
+@pytest.fixture
+def shipped(tmp_path, monkeypatch):
+    """settings.yaml exactly as it ships, with no .env override in sight.
+
+    The `cfg` fixture pins a small account so arithmetic assertions stay
+    still. This one is the opposite: it is for asserting things about the
+    figures the project actually ships with, so a developer's own .env — or
+    the absence of one — cannot change the answer.
+    """
+    from panaoptions import config as config_mod
+
+    monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    for key in ("PANAOPTIONS_CAPITAL", "PANAOPTIONS_PROVIDER"):
+        monkeypatch.delenv(key, raising=False)
+    return config_mod.Config()

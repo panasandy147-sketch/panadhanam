@@ -6,7 +6,17 @@
 account:
   # Paper capital. Real money is not supported by this app at all: there is no
   # broker adapter, and nothing here can place an order anywhere.
-  starting_capital: 500.0
+  # $4,000 of paper capital, which is $800 a trade at the 20% deployment
+  # rule below. That reaches all but the two most expensive patterns (the
+  # three-line strikes, ~$973) on the large-cap universe.
+  #
+  # Raising CAPITAL rather than the deployment percentage is deliberate: 40%
+  # of $2,000 is the same $800 and doubles what one stop-out costs, from 4%
+  # of the account to 8%, while leaving room for only one position instead of
+  # three. Paper capital is a free parameter; risk ratios are not.
+  #
+  # PANAOPTIONS_CAPITAL in .env overrides this per machine.
+  starting_capital: 4000.0
   currency: "$"
 
 session:

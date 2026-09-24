@@ -26,12 +26,20 @@ if "%PY%"=="" (
 echo - Using %PY%
 echo.
 
+REM A per-machine .env setting can hold an old value after an upgrade meant
+REM to change it. Ask preflight what it would suggest rather than hardcoding
+REM a figure here, which goes stale the moment the shipped one moves.
+for /f "usebackq delims=" %%F in (`"%PY%" run.py --suggest-fix 2^>nul`) do (
+  echo - Applying: %%F
+  call %%F
+  echo.
+)
+
 "%PY%" run.py --check-config
 if errorlevel 1 (
   echo.
   echo [!] Not starting: the desk would scan all morning and take nothing.
-  echo     Run the command shown above, then start.bat again.
-  echo.
+  echo     Read the finding above - it names what to change.
   pause
   exit /b 1
 )

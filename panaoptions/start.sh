@@ -26,31 +26,25 @@ fi
 
 echo "- Using $PY"
 echo
+# A per-machine .env setting can hold an old value after an upgrade meant to
+# change it — it wins over the repo by design, and nobody goes looking. Ask
+# preflight what it would suggest rather than hardcoding a figure here, which
+# goes stale the moment the shipped one moves.
+#
+# Only ever writes .env, and prints what it changed.
+FIX="$("$PY" run.py --suggest-fix 2>/dev/null)" || FIX=""
+if [ -n "$FIX" ]; then
+  echo "- Applying: $FIX"
+  eval "$FIX" || echo "  (could not apply — carrying on with the current settings)"
+  echo
+fi
+
 # --check-config prints the command that resolves each blocker.
 "$PY" run.py --check-config || {
   echo
   echo "[!] Not starting: the desk would scan all morning and take nothing."
-  echo
-  # Naming the command was not enough twice over, so offer to run it. It only
-  # writes .env, and it prints what it changed.
-  printf "    Run the suggested fix now? [y/N] "
-  read -r reply
-  case "$reply" in
-    [yY]*)
-      echo
-      "$PY" run.py --set PANAOPTIONS_CAPITAL=2000 || exit 1
-      echo
-      echo "Re-checking..."
-      "$PY" run.py --check-config || {
-        echo "[!] Still blocked. Read the finding above."
-        exit 1
-      }
-      ;;
-    *)
-      echo "    Run the command above, then ./start.sh again."
-      exit 1
-      ;;
-  esac
+  echo "    Read the finding above — it names what to change."
+  exit 1
 }
 
 # --check exit codes: 0 fine, 1 no data feed at all, 2 charts work but option
