@@ -59,7 +59,13 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         # independently. A desk whose charts work can still be unable to
         # price a single contract, and from the outside that looks exactly
         # like a quiet market.
+        from panaoptions.data.provider import describe as describe_provider
+
+        who = describe_provider(cfg)
         out["feed"] = {
+            "provider": who["provider"],
+            "note": who["note"],
+            "ready": who["ready"],
             "options_available": getattr(desk.feed, "options_available", None),
             "options_error": getattr(desk.feed, "options_error", ""),
         }

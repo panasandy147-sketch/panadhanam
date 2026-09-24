@@ -86,12 +86,14 @@ function renderFeed(s) {
   const el = $("feed-health");
   if (!el) return;
   el.innerHTML = (f.options_available === false)
-    ? `<div class="note crit"><b>Option chains are not available.</b>
+    ? `<div class="note crit"><b>Option chains are not available
+       (${esc(f.provider || "feed")}).</b>
        Charts are working, so the desk will screen, chart and fire setups —
        and every one will report &ldquo;no contract&rdquo;. Nothing can be
        bought until this is fixed.
        ${f.options_error ? `<br><code>${esc(f.options_error)}</code>` : ""}
-       <br>Check with <code>python run.py --check</code>.</div>`
+       <br>Check with <code>python run.py --check</code>, or switch source
+       with <code>--provider tradier</code>.</div>`
     : "";
 }
 
@@ -145,6 +147,9 @@ function renderAccount(s) {
       <div class="v" style="font-size:15px">${esc(s.session?.entry_open)}–${esc(s.session?.entry_close)}</div>
       <div class="sub">${esc(s.profile || "default")} · ${
         esc(s.session?.timeframe)} bars · ${esc(s.session?.dte)} DTE</div>
+      <div class="sub">${esc(s.feed?.provider || "yahoo")} data${
+        s.feed?.provider === "tradier" ? " · greeks from the exchange"
+                                       : " · delta estimated"}</div>
       <div class="sub">every ${esc(s.cycle?.seconds ?? 60)}s across ${
         esc(s.cycle?.symbols ?? 0)} symbol${s.cycle?.symbols === 1 ? "" : "s"}${
         s.cycle?.last_took ? ` · last cycle ${num(s.cycle.last_took, 1)}s` : ""}</div>

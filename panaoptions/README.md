@@ -145,6 +145,80 @@ run.py --report 30                      # the paper-trading record
 No API key. Market data comes from Yahoo's public endpoints over plain
 `httpx` — one less package to install than `yfinance`.
 
+## Market data: Yahoo or Tradier
+
+```yaml
+data:
+  provider: "yahoo"        # or "tradier"
+  tradier_env: "sandbox"   # or "production"
+```
+
+```bash
+python run.py --check                      # test the configured source
+python run.py --provider tradier --check   # test the other one
+```
+
+| | **yahoo** (default) | **tradier** |
+|---|---|---|
+| API key | none | free account |
+| Charts | reliable | reliable |
+| Option chains | a different host; **can refuse every request** | a first-class endpoint |
+| Greeks | none — delta is **estimated** with Black-Scholes from IV | **from the exchange** |
+| Data delay | real-time-ish | 15 min on sandbox, real-time on a funded account |
+
+The chain endpoint is the reason this choice exists. Yahoo serves options from
+a different host and API path than charts, and that endpoint has become
+unreliable: it can return `403` to every request while charts work perfectly,
+which leaves the desk screening real prices, drawing real charts and firing
+real setups — every one of which reports `no contract`. The dashboard now
+carries a banner when that happens instead of letting it read as a quiet
+market.
+
+The greeks matter more than they sound. Every delta band in this config —
+0.45–0.75 depending on the pattern — is a rule about a number. On Yahoo that
+number is computed here from implied volatility, which is a reasonable
+estimate and still an estimate. Tradier returns the delta the market is
+actually using, so the bands mean what they say.
+
+### Setting Tradier up
+
+1. Make a free developer account at **developer.tradier.com** and create an
+   access token. (A brokerage account gives real-time data; the developer
+   sandbox is free and serves delayed data with real chains.)
+2. Put the token in `panaoptions/.env`:
+
+   ```
+   TRADIER_TOKEN=your-token-here
+   ```
+
+3. Set the provider:
+
+   ```yaml
+   data:
+     provider: "tradier"
+     tradier_env: "sandbox"
+   ```
+
+4. `python run.py --check` — it fetches a real chain and reports how many
+   contracts carry a usable delta.
+
+A sandbox token does not work against production, and the reverse is also
+true; `--check` says so rather than reporting a generic connection failure.
+If `TRADIER_TOKEN` is missing the desk falls back to Yahoo **with an error in
+the log**, never silently — running on a different data source than you
+intended is worse than not starting.
+
+### Delayed data and the scalp profile
+
+Sandbox data is delayed by about 15 minutes. For the **default** profile —
+5m/15m bars, 14–45 day contracts — that is tolerable: the setups it trades
+develop over hours and the paper fills stay roughly honest.
+
+For the **scalp** profile it is not. A 1-minute desk buying same-day contracts
+on prices from a quarter of an hour ago is not testing the strategy, it is
+testing a fiction. Use real-time data for that profile or treat its results as
+meaningless.
+
 ## The watchlist
 
 The **Watchlist** box at the top of the dashboard takes comma-separated

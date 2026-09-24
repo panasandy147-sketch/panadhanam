@@ -20,6 +20,28 @@ session:
   # Nothing may stay open past this.
   force_exit_at: "15:45"
 
+data:
+  # Where prices and option chains come from.
+  #
+  #   yahoo    No API key. Charts are reliable; the OPTION CHAIN endpoint is a
+  #            different host and has become unreliable — it can refuse every
+  #            request while charts work perfectly, which leaves the desk
+  #            firing setups that all report "no contract". Yahoo also serves
+  #            no greeks, so delta is estimated with Black-Scholes from
+  #            implied volatility.
+  #
+  #   tradier  Needs a free account. Option chains are a first-class endpoint
+  #            and come WITH greeks, so every delta band in this file is
+  #            applied to the number the market is actually using rather than
+  #            to an estimate. Put TRADIER_TOKEN in panaoptions/.env.
+  #
+  # `python run.py --check` tests whichever is selected, chains included.
+  provider: "yahoo"
+  # Which Tradier environment the token came from. A sandbox token does not
+  # work against production. Sandbox data is delayed, which is the right
+  # trade for paper trading: the strategies are what is being tested.
+  tradier_env: "sandbox"
+
 universe:
   # The brief's universe. At-the-money contracts here cost $320-$1,800, so a
   # $500 account cannot buy one — see `python run.py --check-config`.

@@ -22,8 +22,8 @@ from typing import Any
 from panaoptions import clock, watchlist
 from panaoptions.activity import ActivityLog
 from panaoptions.config import Config, get_config
-from panaoptions.data.feed import YahooFeed
 from panaoptions.data.premarket import screen
+from panaoptions.data.provider import make_feed
 from panaoptions.engine import contracts as contract_filter
 from panaoptions.engine import indicators as ta
 from panaoptions.engine import levels as levels_mod
@@ -41,7 +41,7 @@ log = get_logger("app")
 class OptionsDesk:
     def __init__(self, cfg: Config | None = None, feed: Any | None = None) -> None:
         self.cfg = cfg or get_config()
-        self.feed = feed or YahooFeed()
+        self.feed = feed or make_feed(self.cfg)
         self.risk = RiskManager(self.cfg)
         self.ledger = PaperLedger(self.cfg, self.risk)
         self.notifier = Notifier(self.cfg)

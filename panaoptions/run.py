@@ -97,18 +97,27 @@ async def _desk():
 
 
 async def _check() -> bool:
-    from panaoptions.data.feed import YahooFeed
+    from panaoptions.data.provider import make_feed
     cfg = get_config()
+    from panaoptions.data.provider import describe
+
+    who = describe(cfg)
     print("\n=== DATA FEED ===")
+    print(f"  Provider          {who['provider']}")
+    if who["note"]:
+        print(f"                    {who['note']}")
+    if not who["ready"]:
+        print(f"\n  NOT READY — {who['note']}")
+        return False
     # The context manager connects on entry; calling connect() again here
     # would open a second client and print every failure twice.
-    async with YahooFeed() as feed:
+    async with make_feed(cfg) as feed:
         ok = feed.connected
         if not ok:
-            print("  Yahoo Finance UNREACHABLE — check your connection, a VPN, "
-                  "or a corporate proxy.")
+            print(f"  {who['provider']} UNREACHABLE — check your "
+                  f"connection, a VPN, a corporate proxy, or the token.")
             return False
-        print("  Yahoo Finance connected.")
+        print(f"  {who['provider']} connected.")
         for symbol in cfg.symbols[:3]:
             quote = await feed.quote(symbol)
             if quote and quote.get("last_price"):
@@ -156,8 +165,8 @@ async def _explain_contracts() -> None:
     cannot both be satisfied on this universe, and an empty signal list is
     indistinguishable from a quiet market until somebody prints the numbers.
     """
-    from panaoptions.data.feed import YahooFeed
     from panaoptions.data.greeks import atm_premium_estimate
+    from panaoptions.data.provider import make_feed
     from panaoptions.engine.contracts import affordable_delta
     from panaoptions.models import Direction, OptionRight
 
@@ -178,7 +187,7 @@ async def _explain_contracts() -> None:
     print("  " + "-" * 62)
 
     impossible = []
-    async with YahooFeed() as feed:
+    async with make_feed(cfg) as feed:
         if not await feed.connect():
             print("  No data feed — cannot check live prices.")
             return
@@ -314,6 +323,7 @@ def _check_config() -> int:
 
     print("\n=== CONFIGURATION CHECK ===")
     print(f"  Profile           {cfg.profile_label}")
+    print(f"  Market data       {cfg.get('data.provider', 'yahoo')}")
     print(f"  Bars              {cfg.get('technical.timeframe')} "
           f"(patterns on "
           f"{cfg.get('strategies.candlestick_at_level.timeframe', '15m')})")
@@ -358,12 +368,12 @@ def _check_config() -> int:
 
 
 async def _screen() -> None:
-    from panaoptions.data.feed import YahooFeed
     from panaoptions.data.premarket import screen
+    from panaoptions.data.provider import make_feed
 
     cfg = get_config()
     now = clock.now(cfg.timezone)
-    async with YahooFeed() as feed:
+    async with make_feed(cfg) as feed:
         if not await feed.connect():
             return
         reads = await screen(feed, cfg, now)
@@ -417,7 +427,7 @@ def _report(days: int) -> None:
 async def _train(symbols: list[str]) -> int:
     import pandas as pd
 
-    from panaoptions.data.feed import YahooFeed
+    from panaoptions.data.provider import make_feed
     from panaoptions.engine import indicators as ta
     from panaoptions.ml.train import MissingDependencies, dataset, save, walk_forward
 
@@ -426,7 +436,7 @@ async def _train(symbols: list[str]) -> int:
 
     try:
         frames = []
-        async with YahooFeed() as feed:
+        async with make_feed(cfg) as feed:
             if not await feed.connect():
                 return 1
             for symbol in symbols:
@@ -515,6 +525,9 @@ def main() -> None:
     parser.add_argument("--profile", metavar="NAME",
                         help="config profile to layer over settings.yaml "
                              "(e.g. scalp — a 1-minute, 0-DTE desk)")
+    parser.add_argument("--provider", choices=("yahoo", "tradier"),
+                        help="market data source for this run, overriding "
+                             "data.provider in settings.yaml")
     parser.add_argument("--profiles", action="store_true",
                         help="list the available profiles and exit")
     parser.add_argument("--interval", type=int, default=60,
@@ -538,6 +551,10 @@ def main() -> None:
         except FileNotFoundError as exc:
             print(exc)
             raise SystemExit(2) from None
+
+    if args.provider:
+        # Set before anything builds a feed, so --check and the desk agree.
+        get_config().data.setdefault("data", {})["provider"] = args.provider
 
     if args.set_env:
         raise SystemExit(_set_env(args.set_env))
