@@ -253,9 +253,9 @@ def test_a_strategy_window_past_the_square_off_is_called_out(cfg):
         found = [f for f in preflight.check(cfg)
                  if f.setting == "strategies.orb_vwap.to"]
         assert found and found[0].level == "warning"
-        assert "15:45" in found[0].problem
+        assert "15:55" in found[0].problem
     finally:
-        cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
+        cfg.data["strategies"]["orb_vwap"]["to"] = "15:45"
 
 
 def test_windows_inside_the_session_raise_nothing(cfg):

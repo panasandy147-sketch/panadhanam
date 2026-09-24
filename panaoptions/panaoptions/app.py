@@ -579,17 +579,33 @@ class OptionsDesk:
         return None
 
     async def _maybe_tighten(self, now: datetime) -> None:
-        """After the tighten time, pull stops to breakeven on anything green."""
-        if not clock.at_or_after(self.cfg.timezone,
-                                 str(self.cfg.get("session.tighten_stops_at", "10:45")),
-                                 now):
+        """After the tighten time, pull stops to breakeven on anything green.
+
+        Only on trades that were ALREADY open at the tighten time, and only
+        while they are in profit. It used to move every open stop to entry
+        regardless: a trade opened at 13:00 started life with its stop at its
+        own entry price — out at the first tick against it — and, because that
+        also armed breakeven, its first-target scale-out and its time exit
+        were switched off too. The tighten time protects a morning trade going
+        into the lunch slump; an afternoon entry has its own exits.
+        """
+        cutoff = str(self.cfg.get("session.tighten_stops_at", "10:45"))
+        if not clock.at_or_after(self.cfg.timezone, cutoff, now):
             return
+        tighten_at = clock.parse_hhmm(cutoff)
         for trade in self.ledger.open_trades.values():
-            if not trade.breakeven_armed and trade.stop_price < trade.entry_price:
-                trade.stop_price = trade.entry_price
-                trade.breakeven_armed = True
-                log.info("%s past the tighten time — stop moved to breakeven "
-                         "%.2f", trade.contract_label, trade.stop_price)
+            if trade.breakeven_armed or trade.stop_price >= trade.entry_price:
+                continue
+            opened = trade.opened_at.astimezone(now.tzinfo) if (
+                trade.opened_at.tzinfo and now.tzinfo) else trade.opened_at
+            if opened.timetz().replace(tzinfo=None) >= tighten_at:
+                continue
+            if trade.last_price <= trade.entry_price:
+                continue
+            trade.stop_price = trade.entry_price
+            trade.breakeven_armed = True
+            log.info("%s green past the tighten time — stop moved to "
+                     "breakeven %.2f", trade.contract_label, trade.stop_price)
 
     async def _square_off(self, now: datetime) -> None:
         if not self.ledger.open_trades:

@@ -92,8 +92,8 @@ def _at(hh, mm):
 @pytest.mark.parametrize("hh,mm,expected", [
     (8, 0, "premarket"), (9, 34, "premarket"), (9, 35, "entry_window"),
     (10, 29, "entry_window"), (10, 30, "entry_window"),
-    (14, 59, "entry_window"), (15, 0, "managing"), (15, 44, "managing"),
-    (15, 45, "closed"), (20, 0, "closed"),
+    (14, 59, "entry_window"), (15, 44, "entry_window"), (15, 45, "managing"),
+    (15, 54, "managing"), (15, 55, "closed"), (20, 0, "closed"),
 ])
 def test_the_session_phases_follow_the_clock(cfg, hh, mm, expected):
     assert clock.session_phase(cfg, _at(hh, mm)) == expected
@@ -119,15 +119,20 @@ def test_the_entry_window_never_outlasts_the_force_exit(cfg):
     try:
         assert cfg.last_entry_hhmm == cfg.get("session.force_exit_at")
     finally:
-        cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
+        cfg.data["strategies"]["orb_vwap"]["to"] = "15:45"
 
 
 def test_a_disabled_strategy_does_not_hold_the_window_open(cfg):
     cfg.data["strategies"]["candlestick_at_level"]["enabled"] = False
     try:
+        cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
+        cfg.data["strategies"]["vwap_ema_pullback"]["to"] = "13:30"
+        cfg.data["strategies"]["liquidity_sweep"]["to"] = "12:00"
         assert cfg.last_entry_hhmm == "13:30"      # the pullback, next longest
     finally:
         cfg.data["strategies"]["candlestick_at_level"]["enabled"] = True
+        for key in ("orb_vwap", "vwap_ema_pullback", "liquidity_sweep"):
+            cfg.data["strategies"][key]["to"] = "15:45"
 
 
 def test_a_weekend_is_never_a_trading_session(cfg):
@@ -173,8 +178,8 @@ async def test_several_symbols_can_fire_in_the_same_cycle(desk, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_entries_outside_the_window(desk, monkeypatch):
-    # 15:00 is the last strategy's close, so the desk is done hunting.
-    monkeypatch.setattr(clock, "now", lambda tz: _at(15, 10))
+    # 15:45 is the last strategy's close, so the desk is done hunting.
+    monkeypatch.setattr(clock, "now", lambda tz: _at(15, 50))
     await desk.cycle()
     assert not desk.ledger.open_trades
 
@@ -274,10 +279,52 @@ async def test_stops_are_tightened_to_breakeven_after_the_midday_time(desk, monk
         return []
 
     monkeypatch.setattr(desk, "_manage", _manage)
+    trade.last_price = trade.entry_price * 1.10          # green
     monkeypatch.setattr(clock, "now", lambda tz: _at(11, 0))
     await desk.cycle()
     assert trade.stop_price == trade.entry_price
     assert trade.breakeven_armed
+
+
+@pytest.mark.asyncio
+async def test_a_losing_trade_keeps_its_stop_at_the_tighten_time(desk, monkeypatch):
+    """Breakeven on a red trade is not protection; it is a forced exit."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+    trade = next(iter(desk.ledger.open_trades.values()))
+    stop = trade.stop_price
+
+    async def _manage(now):
+        return []
+
+    monkeypatch.setattr(desk, "_manage", _manage)
+    trade.last_price = trade.entry_price * 0.95          # red
+    monkeypatch.setattr(clock, "now", lambda tz: _at(11, 0))
+    await desk.cycle()
+    assert trade.stop_price == stop
+    assert not trade.breakeven_armed
+
+
+@pytest.mark.asyncio
+async def test_an_afternoon_entry_is_not_tightened_the_moment_it_opens(desk, monkeypatch):
+    """With the windows running to the close, an entry after the tighten time
+    used to get its stop moved to its own entry price on the next cycle —
+    and lose its first-target scale-out with it."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+    trade = next(iter(desk.ledger.open_trades.values()))
+    trade.opened_at = trade.opened_at.replace(hour=13, minute=5)
+    stop = trade.stop_price
+
+    async def _manage(now):
+        return []
+
+    monkeypatch.setattr(desk, "_manage", _manage)
+    trade.last_price = trade.entry_price * 1.10
+    monkeypatch.setattr(clock, "now", lambda tz: _at(13, 10))
+    await desk.cycle()
+    assert trade.stop_price == stop
+    assert not trade.breakeven_armed
 
 
 @pytest.mark.asyncio

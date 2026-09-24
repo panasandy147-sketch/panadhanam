@@ -261,6 +261,7 @@ class PaperTrade(BaseModel):
     exit_reason: ExitReason | None = None
     breakeven_armed: bool = False
     max_price_seen: float = 0.0
+    last_price: float = 0.0
 
     @property
     def is_open(self) -> bool:

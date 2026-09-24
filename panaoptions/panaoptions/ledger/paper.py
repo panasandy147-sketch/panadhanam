@@ -77,6 +77,7 @@ class PaperLedger:
         ts = ts or datetime.now()
         fills: list[Fill] = []
         trade.max_price_seen = max(trade.max_price_seen, contract_price)
+        trade.last_price = contract_price
 
         # 1. The stop, first and always. See the module docstring.
         if contract_price <= trade.stop_price:

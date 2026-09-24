@@ -65,7 +65,7 @@ def test_a_clean_loser_also_scores_ten(cfg):
 
 def test_a_winner_that_broke_a_rule_is_graded_as_a_failure(cfg):
     # BAD_WIN is the dangerous one: the money reinforces the habit.
-    entry = build_entry(_trade(pnl=60.0, opened="14:00"), cfg)
+    entry = build_entry(_trade(pnl=60.0, opened="15:50"), cfg)
     assert Mistake.OUTSIDE_WINDOW in entry.mistakes
     assert entry.verdict is Verdict.BAD_WIN
     assert entry.execution_score < 10
@@ -118,7 +118,7 @@ def test_the_score_never_goes_below_one():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_a_card_reads_as_a_post_mortem(cfg):
-    entry = build_entry(_trade(pnl=60.0, opened="14:00"), cfg)
+    entry = build_entry(_trade(pnl=60.0, opened="15:50"), cfg)
     card = await build_card(entry, cfg)
     markdown = card.to_markdown()
 
@@ -151,7 +151,7 @@ async def test_a_dead_model_does_not_stop_the_card(cfg, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_the_mistake_cost_excludes_clean_losses(cfg):
     rows = []
-    for pnl, opened in ((-40.0, "10:00"), (-30.0, "14:00"), (50.0, "10:00")):
+    for pnl, opened in ((-40.0, "10:00"), (-30.0, "15:50"), (50.0, "10:00")):
         entry = build_entry(_trade(pnl=pnl, opened=opened), cfg)
         jstore.save_entry(entry)
         rows.append(entry)

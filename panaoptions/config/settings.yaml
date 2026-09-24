@@ -27,8 +27,10 @@ session:
   entry_close: "10:30"
   # Tighten stops to breakeven after this, before the midday volume slump.
   tighten_stops_at: "10:45"
-  # Nothing may stay open past this.
-  force_exit_at: "15:45"
+  # Nothing may stay open past this — five minutes before the 16:00 close,
+  # while the chain still quotes. The strategy windows run to 15:45, so the
+  # last trade of the day still gets ten minutes rather than none.
+  force_exit_at: "15:55"
 
 data:
   # Where prices and option chains come from.
@@ -119,24 +121,26 @@ contracts:
   contract_multiplier: 100
 
 strategies:
-  # Each strategy runs only inside its own window, in EXCHANGE time. All three
-  # avoid 09:30-09:45, where spreads are widest and the first prints are noise.
+  # Each strategy runs only inside its own window, in EXCHANGE time. All of
+  # them avoid 09:30-09:45, where spreads are widest and the first prints are
+  # noise, and all hunt until 15:45 — the last entry that still leaves the
+  # trade ten minutes before the 15:55 square-off.
   orb_vwap:
     enabled: true
     from: "09:45"        # the 15m opening range is not final until 09:45
-    to:   "11:00"
+    to:   "15:45"
     volume_multiple: 1.5
     target_range_multiple: 1.5     # take profit at 1.5x the range height
   vwap_ema_pullback:
     enabled: true
     from: "10:00"
-    to:   "13:30"
+    to:   "15:45"
     volume_multiple: 1.0
     touch_atr: 0.35      # how close to the line counts as a pullback
   liquidity_sweep:
     enabled: true
     from: "09:45"
-    to:   "12:00"
+    to:   "15:45"
     volume_multiple: 1.5
 
   # Seven reversal patterns, but only where one can mean something. A hammer
@@ -145,7 +149,7 @@ strategies:
   candlestick_at_level:
     enabled: true
     from: "09:45"
-    to:   "15:00"
+    to:   "15:45"
     timeframe: "15m"          # patterns pay on the higher timeframes
     level_tolerance_atr: 0.5  # how close to a level still counts as "at" it
     # The entry is a break of the pattern's trigger, which happens on a LATER
