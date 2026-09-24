@@ -62,8 +62,14 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         from panaoptions.data.provider import describe as describe_provider
 
         who = describe_provider(cfg)
+        # What is LIVE, which after an auto fallback is not what is
+        # configured. The dashboard must name the one serving data.
+        live = getattr(desk.feed, "chains_name", "") or who["provider"]
         out["feed"] = {
-            "provider": who["provider"],
+            "provider": live,
+            "configured": who["provider"],
+            "delayed": bool(getattr(desk.feed, "chains_delayed", False)),
+            "greeks": bool(getattr(desk.feed, "chains_greeks", False)),
             "note": who["note"],
             "ready": who["ready"],
             "options_available": getattr(desk.feed, "options_available", None),

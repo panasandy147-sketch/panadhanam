@@ -258,4 +258,4 @@ def test_an_unset_provider_leaves_the_config_alone(monkeypatch):
 
     monkeypatch.delenv("PANAOPTIONS_PROVIDER", raising=False)
     monkeypatch.setattr(config_mod, "ENV_PATH", config_mod.ROOT / "absent.env")
-    assert config_mod.Config().get("data.provider") == "yahoo"
+    assert config_mod.Config().get("data.provider") == "auto"

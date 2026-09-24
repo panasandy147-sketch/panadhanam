@@ -116,6 +116,10 @@ def parse_chain(payload: dict[str, Any] | None, symbol: str,
 class CboeChains:
     """Option chains only. Pair it with a chart source via HybridFeed."""
 
+    name = "cboe"
+    delayed = True          # about 15 minutes
+    greeks = True           # delta and IV come from CBOE
+
     def __init__(self, timeout: float = 20.0) -> None:
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None

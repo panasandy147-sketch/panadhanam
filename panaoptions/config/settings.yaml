@@ -36,7 +36,12 @@ data:
   #            to an estimate. Put TRADIER_TOKEN in panaoptions/.env.
   #
   # `python run.py --check` tests whichever is selected, chains included.
-  provider: "yahoo"
+  #
+  #   auto     the default. Tries Yahoo's chains, falls back to CBOE when
+  #            they refuse, and says on startup and on the dashboard which
+  #            one it ended up using. Nothing to configure and nothing to
+  #            run when Yahoo's endpoint changes its mind, which it does.
+  provider: "auto"
   # Which Tradier environment the token came from. A sandbox token does not
   # work against production. Sandbox data is delayed, which is the right
   # trade for paper trading: the strategies are what is being tested.

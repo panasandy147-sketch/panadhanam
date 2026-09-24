@@ -60,15 +60,26 @@ class HybridFeed:
 
         await self.chains.open()
         self.options_available = await self.chains.probe()
-        if self.options_available:
-            log.info("option chains from %s — greeks included, delayed",
-                     self.chains_name)
-        else:
+        # When the chain source picked itself, report what it picked rather
+        # than the word "auto" — which source is live changes what the data
+        # means, so it must never be a mystery.
+        chosen = getattr(self.chains, "chosen", "")
+        if chosen:
+            self.chains_name = chosen
+        if not self.options_available:
             log.error("%s is not answering (%s). Charts work, so the desk "
                       "will screen and fire setups and every one will report "
                       "'no contract'.", self.chains_name,
                       self.options_error or "empty response")
         return True
+
+    @property
+    def chains_delayed(self) -> bool:
+        return bool(getattr(self.chains, "delayed", False))
+
+    @property
+    def chains_greeks(self) -> bool:
+        return bool(getattr(self.chains, "greeks", False))
 
     async def close(self) -> None:
         await self.charts.close()

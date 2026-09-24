@@ -572,11 +572,18 @@ def test_the_page_can_warn_that_chains_are_down(client):
     assert "Option chains are not available" in js
 
 
-def test_the_dashboard_names_the_data_provider(client):
-    """Yahoo's delta is a Black-Scholes estimate and Tradier's is the
-    exchange's. Which one is on screen changes what a delta band means."""
+def test_the_dashboard_names_the_live_data_source(client):
+    """Which source is serving changes what the numbers mean.
+
+    Yahoo's delta is a Black-Scholes estimate, CBOE's and Tradier's are
+    quoted; CBOE is delayed and Yahoo is not. After an automatic fallback the
+    live source is not the configured one, so the page must name the live
+    one — and say whether it is delayed and whether its greeks are real.
+    """
     feed = client.get("/api/status").json()["feed"]
-    assert feed["provider"] in ("yahoo", "tradier")
+    assert feed["provider"] in ("auto", "yahoo", "cboe", "tradier")
+    assert feed["configured"] in ("auto", "yahoo", "cboe", "tradier")
+    assert "delayed" in feed and "greeks" in feed
     assert feed["note"]
 
 

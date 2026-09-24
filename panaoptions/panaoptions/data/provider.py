@@ -20,10 +20,12 @@ from panaoptions.logging import get_logger
 
 log = get_logger("provider")
 
-PROVIDERS = ("yahoo", "cboe", "tradier")
+PROVIDERS = ("auto", "yahoo", "cboe", "tradier")
 
 # What each one is, in one line, for --check and the dashboard.
 NOTES = {
+    "auto": ("tries Yahoo's chains first and falls back to CBOE's public "
+             "delayed feed when they refuse — no account needed either way"),
     "yahoo": ("Yahoo serves no greeks, so delta is estimated with "
               "Black-Scholes from implied volatility"),
     "cboe": ("charts from Yahoo, option chains from CBOE's public delayed "
@@ -65,7 +67,35 @@ def make_feed(cfg) -> Any:
     it must never be silent either, because a desk quietly running on a
     different data source than intended is the worst of both.
     """
-    name = str(cfg.get("data.provider", "yahoo")).strip().lower()
+    name = str(cfg.get("data.provider", "auto")).strip().lower()
+
+    if name == "auto":
+        from panaoptions.data.auto import AutoChains, YahooChains
+        from panaoptions.data.cboe import CboeChains
+        from panaoptions.data.feed import YahooFeed
+        from panaoptions.data.hybrid import HybridFeed
+
+        charts = YahooFeed()
+        candidates: list[Any] = [YahooChains(charts), CboeChains()]
+
+        # A token is a deliberate choice, so try it before the public feeds:
+        # somebody who set one up wants real-time, not a delayed fallback.
+        token = os.getenv("TRADIER_TOKEN", "")
+        if token:
+            from panaoptions.data.tradier import TradierFeed
+
+            tradier = TradierFeed(
+                token=token, environment=str(cfg.get("data.tradier_env",
+                                                     "sandbox")))
+            tradier.name = "tradier"
+            tradier.delayed = str(cfg.get("data.tradier_env",
+                                          "sandbox")) == "sandbox"
+            tradier.greeks = True
+            tradier.open = tradier.connect          # same shape as the others
+            candidates.insert(0, tradier)
+
+        return HybridFeed(charts=charts, chains=AutoChains(candidates),
+                          chains_name="auto")
 
     if name == "tradier":
         from panaoptions.data.tradier import TradierFeed

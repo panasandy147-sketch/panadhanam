@@ -158,6 +158,17 @@ python run.py --check                      # test the configured source
 python run.py --provider tradier --check   # test the other one
 ```
 
+`provider: "auto"` is the default and needs nothing set up: it tries Yahoo's
+chains, falls back to CBOE when they refuse, and says on startup and on the
+dashboard which one it ended up using. Yahoo's chain endpoint returns 401 for
+some people and works for others, and it changes its mind without notice —
+reading a log and running a command to switch is a chore the desk can do in
+one request.
+
+A Tradier token, if one is set, is tried first: configuring it is a
+deliberate choice for real-time data, and a delayed fallback should not
+quietly win over it.
+
 | | **yahoo** | **cboe** | **tradier** |
 |---|---|---|---|
 | Signup | none | **none** | US brokerage account — SSN, phone |
