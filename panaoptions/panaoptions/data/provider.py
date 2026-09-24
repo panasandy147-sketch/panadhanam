@@ -20,7 +20,16 @@ from panaoptions.logging import get_logger
 
 log = get_logger("provider")
 
-PROVIDERS = ("yahoo", "tradier")
+PROVIDERS = ("yahoo", "cboe", "tradier")
+
+# What each one is, in one line, for --check and the dashboard.
+NOTES = {
+    "yahoo": ("Yahoo serves no greeks, so delta is estimated with "
+              "Black-Scholes from implied volatility"),
+    "cboe": ("charts from Yahoo, option chains from CBOE's public delayed "
+             "feed — no account, greeks included, about 15 minutes late"),
+    "tradier": "greeks come from the exchange",
+}
 
 
 def describe(cfg) -> dict[str, Any]:
@@ -36,13 +45,13 @@ def describe(cfg) -> dict[str, Any]:
         if not os.getenv("TRADIER_TOKEN"):
             ready = False
             note = ("TRADIER_TOKEN is not set. Put it in panaoptions/.env — "
-                    "a sandbox token is free and serves real option chains.")
+                    "note that Tradier's signup opens a US brokerage account "
+                    "and asks for SSN and phone. `cboe` needs no account.")
         else:
             note = (f"{cfg.get('data.tradier_env', 'sandbox')} environment, "
-                    f"greeks come from the exchange")
+                    f"{NOTES['tradier']}")
     else:
-        note = ("Yahoo serves no greeks, so delta is estimated with "
-                "Black-Scholes from implied volatility")
+        note = NOTES[name]
 
     return {"provider": name if known else "yahoo", "configured": name,
             "ready": ready, "note": note}
@@ -71,6 +80,15 @@ def make_feed(cfg) -> Any:
         else:
             log.info("market data: Tradier (%s), greeks from the exchange", env)
             return TradierFeed(token=token, environment=env)
+    elif name == "cboe":
+        from panaoptions.data.cboe import CboeChains
+        from panaoptions.data.feed import YahooFeed
+        from panaoptions.data.hybrid import HybridFeed
+
+        log.info("market data: Yahoo charts + CBOE chains (no account, "
+                 "greeks included, delayed)")
+        return HybridFeed(charts=YahooFeed(), chains=CboeChains(),
+                          chains_name="CBOE")
     elif name not in PROVIDERS:
         log.warning("unknown data.provider %r — using Yahoo. Valid: %s",
                     name, ", ".join(PROVIDERS))

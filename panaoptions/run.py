@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -170,6 +171,79 @@ async def _check() -> int:
     return CHECK_OK
 
 
+async def _probe_sources() -> int:
+    """Try every option-chain source from THIS machine and say which works.
+
+    Written because the answer is genuinely machine-dependent: Yahoo's chain
+    endpoint returns 401 for some people and works for others, and a
+    corporate network or a country block can take out any of them. Guessing
+    from here wastes an afternoon; this settles it in a few seconds.
+    """
+    cfg = get_config()
+    symbol = (cfg.symbols or ["SPY"])[0]
+    print(f"\n=== OPTION CHAIN SOURCES ===   probing with {symbol}\n")
+    results: list[tuple[str, bool, str]] = []
+
+    # 1. Yahoo, which needs no account and may be blocked.
+    from panaoptions.data.feed import YahooFeed
+
+    async with YahooFeed() as feed:
+        if not feed.connected:
+            results.append(("yahoo", False, "cannot reach Yahoo at all"))
+        else:
+            stamps = await feed.expiries(symbol)
+            results.append(("yahoo", bool(stamps),
+                            f"{len(stamps)} expiries" if stamps
+                            else feed.options_error or "no expiries returned"))
+
+    # 2. CBOE's public delayed feed. No account, no key.
+    from panaoptions.data.cboe import CboeChains
+
+    chains = CboeChains()
+    try:
+        contracts = await chains.all_contracts(symbol)
+        greeks = sum(1 for c in contracts if c.delta)
+        results.append(("cboe", bool(contracts),
+                        f"{len(contracts)} contracts, {greeks} with a delta"
+                        if contracts else chains.options_error or "no reply"))
+    finally:
+        await chains.close()
+
+    # 3. Tradier, only if a token is present.
+    token = os.getenv("TRADIER_TOKEN", "")
+    if not token:
+        results.append(("tradier", False, "no TRADIER_TOKEN set (signup opens "
+                                          "a US brokerage account)"))
+    else:
+        from panaoptions.data.tradier import TradierFeed
+
+        async with TradierFeed(
+                token=token,
+                environment=str(cfg.get("data.tradier_env", "sandbox"))) as feed:
+            stamps = await feed.expiries(symbol) if feed.connected else []
+            results.append(("tradier", bool(stamps),
+                            f"{len(stamps)} expiries" if stamps
+                            else feed.options_error or "token rejected"))
+
+    for name, ok, detail in results:
+        print(f"  {'OK  ' if ok else 'no  '} {name:8} {detail}")
+
+    working = [name for name, ok, _ in results if ok]
+    print()
+    if not working:
+        print("  None of them answered. That is usually a network block —\n"
+              "  a VPN, a corporate proxy, or a country restriction.")
+        return 1
+
+    best = "cboe" if "cboe" in working else working[0]
+    print(f"  Use: data.provider: \"{best}\"  in config/settings.yaml")
+    if best == "cboe":
+        print("  (charts stay on Yahoo, which is working; chains come from\n"
+              "   CBOE with greeks and no account. Delayed ~15 minutes, which\n"
+              "   suits the default profile and not the scalp one.)")
+    return 0
+
+
 def _print_chain_fix(provider: str) -> None:
     """The next action, spelled out. Naming a problem is half the job."""
     if provider == "tradier":
@@ -179,15 +253,19 @@ def _print_chain_fix(provider: str) -> None:
         return
     print("""
   Yahoo serves option chains from a different host than charts, and that
-  endpoint has been refusing requests. Switching data source fixes it:
+  endpoint has been refusing requests. There are two ways out:
 
-    1. Free token at  https://developer.tradier.com
-    2. In panaoptions/.env:      TRADIER_TOKEN=your-token-here
-    3. In config/settings.yaml:  data:
-                                   provider: "tradier"
-    4. python run.py --check
+    CBOE — no account, no key, no signup. Public delayed quotes WITH greeks.
+      In config/settings.yaml:   data:
+                                   provider: "cboe"
+      Charts stay on Yahoo, which is working. About 15 minutes delayed.
 
-  Tradier also returns real greeks, so the delta bands stop being estimates.""")
+    Tradier — real-time-capable, but signing up opens a US brokerage account
+      and asks for SSN and phone. Only worth it if you want live data.
+
+  Find out which actually works from this machine:
+
+      python run.py --probe-sources""")
 
 
 async def _explain_contracts() -> None:
@@ -557,7 +635,10 @@ def main() -> None:
     parser.add_argument("--profile", metavar="NAME",
                         help="config profile to layer over settings.yaml "
                              "(e.g. scalp — a 1-minute, 0-DTE desk)")
-    parser.add_argument("--provider", choices=("yahoo", "tradier"),
+    parser.add_argument("--probe-sources", action="store_true",
+                        help="try every option-chain source from this machine "
+                             "and say which one works")
+    parser.add_argument("--provider", choices=("yahoo", "cboe", "tradier"),
                         help="market data source for this run, overriding "
                              "data.provider in settings.yaml")
     parser.add_argument("--profiles", action="store_true",
@@ -594,6 +675,8 @@ def main() -> None:
         raise SystemExit(_check_config())
     if args.check_llm:
         raise SystemExit(asyncio.run(_check_llm()))
+    if args.probe_sources:
+        raise SystemExit(asyncio.run(_probe_sources()))
     if args.check:
         raise SystemExit(asyncio.run(_check()))
     if args.explain_contracts:

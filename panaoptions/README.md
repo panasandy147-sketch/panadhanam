@@ -158,13 +158,26 @@ python run.py --check                      # test the configured source
 python run.py --provider tradier --check   # test the other one
 ```
 
-| | **yahoo** (default) | **tradier** |
-|---|---|---|
-| API key | none | free account |
-| Charts | reliable | reliable |
-| Option chains | a different host; **can refuse every request** | a first-class endpoint |
-| Greeks | none — delta is **estimated** with Black-Scholes from IV | **from the exchange** |
-| Data delay | real-time-ish | 15 min on sandbox, real-time on a funded account |
+| | **yahoo** | **cboe** | **tradier** |
+|---|---|---|---|
+| Signup | none | **none** | US brokerage account — SSN, phone |
+| Charts | reliable | Yahoo's, which work | reliable |
+| Option chains | different host; **often 401** | public delayed feed | first-class endpoint |
+| Greeks | none — **estimated** here from IV | **from CBOE** | **from the exchange** |
+| Delay | real-time-ish | ~15 min | 15 min sandbox, real-time funded |
+
+**Start with `cboe`.** It needs no account of any kind, and it fixes the one
+thing that is actually broken: Yahoo's chain endpoint. Charts stay on Yahoo,
+which works.
+
+```bash
+python run.py --probe-sources
+```
+
+tries all three from your machine and tells you which answers — worth running
+first, because the answer is genuinely machine-dependent. Yahoo's chain
+endpoint returns 401 for some people and works for others, and a corporate
+network or a country block can take out any of them.
 
 The chain endpoint is the reason this choice exists. Yahoo serves options from
 a different host and API path than charts, and that endpoint has become
@@ -180,10 +193,34 @@ number is computed here from implied volatility, which is a reasonable
 estimate and still an estimate. Tradier returns the delta the market is
 actually using, so the bands mean what they say.
 
+### Setting CBOE up
+
+Nothing to sign up for. In `config/settings.yaml`:
+
+```yaml
+data:
+  provider: "cboe"
+```
+
+Then `python run.py --check`. Charts continue to come from Yahoo; option
+chains come from CBOE's public delayed-quotes feed, greeks included.
+
+The endpoint is undocumented and could change. Every field is read
+defensively and the parsing is tested against the recorded shape, so a change
+fails a test and prints a clear message rather than producing a quiet day
+with no trades. CBOE publishes chains only for the options it lists, so a
+symbol it does not carry returns 404 and says so by name.
+
 ### Setting Tradier up
 
-1. Make a free developer account at **developer.tradier.com** and create an
-   access token. (A brokerage account gives real-time data; the developer
+Worth knowing before you start: Tradier is a US broker, and their signup
+opens a **brokerage account** — it asks for SSN, phone verification and the
+rest of the KYC. That is a lot of identity to hand over in order to paper
+trade, and `cboe` above needs none of it. Only go this way if you want
+real-time data later.
+
+1. Create an account at **developer.tradier.com** and generate an access
+   token. (A funded brokerage account gives real-time data; the developer
    sandbox is free and serves delayed data with real chains.)
 2. Put the token in `panaoptions/.env`:
 
