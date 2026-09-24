@@ -18,6 +18,17 @@ class DerivativesAgent(BaseAgent):
                                data_available=False,
                                rationale="No option chain available for this underlying.")
 
+        # A generated chain alongside REAL prices is invented OI and PCR next
+        # to a real tape — the banner says so, and the analyst must not vote
+        # on it as if it were the market. In the all-synthetic demo market it
+        # is consistent with everything else, so it still votes there.
+        if ctx.option_chain.synthetic and bool(self.cfg.get("data.use_real_data", True)):
+            return AgentReport(agent_id=self.agent_id, symbol=ctx.symbol,
+                               data_available=False,
+                               rationale="Option chain is simulated (no feed served "
+                                         "one) — abstaining rather than voting on "
+                                         "invented open interest.")
+
         cfg = self.cfg.get("derivatives", {}) or {}
         score = 0.0
         evidence: list[Evidence] = []

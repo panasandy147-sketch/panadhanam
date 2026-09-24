@@ -226,10 +226,18 @@ class TradingEngine:
         targets = symbols or [w["symbol"] for w in self.cfg.watchlist()]
         outcomes: list[dict[str, Any]] = []
 
+        # Fetch every symbol's data concurrently, then decide one at a time.
+        # Fetching one after another made a 60-name watchlist take longer
+        # than the cycle; deciding one at a time is still required, because
+        # each approved trade must count against the limits before the next
+        # symbol is judged.
+        contexts = await self._prefetch(targets, cycle_id, news_items, macro_snap)
+
         for symbol in targets:
             try:
                 result = await self._cycle_for_symbol(
-                    symbol, cycle_id, news_items, macro_snap)
+                    symbol, cycle_id, news_items, macro_snap,
+                    ctx=contexts.get(symbol))
                 outcomes.append(result)
             except Exception as exc:
                 log.exception("cycle failed for %s: %s", symbol, exc)
@@ -249,15 +257,36 @@ class TradingEngine:
         }
         return outcomes
 
-    async def _cycle_for_symbol(self, symbol: str, cycle_id: str,
-                                news_items: list, macro_snap: Any) -> dict[str, Any]:
+    async def _build_context(self, symbol: str, cycle_id: str,
+                             news_items: list, macro_snap: Any):
         symbol_news = self.news.for_symbol(news_items, symbol) if news_items else []
-        recall = self.feedback.recall_for(symbol)
-
-        ctx = await self.data.build_context(
+        return await self.data.build_context(
             symbol=symbol, cycle_id=cycle_id, news=symbol_news, macro=macro_snap,
-            fundamentals=self._fundamentals.get(symbol), recall=recall,
+            fundamentals=self._fundamentals.get(symbol),
+            recall=self.feedback.recall_for(symbol),
         )
+
+    async def _prefetch(self, symbols: list[str], cycle_id: str,
+                        news_items: list, macro_snap: Any) -> dict[str, Any]:
+        limit = asyncio.Semaphore(int(self.cfg.get("system.fetch_concurrency", 8)))
+
+        async def one(symbol: str):
+            async with limit:
+                try:
+                    return await self._build_context(symbol, cycle_id,
+                                                     news_items, macro_snap)
+                except Exception as exc:
+                    log.warning("data fetch failed for %s: %s", symbol, exc)
+                    return None
+
+        built = await asyncio.gather(*(one(s) for s in symbols))
+        return {s: c for s, c in zip(symbols, built, strict=True) if c is not None}
+
+    async def _cycle_for_symbol(self, symbol: str, cycle_id: str,
+                                news_items: list, macro_snap: Any,
+                                ctx: Any = None) -> dict[str, Any]:
+        if ctx is None:
+            ctx = await self._build_context(symbol, cycle_id, news_items, macro_snap)
         if ctx.quote:
             await bus.publish(Topic.QUOTE, ctx.quote)
 

@@ -75,9 +75,18 @@ class CMIOAgent(BaseAgent):
         confirmations: list[str] = []
         conflicts: list[str] = []
 
+        # An analyst with nothing to say is not a vote for "nothing". Averaged
+        # in at zero, three quiet analysts turned a chart reading of +0.36
+        # into +0.12 — under any bar — so a single strong voice could never
+        # trade however low min_confirmations was set.
+        silence = float(consensus.get("silent_below", 0.10))
+        dilute = bool(consensus.get("silent_analysts_dilute", True))
+
         for r in active:
             if r.agent_id == "fundamental":
                 continue    # a veto gate, not a vote
+            if not dilute and abs(r.score) < silence:
+                continue
             w = float(weights.get(r.agent_id, 1.0)) * max(r.confidence, 0.05)
             numerator += r.score * w
             denominator += w
@@ -128,11 +137,24 @@ class CMIOAgent(BaseAgent):
         min_score = float(consensus.get("min_composite_score", 0.35))
         bias = self._bias_from_score(composite, min_score)
 
+        # A trade must be led by an analyst that reads THIS symbol's price.
+        # News and macro are largely market-wide: one bearish headline scored
+        # -0.36 on every name at once, and on its own it would short them all.
+        leads = set(consensus.get("lead_analysts") or [])
+        led = (not leads) or any(
+            r.agent_id in leads and abs(r.score) >= 0.25
+            and (r.score > 0) == (composite > 0)
+            for r in active)
+
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
-                   and abs(composite) >= min_score)
+                   and abs(composite) >= min_score
+                   and led)
 
         reasons = []
+        if bias != Bias.NEUTRAL and not led:
+            reasons.append(f"no price-based analyst ({', '.join(sorted(leads))}) "
+                           f"agrees — news or macro alone does not trade")
         if bias == Bias.NEUTRAL:
             reasons.append(f"composite {composite:+.2f} inside the neutral band (±{min_score})")
         if len(confirmations) < min_conf:

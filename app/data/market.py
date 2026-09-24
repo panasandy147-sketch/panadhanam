@@ -7,6 +7,7 @@ agents trivially testable (hand them a fixture, assert the report).
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 from typing import Any
 
@@ -27,6 +28,25 @@ class MarketDataService:
     def __init__(self, broker: BrokerAdapter, cfg: Config | None = None) -> None:
         self.broker = broker
         self.cfg = cfg or get_config()
+        # (symbol, timeframe) -> (monotonic time fetched, candles)
+        self._slow: dict[tuple[str, str], tuple[float, list]] = {}
+
+    # Daily and 15m bars barely move between one-minute cycles. Re-fetching
+    # them for 60 symbols every minute is ~120 needless requests a minute to
+    # a free feed that throttles; 1m and 5m are always fetched fresh.
+    _DEFAULT_TTL = {"15m": 120, "30m": 240, "1h": 300, "1d": 900}
+
+    async def _candles(self, symbol: str, tf: str) -> list:
+        ttl = float((self.cfg.get("technical.cache_seconds") or self._DEFAULT_TTL)
+                    .get(tf, 0) or 0)
+        key = (symbol, tf)
+        hit = self._slow.get(key)
+        if ttl and hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        bars = await self.broker.get_candles(symbol, tf, 200)
+        if ttl and bars:
+            self._slow[key] = (time.monotonic(), bars)
+        return bars
 
     async def build_context(
         self,
@@ -41,8 +61,12 @@ class MarketDataService:
         timeframes: list[str] = tech.get("timeframes", ["5m", "15m"])
 
         quote_task = self.broker.get_quote(symbol)
-        candle_tasks = {tf: self.broker.get_candles(symbol, tf, 200) for tf in timeframes}
-        chain_task = self.broker.get_option_chain(symbol) if self.broker.supports_options else None
+        candle_tasks = {tf: self._candles(symbol, tf) for tf in timeframes}
+        # Only names marked F&O have a chain worth asking for. Asking NSE for
+        # forty cash-only names a minute is how a feed gets rate-limited.
+        fno = bool(self.cfg.instrument_meta(symbol).get("fno", True))
+        chain_task = (self.broker.get_option_chain(symbol)
+                      if self.broker.supports_options and fno else None)
 
         quote = await quote_task
         candle_results = await asyncio.gather(*candle_tasks.values(), return_exceptions=True)

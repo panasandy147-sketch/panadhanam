@@ -44,13 +44,19 @@ risk:
   max_risk_per_trade_pct: 3.0    # hard ceiling — never exceed (was 2.0)
   max_daily_loss_pct: 6.0        # kill-switch: halt all new trades for the day (was 3.0)
   max_open_positions: 5          # was 3
+  # Cap each position at max exposure / max_open_positions, so a tight stop
+  # cannot size one trade into the whole limit and crowd out the rest.
+  split_exposure_across_positions: true
   max_exposure_pct: 100.0        # max notional as % of (capital x intraday_leverage); was 50
   # Your broker's intraday (MIS) margin multiplier. 1.0 = assume NO leverage,
   # which is the safe default: a 1L account can then hold at most 50k of stock.
   # Indian brokers typically allow ~5x on MIS for liquid names — set it to what
   # YOUR broker actually gives you. This only widens position size; it never
   # relaxes the per-trade risk limit, which stays 1-2% of real capital.
-  intraday_leverage: 1.0
+  # HIGH-RISK PAPER PROFILE: 4x, the standard US intraday (pattern day
+  # trader) buying power; Indian MIS is typically ~5x. At 1.0 one SPY trade at
+  # 2% risk used ~$88k of a $100k account, so "5 positions" was really two.
+  intraday_leverage: 4.0
   min_risk_reward: 1.5           # 1:1.5 minimum, rejected below this (was 2.0)
   max_risk_reward: 10.0          # sanity ceiling (implausible targets rejected)
   # Stop loss must be a real structural level, not a round number guess.
@@ -90,6 +96,15 @@ consensus:
   veto_on_high_impact_news: true # a -0.7 news score kills a long, and vice versa
   require_macro_alignment: false # set true to demand macro bias agreement too
   conflict_policy: "side_with_technicals"   # flat | side_with_technicals | side_with_macro
+  # An analyst scoring under silent_below has nothing to say this cycle. With
+  # silent_analysts_dilute false it is left out of the average instead of
+  # dragging a real reading toward zero (three quiet analysts made a +0.36
+  # chart read +0.12). true is the conservative setting.
+  silent_analysts_dilute: false
+  silent_below: 0.10
+  # At least one of these must agree with the trade. News and macro are
+  # mostly market-wide, so alone they would put the same trade on every name.
+  lead_analysts: ["candlestick", "derivatives"]
 
 # --------------------------------------------------------------------------
 # DECISIONS — may the local model change a trade decision?

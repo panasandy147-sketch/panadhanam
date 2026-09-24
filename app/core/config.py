@@ -203,7 +203,13 @@ class Config:
             d.setdefault("trading_symbol", d["symbol"])
             d["is_index"] = False
             items.append(d)
-        return [i for i in items if i["symbol"] not in black]
+        # Bands let the watchlist be widened or narrowed without deleting
+        # names. Unbanded entries (an older profile) are always scanned.
+        bands = self.universe.get("active_bands")
+        wanted = {str(b).upper() for b in bands} if bands else None
+        return [i for i in items if i["symbol"] not in black
+                and (wanted is None or str(i.get("band", "")).upper() in wanted
+                     or not i.get("band"))]
 
     def instrument_meta(self, symbol: str) -> dict[str, Any]:
         for item in self.watchlist():

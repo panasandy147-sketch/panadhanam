@@ -283,7 +283,8 @@ class PaperBroker(BrokerAdapter):
                     iv=round(iv, 4),
                     delta=g["delta"], gamma=g["gamma"], theta=g["theta"], vega=g["vega"],
                 ))
-        return OptionChain(underlying=underlying, spot=spot, expiry=exp, legs=legs)
+        return OptionChain(underlying=underlying, spot=spot, expiry=exp, legs=legs,
+                           synthetic=True)
 
     # ----------------------- account -----------------------
     async def get_funds(self) -> dict[str, float]:

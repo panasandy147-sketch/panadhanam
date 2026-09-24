@@ -82,21 +82,81 @@ news:
         url: "https://news.google.com/rss/search?q=NSE+OR+Nifty+OR+Sensex+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
 
 universe:
+  # Three bands of 20, scanned every cycle. Remove a band from active_bands to
+  # stop scanning it; the names stay here.
+  #   A  the indices and the Nifty 50 heavyweights
+  #   B  the rest of the Nifty 50
+  #   C  Nifty Next 50 and mid caps — bigger moves, thinner books
+  #
+  # Names added with fno: false trade the CASH equity (intraday), never an
+  # option: NSE revises lot sizes, and a wrong lot would size an option trade
+  # wrongly. To allow options on one, set fno: true with its current lot_size.
+  active_bands: ["A", "B", "C"]
   indices:
-    - { symbol: "NIFTY 50",   trading_symbol: "NIFTY",     exchange: "NSE", lot_size: 75, fno: true, tick_size: 0.05, seed_price: 24200 }
-    - { symbol: "NIFTY BANK", trading_symbol: "BANKNIFTY", exchange: "NSE", lot_size: 30, fno: true, tick_size: 0.05, seed_price: 51500 }
-    - { symbol: "FINNIFTY",   trading_symbol: "FINNIFTY",  exchange: "NSE", lot_size: 65, fno: true, tick_size: 0.05, seed_price: 23100 }
+    - { symbol: "NIFTY 50",   trading_symbol: "NIFTY",     exchange: "NSE", lot_size: 75, fno: true, tick_size: 0.05, seed_price: 24200, band: "A" }
+    - { symbol: "NIFTY BANK", trading_symbol: "BANKNIFTY", exchange: "NSE", lot_size: 30, fno: true, tick_size: 0.05, seed_price: 51500, band: "A" }
+    - { symbol: "FINNIFTY",   trading_symbol: "FINNIFTY",  exchange: "NSE", lot_size: 65, fno: true, tick_size: 0.05, seed_price: 23100, band: "A" }
   stocks:
-    - { symbol: "RELIANCE",   exchange: "NSE", lot_size: 500, fno: true, sector: "Energy",  seed_price: 2950 }
-    - { symbol: "HDFCBANK",   exchange: "NSE", lot_size: 550, fno: true, sector: "Banking", seed_price: 1680 }
-    - { symbol: "ICICIBANK",  exchange: "NSE", lot_size: 700, fno: true, sector: "Banking", seed_price: 1240 }
-    - { symbol: "INFY",       exchange: "NSE", lot_size: 400, fno: true, sector: "IT",      seed_price: 1870 }
-    - { symbol: "TCS",        exchange: "NSE", lot_size: 175, fno: true, sector: "IT",      seed_price: 4100 }
-    - { symbol: "SBIN",       exchange: "NSE", lot_size: 750, fno: true, sector: "Banking", seed_price: 815 }
-    - { symbol: "TATAMOTORS", exchange: "NSE", lot_size: 550, fno: true, sector: "Auto",    seed_price: 975 }
-    - { symbol: "AXISBANK",   exchange: "NSE", lot_size: 625, fno: true, sector: "Banking", seed_price: 1150 }
-    - { symbol: "LT",         exchange: "NSE", lot_size: 150, fno: true, sector: "Infra",   seed_price: 3600 }
-    - { symbol: "BHARTIARTL", exchange: "NSE", lot_size: 475, fno: true, sector: "Telecom", seed_price: 1580 }
+    # --- Band A (17 + the 3 indices above) ---
+    - { symbol: "RELIANCE",   exchange: "NSE", lot_size: 500, fno: true, sector: "Energy",  seed_price: 2950, band: "A" }
+    - { symbol: "HDFCBANK",   exchange: "NSE", lot_size: 550, fno: true, sector: "Banking", seed_price: 1680, band: "A" }
+    - { symbol: "ICICIBANK",  exchange: "NSE", lot_size: 700, fno: true, sector: "Banking", seed_price: 1240, band: "A" }
+    - { symbol: "INFY",       exchange: "NSE", lot_size: 400, fno: true, sector: "IT",      seed_price: 1870, band: "A" }
+    - { symbol: "TCS",        exchange: "NSE", lot_size: 175, fno: true, sector: "IT",      seed_price: 4100, band: "A" }
+    - { symbol: "SBIN",       exchange: "NSE", lot_size: 750, fno: true, sector: "Banking", seed_price: 815, band: "A" }
+    - { symbol: "TATAMOTORS", exchange: "NSE", lot_size: 550, fno: true, sector: "Auto",    seed_price: 975, band: "A" }
+    - { symbol: "AXISBANK",   exchange: "NSE", lot_size: 625, fno: true, sector: "Banking", seed_price: 1150, band: "A" }
+    - { symbol: "LT",         exchange: "NSE", lot_size: 150, fno: true, sector: "Infra",   seed_price: 3600, band: "A" }
+    - { symbol: "BHARTIARTL", exchange: "NSE", lot_size: 475, fno: true, sector: "Telecom", seed_price: 1580, band: "A" }
+    - { symbol: "KOTAKBANK", exchange: "NSE", fno: false, sector: "Banking", band: "A" }
+    - { symbol: "ITC", exchange: "NSE", fno: false, sector: "FMCG", band: "A" }
+    - { symbol: "HINDUNILVR", exchange: "NSE", fno: false, sector: "FMCG", band: "A" }
+    - { symbol: "BAJFINANCE", exchange: "NSE", fno: false, sector: "Finance", band: "A" }
+    - { symbol: "MARUTI", exchange: "NSE", fno: false, sector: "Auto", band: "A" }
+    - { symbol: "SUNPHARMA", exchange: "NSE", fno: false, sector: "Pharma", band: "A" }
+    - { symbol: "HCLTECH", exchange: "NSE", fno: false, sector: "IT", band: "A" }
+    # --- Band B ---
+    - { symbol: "WIPRO", exchange: "NSE", fno: false, sector: "IT", band: "B" }
+    - { symbol: "TECHM", exchange: "NSE", fno: false, sector: "IT", band: "B" }
+    - { symbol: "ASIANPAINT", exchange: "NSE", fno: false, sector: "Consumer", band: "B" }
+    - { symbol: "TITAN", exchange: "NSE", fno: false, sector: "Consumer", band: "B" }
+    - { symbol: "ULTRACEMCO", exchange: "NSE", fno: false, sector: "Cement", band: "B" }
+    - { symbol: "NTPC", exchange: "NSE", fno: false, sector: "Power", band: "B" }
+    - { symbol: "POWERGRID", exchange: "NSE", fno: false, sector: "Power", band: "B" }
+    - { symbol: "ONGC", exchange: "NSE", fno: false, sector: "Energy", band: "B" }
+    - { symbol: "COALINDIA", exchange: "NSE", fno: false, sector: "Mining", band: "B" }
+    - { symbol: "TATASTEEL", exchange: "NSE", fno: false, sector: "Metals", band: "B" }
+    - { symbol: "JSWSTEEL", exchange: "NSE", fno: false, sector: "Metals", band: "B" }
+    - { symbol: "HINDALCO", exchange: "NSE", fno: false, sector: "Metals", band: "B" }
+    - { symbol: "ADANIENT", exchange: "NSE", fno: false, sector: "Infra", band: "B" }
+    - { symbol: "ADANIPORTS", exchange: "NSE", fno: false, sector: "Infra", band: "B" }
+    - { symbol: "BAJAJFINSV", exchange: "NSE", fno: false, sector: "Finance", band: "B" }
+    - { symbol: "NESTLEIND", exchange: "NSE", fno: false, sector: "FMCG", band: "B" }
+    - { symbol: "DRREDDY", exchange: "NSE", fno: false, sector: "Pharma", band: "B" }
+    - { symbol: "CIPLA", exchange: "NSE", fno: false, sector: "Pharma", band: "B" }
+    - { symbol: "INDUSINDBK", exchange: "NSE", fno: false, sector: "Banking", band: "B" }
+    - { symbol: "HDFCLIFE", exchange: "NSE", fno: false, sector: "Insurance", band: "B" }
+    # --- Band C ---
+    - { symbol: "TRENT", exchange: "NSE", fno: false, sector: "Consumer", band: "C" }
+    - { symbol: "DLF", exchange: "NSE", fno: false, sector: "Realty", band: "C" }
+    - { symbol: "BEL", exchange: "NSE", fno: false, sector: "Defence", band: "C" }
+    - { symbol: "HAL", exchange: "NSE", fno: false, sector: "Defence", band: "C" }
+    - { symbol: "TATAPOWER", exchange: "NSE", fno: false, sector: "Power", band: "C" }
+    - { symbol: "IRCTC", exchange: "NSE", fno: false, sector: "Travel", band: "C" }
+    - { symbol: "VEDL", exchange: "NSE", fno: false, sector: "Metals", band: "C" }
+    - { symbol: "PNB", exchange: "NSE", fno: false, sector: "Banking", band: "C" }
+    - { symbol: "BANKBARODA", exchange: "NSE", fno: false, sector: "Banking", band: "C" }
+    - { symbol: "CANBK", exchange: "NSE", fno: false, sector: "Banking", band: "C" }
+    - { symbol: "GAIL", exchange: "NSE", fno: false, sector: "Energy", band: "C" }
+    - { symbol: "SAIL", exchange: "NSE", fno: false, sector: "Metals", band: "C" }
+    - { symbol: "NMDC", exchange: "NSE", fno: false, sector: "Mining", band: "C" }
+    - { symbol: "BHEL", exchange: "NSE", fno: false, sector: "Industrial", band: "C" }
+    - { symbol: "IOC", exchange: "NSE", fno: false, sector: "Energy", band: "C" }
+    - { symbol: "BPCL", exchange: "NSE", fno: false, sector: "Energy", band: "C" }
+    - { symbol: "SIEMENS", exchange: "NSE", fno: false, sector: "Industrial", band: "C" }
+    - { symbol: "PIDILITIND", exchange: "NSE", fno: false, sector: "Chemicals", band: "C" }
+    - { symbol: "DABUR", exchange: "NSE", fno: false, sector: "FMCG", band: "C" }
+    - { symbol: "LUPIN", exchange: "NSE", fno: false, sector: "Pharma", band: "C" }
   blacklist: []
   sector_max_positions:
     Banking: 2

@@ -270,6 +270,12 @@ class RiskManager:
         caps: list[tuple[str, float]] = []
         max_exposure = self._max_exposure()
         caps.append(("exposure limit", max(max_exposure - self.state.exposure, 0.0)))
+        # Each position gets at most its share of the exposure. Without this a
+        # tight stop sized the first trade into nearly the whole limit — one
+        # QQQ entry took $333k of $400k — and "five positions" meant two.
+        slots = int(self.cfg.get("risk.max_open_positions", 3) or 1)
+        if bool(self.cfg.get("risk.split_exposure_across_positions", True)) and slots > 1:
+            caps.append(("per-position share of exposure", max_exposure / slots))
         if is_option:
             caps.append(("option premium cap", self.state.capital * float(
                 self.cfg.get("risk.options_max_premium_pct", 25.0)) / 100.0))

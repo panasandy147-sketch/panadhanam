@@ -88,24 +88,79 @@ news:
         url: "https://news.google.com/rss/search?q=stock+market+OR+S%26P+500+OR+Nasdaq+when:1d&hl=en-US&gl=US&ceid=US:en" }
 
 universe:
+  # Three bands of 20, scanned every cycle. Remove a band from active_bands to
+  # stop scanning it; the names stay here.
+  #   A  the index ETFs and the largest, most liquid names
+  #   B  large caps
+  #   C  high-beta and mid caps — bigger moves, wider spreads
+  active_bands: ["A", "B", "C"]
   indices:
     # These are ETFs, not indices: they trade as ordinary shares, so
     # cash_tradeable is true. A true index (NIFTY) has no cash instrument.
-    # Tracked via the liquid ETFs — that is what you can actually trade options on.
-    - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  cash_tradeable: true, note: "S&P 500 ETF" }
-    - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  cash_tradeable: true, note: "Nasdaq 100 ETF" }
-    - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  cash_tradeable: true, note: "Russell 2000 ETF" }
+    - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  cash_tradeable: true, band: "A", note: "S&P 500 ETF" }
+    - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  cash_tradeable: true, band: "A", note: "Nasdaq 100 ETF" }
+    - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  cash_tradeable: true, band: "A", note: "Russell 2000 ETF" }
   stocks:
-    - { symbol: "AAPL",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 232 }
-    - { symbol: "MSFT",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 428 }
-    - { symbol: "NVDA",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis",      seed_price: 138 }
-    - { symbol: "AMZN",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer",   seed_price: 201 }
-    - { symbol: "META",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 578 }
-    - { symbol: "GOOGL", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech",       seed_price: 176 }
-    - { symbol: "TSLA",  exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Auto",       seed_price: 345 }
-    - { symbol: "AMD",   exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis",      seed_price: 142 }
-    - { symbol: "JPM",   exchange: "NYSE",   lot_size: 1, fno: true, sector: "Banking",    seed_price: 236 }
-    - { symbol: "XOM",   exchange: "NYSE",   lot_size: 1, fno: true, sector: "Energy",     seed_price: 118 }
+    # --- Band A (17 + the 3 ETFs above) ---
+    - { symbol: "AAPL", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "A", seed_price: 232 }
+    - { symbol: "MSFT", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "A", seed_price: 428 }
+    - { symbol: "NVDA", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "A", seed_price: 138 }
+    - { symbol: "AMZN", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer", band: "A", seed_price: 201 }
+    - { symbol: "META", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "A", seed_price: 578 }
+    - { symbol: "GOOGL", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "A", seed_price: 176 }
+    - { symbol: "TSLA", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Auto", band: "A", seed_price: 345 }
+    - { symbol: "AMD", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "A", seed_price: 142 }
+    - { symbol: "JPM", exchange: "NYSE", lot_size: 1, fno: true, sector: "Banking", band: "A", seed_price: 236 }
+    - { symbol: "XOM", exchange: "NYSE", lot_size: 1, fno: true, sector: "Energy", band: "A", seed_price: 118 }
+    - { symbol: "AVGO", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "A" }
+    - { symbol: "NFLX", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Media", band: "A" }
+    - { symbol: "LLY", exchange: "NYSE", lot_size: 1, fno: true, sector: "Health", band: "A" }
+    - { symbol: "UNH", exchange: "NYSE", lot_size: 1, fno: true, sector: "Health", band: "A" }
+    - { symbol: "V", exchange: "NYSE", lot_size: 1, fno: true, sector: "Payments", band: "A" }
+    - { symbol: "MA", exchange: "NYSE", lot_size: 1, fno: true, sector: "Payments", band: "A" }
+    - { symbol: "COST", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer", band: "A" }
+    # --- Band B ---
+    - { symbol: "ORCL", exchange: "NYSE", lot_size: 1, fno: true, sector: "Tech", band: "B" }
+    - { symbol: "CRM", exchange: "NYSE", lot_size: 1, fno: true, sector: "Tech", band: "B" }
+    - { symbol: "ADBE", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "B" }
+    - { symbol: "INTC", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "B" }
+    - { symbol: "QCOM", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "B" }
+    - { symbol: "MU", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "B" }
+    - { symbol: "BAC", exchange: "NYSE", lot_size: 1, fno: true, sector: "Banking", band: "B" }
+    - { symbol: "WFC", exchange: "NYSE", lot_size: 1, fno: true, sector: "Banking", band: "B" }
+    - { symbol: "GS", exchange: "NYSE", lot_size: 1, fno: true, sector: "Banking", band: "B" }
+    - { symbol: "HD", exchange: "NYSE", lot_size: 1, fno: true, sector: "Consumer", band: "B" }
+    - { symbol: "WMT", exchange: "NYSE", lot_size: 1, fno: true, sector: "Consumer", band: "B" }
+    - { symbol: "KO", exchange: "NYSE", lot_size: 1, fno: true, sector: "Staples", band: "B" }
+    - { symbol: "PEP", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Staples", band: "B" }
+    - { symbol: "DIS", exchange: "NYSE", lot_size: 1, fno: true, sector: "Media", band: "B" }
+    - { symbol: "BA", exchange: "NYSE", lot_size: 1, fno: true, sector: "Industrial", band: "B" }
+    - { symbol: "CAT", exchange: "NYSE", lot_size: 1, fno: true, sector: "Industrial", band: "B" }
+    - { symbol: "CVX", exchange: "NYSE", lot_size: 1, fno: true, sector: "Energy", band: "B" }
+    - { symbol: "PFE", exchange: "NYSE", lot_size: 1, fno: true, sector: "Health", band: "B" }
+    - { symbol: "NKE", exchange: "NYSE", lot_size: 1, fno: true, sector: "Consumer", band: "B" }
+    - { symbol: "MRK", exchange: "NYSE", lot_size: 1, fno: true, sector: "Health", band: "B" }
+    # --- Band C ---
+    - { symbol: "PLTR", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "COIN", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Crypto", band: "C" }
+    - { symbol: "UBER", exchange: "NYSE", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "SHOP", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "SNOW", exchange: "NYSE", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "SOFI", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Banking", band: "C" }
+    - { symbol: "HOOD", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Banking", band: "C" }
+    - { symbol: "RIVN", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Auto", band: "C" }
+    - { symbol: "MARA", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Crypto", band: "C" }
+    - { symbol: "ROKU", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Media", band: "C" }
+    - { symbol: "DKNG", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer", band: "C" }
+    - { symbol: "CRWD", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "PANW", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "ARM", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "C" }
+    - { symbol: "SMCI", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Semis", band: "C" }
+    - { symbol: "AFRM", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Payments", band: "C" }
+    - { symbol: "NET", exchange: "NYSE", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "DDOG", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Tech", band: "C" }
+    - { symbol: "ABNB", exchange: "NASDAQ", lot_size: 1, fno: true, sector: "Consumer", band: "C" }
+    - { symbol: "RBLX", exchange: "NYSE", lot_size: 1, fno: true, sector: "Media", band: "C" }
   blacklist: []
   sector_max_positions:
     Tech: 2

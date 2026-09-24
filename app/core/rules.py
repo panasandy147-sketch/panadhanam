@@ -43,6 +43,20 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
 
     sections: list[dict[str, Any]] = []
 
+    # The watchlist, band by band — which names, and which bands are on.
+    active = {str(b).upper() for b in (cfg.universe.get("active_bands") or [])}
+    everything = [dict(i) for i in (cfg.universe.get("indices") or [])] + \
+                 [dict(i) for i in (cfg.universe.get("stocks") or [])]
+    band_rules = []
+    for band in sorted({str(i.get("band", "")).upper() for i in everything} - {""}):
+        names = [i["symbol"] for i in everything
+                 if str(i.get("band", "")).upper() == band]
+        on = not active or band in active
+        band_rules.append(_rule(
+            f"Band {band} ({len(names)}): " + ", ".join(names),
+            "scanned" if on else "off",
+            f"markets/{market_file}.yaml → universe.active_bands"))
+
     # ------------------------------------------------------------------ #
     sections.append({
         "title": "How a trade happens",
@@ -65,6 +79,7 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         "rules": [
             _rule("A full cycle runs every", f"{g('system.cycle_seconds', 60)} s",
                   "system.cycle_seconds"),
+            *band_rules,
             _rule("Market opens", g("system.market_open"), session_key + "market_open"),
             _rule("No new trades after", g("system.no_new_entry_after"),
                   session_key + "no_new_entry_after"),
@@ -104,6 +119,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
              ]},
             {"name": "Options & futures", "weight": weight("derivatives"),
              "reads": [
+                 "Abstains when the option chain is simulated (no feed served "
+                 "one), instead of voting on invented open interest.",
                  "Open-interest build-up is the main read, ±0.35: a fresh long "
                  "or short build-up (short covering counts for less, 0.22).",
                  f"Put/call ratio above {g('derivatives.pcr_bullish_above', 1.2)} "
@@ -156,6 +173,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   g("consensus.min_composite_score", 0.35),
                   "consensus.min_composite_score"),
             _rule("When analysts disagree", conflict_text, "consensus.conflict_policy"),
+            _rule("An analyst scoring under this has nothing to say, and "
+                  + ("still counts as a zero in the average"
+                     if g("consensus.silent_analysts_dilute", True)
+                     else "is left out of the average rather than watering it down"),
+                  g("consensus.silent_below", 0.10),
+                  "consensus.silent_analysts_dilute / silent_below"),
+            _rule("At least one of these must agree (news or macro alone never trades)",
+                  ", ".join(g("consensus.lead_analysts") or []) or "any",
+                  "consensus.lead_analysts"),
             _rule("Macro must agree with the direction",
                   "yes" if g("consensus.require_macro_alignment", False) else "no",
                   "consensus.require_macro_alignment"),
@@ -218,6 +244,11 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   f"{_pct(g('risk.max_exposure_pct', 50.0))} of capital × "
                   f"{g('risk.intraday_leverage', 1.0)} leverage",
                   "risk.max_exposure_pct / intraday_leverage"),
+            _rule("Each position, notional at most (so one tight stop cannot "
+                  "crowd out the rest)",
+                  "total ÷ max positions" if g("risk.split_exposure_across_positions", True)
+                  else "no per-position cap",
+                  "risk.split_exposure_across_positions"),
             _rule("Option premium held at once, at most",
                   _pct(g("risk.options_max_premium_pct", 25.0)),
                   "risk.options_max_premium_pct"),

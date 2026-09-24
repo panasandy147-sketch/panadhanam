@@ -99,6 +99,9 @@ class OptionChain(BaseModel):
     expiry: str
     fetched_at: datetime = Field(default_factory=utcnow)
     legs: list[OptionLeg] = Field(default_factory=list)
+    # True when no feed served a chain and the simulator generated one. Its
+    # OI, PCR and Max Pain are invented, so nothing may vote on them.
+    synthetic: bool = False
 
     def by_type(self, opt: str) -> list[OptionLeg]:
         return sorted([leg for leg in self.legs if leg.option_type == opt],
