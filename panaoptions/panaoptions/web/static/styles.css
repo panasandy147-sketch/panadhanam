@@ -276,3 +276,49 @@ button.ghost:hover { color: var(--text); }
   .candidate { grid-template-columns: 1fr; }
   .candidate-chart { border-right: none; border-bottom: 1px solid var(--border); }
 }
+
+/* ---- Rules & strategies pop-up ------------------------------------------ */
+.rules-link {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .05em;
+  text-transform: uppercase; padding: 3px 9px; border: 1px solid var(--accent);
+  color: var(--accent); text-decoration: none; border-radius: 3px;
+}
+.rules-link:hover { background: var(--accent); color: var(--bg); }
+#rules-dialog {
+  width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+  padding: 0; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); color: var(--text);
+}
+#rules-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.rules-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center;
+  gap: 12px; padding: 12px 16px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.rules-head h2 { margin: 0; font-size: 15px; }
+.rules-head .spacer { flex: 1; }
+.rules-body { padding: 4px 16px 16px; font-size: 13px; line-height: 1.5; }
+.rules-sec h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--accent); margin: 18px 0 6px; }
+.rules-sec p { margin: 0 0 8px; color: var(--muted); }
+.rules-sec .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin-right: 6px; }
+.rules-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+.rules-table th { text-align: left; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); font-weight: 500; padding: 4px 6px; }
+.rules-table td { border-top: 1px solid var(--border); padding: 5px 6px; vertical-align: top; }
+.rules-table .rv { font-family: var(--mono); white-space: nowrap; }
+.rs code { font-size: 11px; color: var(--muted); }
+.rule-strategy { border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 12px; margin: 8px 0; }
+.rule-strategy.off { opacity: .55; }
+.rule-strategy h4 { margin: 0 0 4px; font-size: 13.5px; }
+.rule-strategy ol { margin: 2px 0 6px; padding-left: 20px; }
+.rules-foot { margin-top: 14px; }
+@media (max-width: 640px) {
+  .rules-table .rs { display: none; }
+  .rules-table .rv { white-space: normal; }
+}
+/* The page styles every <section> as a panel; inside the pop-up they are
+   just headed blocks. */
+#rules-dialog section.rules-sec { border: 0; background: none; padding: 0; margin: 0; }

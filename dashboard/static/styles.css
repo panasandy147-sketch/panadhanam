@@ -970,3 +970,42 @@ details.why li { margin: 2px 0; }
 .exit-why { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
 .exit-why b { color: var(--text); }
 tr.why-row td { padding-top: 0; border-top: 0; white-space: normal; }
+
+/* Rules pop-up */
+.rules-link {
+  display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--market-accent, var(--border)); color: var(--text);
+  text-decoration: none; font-size: 12.5px; font-weight: 600;
+}
+.rules-link:hover { background: var(--market-accent-soft, var(--surface-2)); }
+#rules-dialog {
+  width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+  padding: 0; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-1); color: var(--text);
+}
+#rules-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.rules-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.rules-head h2 { margin: 0; font-size: 15px; }
+.rules-head #rules-close { margin-left: auto; }
+.rules-body { padding: 4px 16px 16px; font-size: 13px; line-height: 1.5; }
+.rules-sec h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 18px 0 6px; }
+.rules-sec p { margin: 0 0 8px; color: var(--text-muted); }
+.rules-sec ol, .rules-sec ul { margin: 2px 0 8px; padding-left: 20px; }
+.rule-block { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.rule-block h4 { margin: 0 0 2px; font-size: 13px; }
+.rules-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+.rules-table th { text-align: left; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-muted); font-weight: 500; padding: 4px 6px; }
+.rules-table td { border-top: 1px solid var(--border); padding: 5px 6px; vertical-align: top; }
+.rules-table .rv { font-family: var(--mono); white-space: nowrap; }
+.rules-table .rs code { font-size: 11px; color: var(--text-muted); }
+.rules-foot { margin-top: 14px; color: var(--text-muted); }
+@media (max-width: 640px) {
+  .rules-table .rs { display: none; }
+  .rules-table .rv { white-space: normal; }
+}

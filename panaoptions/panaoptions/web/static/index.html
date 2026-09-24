@@ -16,9 +16,23 @@
   <span class="badge" id="b-phase">—</span>
   <span class="badge" id="b-clock">—</span>
   <span class="spacer"></span>
+  <a class="rules-link" id="btn-rules" href="#rules"
+     title="The rules and strategies the desk trades by">Rules &amp; strategies</a>
   <span class="badge" id="b-capital">—</span>
   <span class="badge" id="b-halt" hidden>halted</span>
 </header>
+
+<!-- Opened from the header link, or directly at /#rules. Written from the
+     live config by /api/rules, so the numbers are the ones the desk is using. -->
+<dialog id="rules-dialog" aria-labelledby="rules-title">
+  <div class="rules-head">
+    <h2 id="rules-title">Rules &amp; strategies</h2>
+    <span class="muted" id="rules-meta"></span>
+    <span class="spacer"></span>
+    <button class="ghost" id="rules-close" aria-label="Close">✕</button>
+  </div>
+  <div class="rules-body" id="rules-body"><div class="empty">Loading…</div></div>
+</dialog>
 
 <main>
 

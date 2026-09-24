@@ -45,11 +45,24 @@
   <button id="btn-td-start" class="primary" hidden>▶ Start trading day</button>
 
   <div class="header-actions">
+    <a class="rules-link" id="btn-rules" href="#rules"
+       title="The rules the desk trades by, from the live config">Rules</a>
     <button id="btn-day-review">Today's review</button>
     <button id="btn-weekly">Weekly review</button>
     <button id="btn-theme" title="Toggle light/dark">◐</button>
   </div>
 </header>
+
+<!-- Opened from the header link, or directly at /#rules. Written from the
+     live config by /api/rules, so the numbers are the ones in force. -->
+<dialog id="rules-dialog" aria-labelledby="rules-title">
+  <div class="rules-head">
+    <h2 id="rules-title">Rules &amp; strategy</h2>
+    <span class="count" id="rules-meta"></span>
+    <button id="rules-close" aria-label="Close">✕</button>
+  </div>
+  <div class="rules-body" id="rules-body"><div class="empty">Loading…</div></div>
+</dialog>
 
 <div id="banners"></div>
 

@@ -1017,6 +1017,48 @@ function notifyTrade(d) {
 }
 
 /* ====================================================================== */
+/* Rules pop-up                                                           */
+/* ====================================================================== */
+/* Read beside the desk, not instead of it. /api/rules writes the text from
+   the live config for the active market, so the numbers are the ones in
+   force — a document kept by hand would have drifted by the first edit. */
+function renderRules(doc) {
+  $("rules-meta").textContent = `${doc.market_name} · live config`;
+  const row = (r) => `<tr><td>${esc(r.text)}</td><td class="rv">${esc(r.value)}</td>
+    <td class="rs"><code>${esc(r.setting)}</code></td></tr>`;
+  $("rules-body").innerHTML = doc.sections.map((sec) => {
+    const steps = sec.steps?.length
+      ? `<ol>${sec.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : "";
+    const analysts = (sec.analysts || []).map((a) => `
+      <div class="rule-block"><h4>${esc(a.name)} <span class="count">${esc(a.weight)}</span></h4>
+        <ul>${a.reads.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("");
+    const rules = sec.rules?.length
+      ? `<table class="rules-table"><thead><tr><th>Rule</th><th>Now</th>
+         <th class="rs">Setting</th></tr></thead><tbody>${sec.rules.map(row).join("")}
+         </tbody></table>` : "";
+    return `<section class="rules-sec"><h3>${esc(sec.title)}</h3>
+      ${sec.intro ? `<p>${esc(sec.intro)}</p>` : ""}${steps}${analysts}${rules}</section>`;
+  }).join("") + `<p class="rules-foot">To change a rule, name the setting in the
+    right-hand column and the new value.</p>`;
+}
+
+async function openRules() {
+  const dlg = $("rules-dialog");
+  if (!dlg.open) dlg.showModal();
+  try {
+    const res = await fetch("/api/rules");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderRules(await res.json());
+  } catch (e) {
+    $("rules-body").innerHTML = `<div class="empty">Could not load the rules: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeRules() {
+  $("rules-dialog").close();
+}
+
+/* ====================================================================== */
 /* Boot                                                                   */
 /* ====================================================================== */
 async function loadWatchlist() {
@@ -1054,6 +1096,18 @@ function bind() {
   };
   $("btn-td-start").onclick = startTradingDay;
   $("btn-day-review").onclick = showDayReport;
+  $("btn-rules").onclick = (e) => { e.preventDefault(); openRules(); };
+  $("rules-close").onclick = closeRules;
+  $("rules-dialog").addEventListener("click", (e) => {
+    if (e.target === $("rules-dialog")) closeRules();    // the backdrop
+  });
+  $("rules-dialog").addEventListener("close", () => {
+    if (location.hash === "#rules") history.replaceState(null, "", location.pathname);
+  });
+  if (location.hash === "#rules") openRules();
+  window.addEventListener("hashchange", () => {
+    if (location.hash === "#rules") openRules();
+  });
   $("btn-weekly").onclick = buildWeekly;
   $("btn-weekly-md").onclick = () => downloadWeekly("md");
   $("btn-weekly-json").onclick = () => downloadWeekly("json");

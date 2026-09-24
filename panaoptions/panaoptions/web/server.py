@@ -354,6 +354,14 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         return Response(content=body, media_type=media, headers={
             "Content-Disposition": f'attachment; filename="{name}"'})
 
+    @app.get("/api/rules")
+    async def rules() -> dict[str, Any]:
+        """The rules and strategies in words, with the live config's numbers."""
+        from panaoptions import rules as rules_mod
+
+        capital = getattr(getattr(desk, "risk", None), "capital", None)
+        return rules_mod.build(cfg, capital=capital or cfg.capital)
+
     @app.get("/api/strategies")
     async def strategies() -> dict[str, Any]:
         """Every strategy, its window, and whether it is live now."""

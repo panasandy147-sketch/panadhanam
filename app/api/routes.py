@@ -150,6 +150,15 @@ async def signal_detail(signal_id: str) -> dict[str, Any]:
             "reports": db.reports_for_signal(signal_id)}
 
 
+@router.get("/rules")
+async def rules(request: Request) -> dict[str, Any]:
+    """The rules and strategies in words, with the live config's numbers."""
+    from app.core.rules import build
+
+    engine = _engine(request)
+    return build(get_config(), capital=engine.risk.state.capital)
+
+
 @router.get("/positions")
 async def positions(request: Request) -> dict[str, Any]:
     engine = _engine(request)

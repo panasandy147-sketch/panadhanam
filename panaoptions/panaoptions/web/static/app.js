@@ -866,6 +866,72 @@ $("watch-input").addEventListener("keydown", (e) => {
 
 getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
 
+/* ---- Rules & strategies ------------------------------------------------ */
+/* A pop-up, not a page: it is read beside the desk, not instead of it. The
+   text comes from /api/rules, which writes it from the live config, so the
+   numbers are always the ones in force. */
+function rulesRow(r) {
+  return `<tr><td>${esc(r.text)}</td><td class="rv">${esc(r.value)}</td>
+    <td class="rs"><code>${esc(r.setting)}</code></td></tr>`;
+}
+
+function renderRules(doc) {
+  $("rules-meta").textContent = `profile: ${doc.profile} · live config`;
+  $("rules-body").innerHTML = doc.sections.map((sec) => {
+    const rules = sec.rules?.length
+      ? `<table class="rules-table"><thead><tr><th>Rule</th><th>Now</th>
+         <th>Setting</th></tr></thead><tbody>${sec.rules.map(rulesRow).join("")}
+         </tbody></table>` : "";
+    const strategies = (sec.strategies || []).map((st) => `
+      <div class="rule-strategy${st.enabled ? "" : " off"}">
+        <h4>${esc(st.name)} <span class="muted">${esc(st.window)}${
+          st.enabled ? "" : " · OFF"}</span></h4>
+        <div class="k">Buys when ALL of these are true</div>
+        <ol>${st.buy.map((b) => `<li>${esc(b)}</li>`).join("")}</ol>
+        <div><span class="k">Wrong if</span> ${esc(st.wrong)}</div>
+        <div><span class="k">Target</span> ${esc(st.target)}</div>
+        <div class="rs"><code>strategies.${esc(st.key)}</code></div>
+      </div>`).join("");
+    const patterns = sec.patterns?.length
+      ? `<div class="k" style="margin-top:10px">Strategy 4, per pattern</div>
+         <table class="rules-table"><thead><tr><th>Pattern</th><th>Delta</th>
+         <th>Expiry</th><th>Claimed win rate</th></tr></thead><tbody>${
+         sec.patterns.map((p) => `<tr><td>${esc(p.pattern)}</td><td>${esc(p.delta)}</td>
+           <td>${esc(p.dte)}</td><td class="muted">${esc(p.claimed)}</td></tr>`).join("")}
+         </tbody></table>` : "";
+    return `<section class="rules-sec"><h3>${esc(sec.title)}</h3>
+      ${sec.intro ? `<p>${esc(sec.intro)}</p>` : ""}${rules}${strategies}${patterns}</section>`;
+  }).join("") + `<p class="muted rules-foot">To change a rule, name the setting
+    in the right-hand column and the new value.</p>`;
+}
+
+async function openRules() {
+  const dlg = $("rules-dialog");
+  if (!dlg.open) dlg.showModal();
+  try {
+    renderRules(await getJSON("/api/rules"));
+  } catch (e) {
+    $("rules-body").innerHTML = `<div class="empty">Could not load the rules: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeRules() {
+  $("rules-dialog").close();
+}
+
+$("btn-rules").addEventListener("click", (e) => { e.preventDefault(); openRules(); });
+$("rules-close").onclick = closeRules;
+$("rules-dialog").addEventListener("click", (e) => {
+  if (e.target === $("rules-dialog")) closeRules();      // click on the backdrop
+});
+$("rules-dialog").addEventListener("close", () => {
+  if (location.hash === "#rules") history.replaceState(null, "", location.pathname);
+});
+if (location.hash === "#rules") openRules();
+window.addEventListener("hashchange", () => {
+  if (location.hash === "#rules") openRules();
+});
+
 refresh();
 refreshActivity();
 $("activity-decisions")?.addEventListener("change", refreshActivity);
