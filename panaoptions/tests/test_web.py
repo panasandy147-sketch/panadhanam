@@ -592,3 +592,76 @@ def test_check_distinguishes_no_feed_from_no_chains():
     assert run.CHECK_OK == 0
     assert run.CHECK_NO_FEED == 1
     assert run.CHECK_NO_CHAINS == 2
+
+
+# --------------------------------------------------------------------------- #
+# The candidate chart shows one session
+# --------------------------------------------------------------------------- #
+def _three_days(monkeypatch, client):
+    """Three sessions of 5m bars, as the feed returns them."""
+    from datetime import UTC, datetime, timedelta
+
+    from panaoptions.models import Candle
+
+    bars = []
+    for day in (22, 23, 24):
+        bell = datetime(2026, 9, day, 13, 30, tzinfo=UTC)   # 09:30 ET
+        bars += [Candle(ts=bell + timedelta(minutes=5 * i), open=100, high=101,
+                        low=99, close=100.5, volume=1000.0) for i in range(78)]
+
+    async def _bars(symbol, interval="5m", include_prepost=False):
+        return bars
+
+    monkeypatch.setattr(client.desk.feed, "candles", _bars)
+    return bars
+
+
+def test_the_chart_shows_only_the_latest_session(client, monkeypatch):
+    """Three days of 5m bars squeeze today into the right-hand third.
+
+    The pattern fired on today's tape, so today's tape is what the panel
+    should be showing.
+    """
+    _three_days(monkeypatch, client)
+    body = client.get("/api/candles/AAPL").json()
+    assert body["session_only"] is True
+
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    days = {datetime.fromtimestamp(c["time"], tz=UTC)
+            .astimezone(ZoneInfo("America/New_York")).date()
+            for c in body["candles"]}
+    assert len(days) == 1
+    assert next(iter(days)).day == 24
+
+
+def test_the_full_history_is_still_available_on_request(client, monkeypatch):
+    _three_days(monkeypatch, client)
+    body = client.get("/api/candles/AAPL?session=false").json()
+    assert body["session_only"] is False
+    assert len(body["candles"]) > 78
+
+
+def test_today_is_the_last_bars_date_not_the_wall_clock(client, monkeypatch):
+    """Before the open, after the close and at a weekend, the panel should
+    still show a complete last session rather than an empty chart."""
+    _three_days(monkeypatch, client)
+    body = client.get("/api/candles/AAPL").json()
+    assert body["candles"], "an out-of-hours chart must not come back empty"
+
+
+def test_the_chart_is_told_which_clock_the_session_is_on(client, monkeypatch):
+    """The library renders epochs in UTC and the browser is wherever the
+    viewer is. Neither is the market's clock."""
+    _three_days(monkeypatch, client)
+    assert client.get("/api/candles/AAPL").json()["timezone"] == \
+        "America/New_York"
+
+    js = client.get("/static/app.js").text
+    assert "tickMarkFormatter" in js
+    # The VWAP must reset on the exchange's day, not the viewer's: from India
+    # the local day rolls over at 00:30 ET, mid-session.
+    assert "exchangeDay(c.time)" in js
+    # The old local-clock version, which must not come back.
+    assert "new Date(c.time * 1000).toDateString()" not in js

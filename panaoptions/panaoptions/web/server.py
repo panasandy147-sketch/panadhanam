@@ -164,13 +164,36 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
                 "cards": cards(limit=10), "coach": coach}
 
     @app.get("/api/candles/{symbol}")
-    async def candles(symbol: str, timeframe: str = "5m",
-                      count: int = 180) -> dict[str, Any]:
-        """OHLCV for the chart. Lightweight-charts wants seconds, not ISO."""
+    async def candles(symbol: str, timeframe: str = "5m", count: int = 180,
+                      session: bool = True) -> dict[str, Any]:
+        """OHLCV for the chart. Lightweight-charts wants seconds, not ISO.
+
+        `session=true` (the default) returns only the LATEST trading day.
+        Three days of 5m bars on one axis compresses today into the right-hand
+        third, which is the part anyone is actually reading — the pattern
+        fired on today's tape, so today's tape is what the panel should show.
+
+        "Today" is taken from the last bar's exchange date rather than from
+        the wall clock, so the chart still shows a complete last session
+        before the open, after the close, and at a weekend.
+        """
+        from zoneinfo import ZoneInfo
+
         bars = await desk.feed.candles(symbol.upper(), timeframe)
+        exchange = ZoneInfo(cfg.timezone)
+
+        if session and bars:
+            day = bars[-1].ts.astimezone(exchange).date()
+            bars = [b for b in bars if b.ts.astimezone(exchange).date() == day]
+
         return {
             "symbol": symbol.upper(),
             "timeframe": timeframe,
+            # The chart library renders epochs in UTC, so it needs telling
+            # which clock the session is on; New York is the only one that
+            # makes sense here and the axis must not silently show UTC.
+            "timezone": cfg.timezone,
+            "session_only": bool(session),
             "candles": [
                 {"time": int(c.ts.timestamp()), "open": c.open, "high": c.high,
                  "low": c.low, "close": c.close, "volume": c.volume}

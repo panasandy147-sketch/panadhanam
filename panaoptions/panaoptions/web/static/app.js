@@ -315,6 +315,25 @@ function ema(values, period) {
   return values.map((v, i) => (prev = i ? v * k + prev * (1 - k) : v));
 }
 
+/* The chart library renders epoch seconds in UTC, and the browser's own
+   clock is wherever the viewer is. Neither is the market's. Watching a New
+   York session from India, `toDateString()` rolls over at 00:30 ET — in the
+   MIDDLE of the session — so a VWAP keyed on the local day resets halfway
+   through the afternoon and the line the strategies lean on goes wrong on
+   screen. Everything below is keyed on the exchange's own date. */
+let chartTz = "America/New_York";
+
+const _tzParts = (epoch, opts) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone: chartTz, ...opts })
+    .format(new Date(epoch * 1000));
+
+/* YYYY-MM-DD in exchange time — a stable key for "which session is this". */
+const exchangeDay = (epoch) =>
+  _tzParts(epoch, { year: "numeric", month: "2-digit", day: "2-digit" });
+
+const exchangeClock = (epoch) =>
+  _tzParts(epoch, { hour: "2-digit", minute: "2-digit", hour12: false });
+
 function initCandChart() {
   const el = $("cand-chart");
   if (!el || candChart || typeof LightweightCharts === "undefined") return;
@@ -323,7 +342,13 @@ function initCandChart() {
               fontSize: 10 },
     grid: { vertLines: { color: "#20272f" }, horzLines: { color: "#20272f" } },
     rightPriceScale: { borderColor: "#283039" },
-    timeScale: { borderColor: "#283039", timeVisible: true, secondsVisible: false },
+    timeScale: {
+      borderColor: "#283039", timeVisible: true, secondsVisible: false,
+      /* Without this the axis reads 15:00 for a 11:00 ET bar, which makes
+         every strategy window on the page look wrong. */
+      tickMarkFormatter: (time) => exchangeClock(time),
+    },
+    localization: { timeFormatter: (time) => exchangeClock(time) + " ET" },
     crosshair: { mode: 0 },
     height: 320,
   });
@@ -350,8 +375,10 @@ async function loadCandChart(symbol) {
 
   let d;
   try {
-    d = await getJSON(`/api/candles/${encodeURIComponent(symbol)}?timeframe=5m`);
+    d = await getJSON(
+      `/api/candles/${encodeURIComponent(symbol)}?timeframe=5m&session=true`);
   } catch { return; }
+  if (d.timezone) chartTz = d.timezone;
 
   // Sorted and de-duplicated: the charting library silently blanks on a
   // non-monotonic series, which looks like "no data" rather than bad data.
@@ -369,10 +396,12 @@ async function loadCandChart(symbol) {
   candSeries.ema21.setData(asLine(ema(closes, 21)));
   candSeries.ema50.setData(asLine(ema(closes, 50)));
 
-  // Session VWAP, reset each day — the same line the strategies lean on.
+  // Session VWAP, reset on each EXCHANGE day — the same line the strategies
+  // lean on. Keyed on the viewer's local day it would reset mid-session for
+  // anyone outside the Americas.
   let pv = 0, vol = 0, day = null;
   candSeries.vwap.setData(bars.map((c) => {
-    const d2 = new Date(c.time * 1000).toDateString();
+    const d2 = exchangeDay(c.time);
     if (d2 !== day) { pv = 0; vol = 0; day = d2; }
     const typical = (c.high + c.low + c.close) / 3;
     const v = c.volume || 1;
@@ -381,12 +410,12 @@ async function loadCandChart(symbol) {
   }));
   candChart.timeScale().fitContent();
 
-  $("cand-symbol").textContent = `${d.symbol} · 5m`;
+  $("cand-symbol").textContent =
+    `${d.symbol} · 5m · ${d.session_only ? "today" : "recent"}`;
   const age = Math.round((Date.now() - bars[bars.length - 1].time * 1000) / 60000);
-  const stamp = new Date(bars[bars.length - 1].time * 1000)
-    .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const stamp = exchangeClock(bars[bars.length - 1].time);
   $("cand-freshness").textContent = age <= 6
-    ? `live · last bar ${stamp}` : `last bar ${stamp} (${age}m ago)`;
+    ? `live · last bar ${stamp} ET` : `last bar ${stamp} ET (${age}m ago)`;
 }
 
 function renderCandidate(d) {
