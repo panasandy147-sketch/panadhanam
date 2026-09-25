@@ -244,3 +244,22 @@ def test_when_nothing_fits_it_says_exactly_why(cfg):
     assert "spread over 10%" in search.note
     assert "Cheapest was" in search.note
     assert "$10-$2000 budget" not in search.note
+
+
+def test_why_names_the_reason_setups_were_not_bought(cfg, capsys):
+    """"It is not buying" has to become one line naming the rule doing it."""
+    from datetime import datetime
+
+    import run
+    from panaoptions.ledger import store
+
+    store.init()
+    now = datetime.now()
+    store.save_signal_seen("WHY-1", now, "TWLO", "SHORT", False,
+                           "The 0.55-0.65 delta contract costs $2,225, over the $800 budget")
+    store.save_signal_seen("WHY-2", now, "FTNT", "SHORT", True, "taken")
+    assert run._why() == 0
+    out = capsys.readouterr().out
+    assert "Budget per trade" in out
+    assert "bought 1" in out
+    assert "over the $800 budget" in out

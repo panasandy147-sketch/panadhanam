@@ -25,6 +25,7 @@ if [ -z "$PY" ]; then
 fi
 
 echo "- Using $PY"
+echo "- Code version $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo
 # A per-machine .env setting can hold an old value after an upgrade meant to
 # change it — it wins over the repo by design, and nobody goes looking. Ask
