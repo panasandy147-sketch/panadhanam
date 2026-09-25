@@ -84,22 +84,24 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         survivors.append(c)
 
     if not survivors and budget is not None:
-        fallback = _within_budget(chain, want, min_dte, max_dte, min_delta,
-                                  max_spread, min_price, max_price, budget,
-                                  multiplier, cfg)
+        fallback, how, diagnosis = _within_budget(
+            chain, want, min_dte, max_dte, min_delta, max_delta, max_spread,
+            min_price, max_price, budget, multiplier, cfg)
+        ideal = min(price_only_failures, key=lambda c: c.mid, default=None)
+        lead = (f"The {min_delta:.2f}-{max_delta:.2f} delta, {min_dte}-{max_dte} day "
+                f"contract ({ideal.label}) costs ${ideal.cost(multiplier):,.0f}, over "
+                f"the ${budget:,.0f} budget" if ideal else
+                f"Nothing in the {min_delta:.2f}-{max_delta:.2f} delta band fits the "
+                f"${budget:,.0f} budget")
         if fallback is not None:
-            ideal = min(price_only_failures, key=lambda c: c.mid, default=None)
             search.chosen = fallback
             search.budget_fallback = True
-            search.note = (
-                (f"The {min_delta:.2f}-{max_delta:.2f} delta contract "
-                 f"({ideal.label}) costs ${ideal.cost(multiplier):,.0f}, over the "
-                 f"${budget:,.0f} budget — " if ideal else
-                 f"Nothing in the {min_delta:.2f}-{max_delta:.2f} delta band fits "
-                 f"the ${budget:,.0f} budget — ")
-                + f"took the highest delta that fits: {fallback.label} "
-                  f"({abs(fallback.delta):.2f} delta) at "
-                  f"${fallback.cost(multiplier):,.0f}.")
+            search.note = (f"{lead} — took {how}: {fallback.label} "
+                           f"({abs(fallback.delta):.2f} delta, {fallback.dte} days) at "
+                           f"${fallback.cost(multiplier):,.0f}.")
+            return search
+        if ideal is not None or diagnosis:
+            search.note = f"{lead}. No cheaper contract qualified either: {diagnosis}"
             return search
 
     if survivors:
@@ -115,7 +117,7 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         cost = nearest.cost(multiplier)
         search.note = (
             f"Nothing fits the ${min_price * multiplier:.0f}-"
-            f"${max_price * multiplier:.0f} budget. The nearest contract that "
+            f"${max_price * multiplier:.0f} per-contract price range. The nearest contract that "
             f"passed DTE, delta and spread was {nearest.label} at "
             f"${cost:,.0f} ({abs(nearest.delta):.2f} delta). A {min_delta:.2f}-"
             f"{max_delta:.2f} delta option is at the money, and at the money on "
@@ -132,27 +134,69 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
     return search
 
 
-def _within_budget(chain, want, min_dte, max_dte, min_delta, max_spread,
-                   min_price, max_price, budget, multiplier, cfg):
-    """The highest-delta contract below the band that the budget can buy.
+def _within_budget(chain, want, min_dte, max_dte, min_delta, max_delta,
+                   max_spread, min_price, max_price, budget, multiplier, cfg):
+    """The best contract the budget can buy when the setup's own is too dear.
 
-    A 0.60-delta option on a $170 stock 30 days out is ~$900 a contract; on a
-    $4,000 account at 20% that never fits, so every setup on it was skipped.
-    Stepping down the delta keeps the same direction and expiry at a price
-    the account can pay, with less leverage per dollar of move. Below
-    `contracts.budget_fallback_min_delta` it is a lottery ticket, and the
-    trade is skipped instead. Set that to 0 to switch the fallback off.
+    Returns (contract or None, how it was chosen, why nothing fitted).
+
+    In order of preference, all in the setup's direction:
+      1. the SAME delta band with less time — down to `contracts.min_dte`.
+         Keeps the leverage; pays for it with a shorter runway.
+      2. a lower delta in the setup's own expiry window.
+      3. a lower delta with less time.
+    Never below `contracts.budget_fallback_min_delta` (a lottery ticket
+    below that); 0 switches the fallback off.
     """
     floor = float(cfg.get("contracts.budget_fallback_min_delta", 0.30) or 0)
     if floor <= 0:
-        return None
-    pool = [c for c in chain
-            if c.right is want and min_dte <= c.dte <= max_dte and c.mid > 0
-            and floor <= abs(c.delta) < min_delta
-            and c.spread_pct_of_mid <= max_spread
-            and min_price <= c.mid <= max_price
-            and c.cost(multiplier) <= budget]
-    return max(pool, key=lambda c: abs(c.delta)) if pool else None
+        return None, "", ""
+    shortest = min(int(cfg.get("contracts.min_dte", 7)), min_dte)
+
+    def ok(c) -> bool:
+        return (c.right is want and c.mid > 0
+                and c.spread_pct_of_mid <= max_spread
+                and min_price <= c.mid <= max_price
+                and c.cost(multiplier) <= budget)
+
+    tiers = [
+        ("the same delta with less time",
+         lambda c: shortest <= c.dte < min_dte and min_delta <= abs(c.delta) <= max_delta,
+         lambda c: (c.dte, abs(c.delta))),
+        ("the highest delta that fits",
+         lambda c: min_dte <= c.dte <= max_dte and floor <= abs(c.delta) < min_delta,
+         lambda c: (abs(c.delta), c.dte)),
+        ("the highest delta that fits, with less time",
+         lambda c: shortest <= c.dte < min_dte and floor <= abs(c.delta) < min_delta,
+         lambda c: (abs(c.delta), c.dte)),
+    ]
+    for how, where, best in tiers:
+        pool = [c for c in chain if where(c) and ok(c)]
+        if pool:
+            return max(pool, key=best), how, ""
+
+    # Nothing fitted: say exactly why, over everything the fallback could use.
+    candidates = [c for c in chain if c.right is want
+                  and shortest <= c.dte <= max_dte and abs(c.delta) >= floor]
+    if not candidates:
+        return None, "", (f"no {want.value.lower()} at {floor:.2f}+ delta between "
+                          f"{shortest} and {max_dte} days came back")
+    causes: dict[str, int] = {}
+    for c in candidates:
+        cause = ("no two-sided market" if c.mid <= 0 else
+                 f"spread over {max_spread:g}%" if c.spread_pct_of_mid > max_spread else
+                 f"over the ${budget:,.0f} budget" if c.cost(multiplier) > budget else
+                 "outside the price range")
+        causes[cause] = causes.get(cause, 0) + 1
+    priced = [c for c in candidates if c.mid > 0]
+    cheapest = min(priced, key=lambda c: c.mid, default=None)
+    return None, "", (
+        f"of {len(candidates)} {want.value.lower()}s at {floor:.2f}+ delta, "
+        f"{shortest}-{max_dte} days: "
+        + ", ".join(f"{n} {k}" for k, n in sorted(causes.items(), key=lambda kv: -kv[1]))
+        + (f". Cheapest was {cheapest.label} ({abs(cheapest.delta):.2f} delta) at "
+           f"${cheapest.cost(multiplier):,.0f}, spread "
+           f"{cheapest.spread_pct_of_mid:.0f}%." if cheapest else "."))
 
 
 def affordable_delta(chain: list[OptionContract], direction: Direction,

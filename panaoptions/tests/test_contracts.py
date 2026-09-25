@@ -211,3 +211,36 @@ def test_start_raises_a_stale_env_capital_to_the_shipped_800_budget(cfg, monkeyp
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "9000")
     run._ensure_capital()
     assert "PANAOPTIONS_CAPITAL=9000" in env.read_text(encoding="utf-8")   # never lowered
+
+
+def test_same_delta_with_less_time_is_tried_before_a_lower_delta(cfg):
+    """TWLO 0.58 delta 21 days out was $2,225. The same delta 9 days out is
+    far cheaper and keeps the leverage the pattern asked for."""
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    chain = [_put(295, 0.58, 22.25, dte=21), _put(282, 0.57, 7.00, dte=9),
+             _put(270, 0.40, 6.00, dte=21)]
+    search = contracts.choose("TWLO", chain, Direction.SHORT, cfg,
+                              setup=_setup(), budget=800.0)
+    assert search.chosen.dte == 9 and abs(search.chosen.delta) == 0.57
+    assert "the same delta with less time" in search.note
+    assert "over the $800 budget" in search.note
+
+
+def test_when_nothing_fits_it_says_exactly_why(cfg):
+    """"Nothing fits the $10-$2000 budget" named the price range as the
+    budget and gave no reason the cheaper contracts were refused."""
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    chain = [_put(295, 0.58, 22.25, dte=21),
+             _put(270, 0.40, 6.00, dte=21, spread=1.80),     # 30% spread
+             _put(265, 0.33, 9.50, dte=21)]                    # $950
+    search = contracts.choose("TWLO", chain, Direction.SHORT, cfg,
+                              setup=_setup(), budget=800.0)
+    assert search.chosen is None
+    assert "$800 budget" in search.note
+    assert "spread over 10%" in search.note
+    assert "Cheapest was" in search.note
+    assert "$10-$2000 budget" not in search.note

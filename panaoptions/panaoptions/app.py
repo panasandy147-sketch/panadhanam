@@ -557,7 +557,11 @@ class OptionsDesk:
         spot = setup.indicators.close
         min_dte = setup.min_dte_override or int(self.cfg.get("contracts.min_dte", 7))
         max_dte = setup.max_dte_override or int(self.cfg.get("contracts.max_dte", 14))
-        chain = await self.feed.chain_for_window(symbol, spot, min_dte, max_dte)
+        # Fetched down to the global minimum as well, so that when the setup's
+        # own contract is over budget the same delta with less time can be
+        # considered. choose() still prefers the setup's window.
+        shortest = min(min_dte, int(self.cfg.get("contracts.min_dte", 7)))
+        chain = await self.feed.chain_for_window(symbol, spot, shortest, max_dte)
         search = contract_filter.choose(symbol, chain, setup.direction,
                                         self.cfg, setup=setup,
                                         budget=self.risk.budget_room())
