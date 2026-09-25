@@ -39,7 +39,12 @@ async def engine(cfg, monkeypatch):
     # shipped high-risk profile has its own tests at the end of this file.
     cfg.settings["consensus"].update({"min_confirmations": 2,
                                       "min_composite_score": 0.35,
-                                      "conflict_policy": "flat"})
+                                      "conflict_policy": "flat",
+                                      # The scripted votes do not match the
+                                      # simulated tape's trend; the filter
+                                      # has its own tests.
+                                      "trend_filter": False})
+    cfg.settings["risk"]["reentry_cooldown_minutes"] = 0
     cfg.settings["risk"].update({"risk_per_trade_pct": 1.0, "min_risk_reward": 2.0})
     broker = PaperBroker(config={"total_capital": 100_000})
     await broker.connect()
@@ -414,6 +419,8 @@ async def test_the_shipped_profile_trades_on_one_strong_voice(engine, cfg):
     desk's log before it."""
     cfg.reload()
     cfg.switch_market("IN")
+    cfg.settings["consensus"]["trend_filter"] = False
+    cfg.settings["risk"]["reentry_cooldown_minutes"] = 0   # earlier cases closed it
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
     cfg.settings["system"]["square_off_time"] = "23:59"
     cfg.settings["execution"]["auto_place_orders"] = True

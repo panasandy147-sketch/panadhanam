@@ -279,8 +279,11 @@ class OutcomeTracker:
                 setup = (json.loads(payload).get("setup") or "")
             except Exception:
                 setup = ""
-        # Only applies to the setups the timer is configured for.
-        if setup and setup not in setups:
+        # Only applies to the setups the timer is configured for. A signal
+        # that names no setup is not one of them: the empty case used to fall
+        # through, so the 30-minute Mean Reversion timer closed EVERY trade
+        # that was not yet green — ten exits at -0.04R to -0.46R in a morning.
+        if setup not in setups:
             return False
 
         entry_ts = row.get("ts")

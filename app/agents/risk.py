@@ -84,6 +84,33 @@ class RiskManager:
     # ------------------------------------------------------------------ #
     # Gate checks
     # ------------------------------------------------------------------ #
+    def symbol_checks(self, symbol: str) -> list[str]:
+        """Reasons THIS symbol may not be traded now.
+
+        A setup stays valid for several cycles, and nothing stopped the desk
+        opening it again each time — LLY was held twice at once, and NFLX and
+        AMZN were shorted, stopped, and shorted again half an hour later on
+        the same idea.
+        """
+        from app.storage import db
+
+        reasons: list[str] = []
+        if bool(self.cfg.get("risk.one_position_per_symbol", True)):
+            if any(r["symbol"] == symbol for r in db.open_signals()):
+                reasons.append(f"Already holding {symbol} — one position per symbol")
+        cooldown = float(self.cfg.get("risk.reentry_cooldown_minutes", 0) or 0)
+        if cooldown > 0:
+            last = db.last_exit(symbol)
+            if last:
+                try:
+                    waited = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 60
+                except ValueError:
+                    waited = cooldown
+                if 0 <= waited < cooldown:
+                    reasons.append(f"{symbol} closed {waited:.0f} min ago — waiting "
+                                   f"{cooldown:g} min before trading it again")
+        return reasons
+
     def desk_checks(self) -> list[str]:
         """Reasons the desk is closed for new business, regardless of the setup."""
         self.roll_day_if_needed()
@@ -180,6 +207,7 @@ class RiskManager:
 
         # ---- desk-level gates ----
         reasons.extend(self.desk_checks())
+        reasons.extend(self.symbol_checks(ctx.symbol))
 
         # ---- can this instrument actually be bought? ----
         if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):
@@ -512,6 +540,17 @@ class RiskManager:
             pct = float(self.cfg.get("risk.max_stop_distance_pct", 3.0)) / 3
             stop = entry * (1 - pct / 100) if bias == Bias.BULLISH else entry * (1 + pct / 100)
             note = f"percentage fallback stop ({pct:.2f}%)"
+
+        # Never inside the market's own noise. A structural level two ticks
+        # beyond a 5-minute candle can be 0.3% away (NFLX 71.03 -> 71.26) —
+        # less than a normal bar's range — and gets hit by nothing but the
+        # tape wiggling, twice in a morning. The stop goes at least
+        # risk.min_stop_atr x ATR away; the size shrinks to keep the risk.
+        floor_atr = float(self.cfg.get("risk.min_stop_atr", 0) or 0)
+        if atr > 0 and floor_atr > 0 and abs(entry - stop) < floor_atr * atr:
+            stop = (entry - floor_atr * atr if bias == Bias.BULLISH
+                    else entry + floor_atr * atr)
+            note += f", widened to {floor_atr:g}x ATR ({atr:.2f}) — the level sat inside normal noise"
 
         stop_points = abs(entry - stop)
         target = (entry + stop_points * min_rr if bias == Bias.BULLISH

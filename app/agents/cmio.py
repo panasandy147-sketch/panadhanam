@@ -146,12 +146,17 @@ class CMIOAgent(BaseAgent):
             and (r.score > 0) == (composite > 0)
             for r in active)
 
+        against = self._against_the_trend(ctx, composite) \
+            if consensus.get("trend_filter", False) else ""
+
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
                    and abs(composite) >= min_score
-                   and led)
+                   and led and not against)
 
         reasons = []
+        if bias != Bias.NEUTRAL and against:
+            reasons.append(against)
         if bias != Bias.NEUTRAL and not led:
             reasons.append(f"no price-based analyst ({', '.join(sorted(leads))}) "
                            f"agrees — news or macro alone does not trade")
@@ -171,6 +176,30 @@ class CMIOAgent(BaseAgent):
 
         return self._decision(bias, composite, confirmations, conflicts,
                               rationale, counter, proceed, abstained)
+
+    @staticmethod
+    def _against_the_trend(ctx: MarketContext, composite: float) -> str:
+        """Why this would be a counter-trend trade, or "".
+
+        Intraday, VWAP is where the day's average buyer and seller stand, and
+        a stacked 15-minute trend is the tide. Shorting above VWAP into a
+        rising 15-minute trend — or buying below it into a falling one — is
+        fighting both; it was most of a morning of stop-outs.
+        """
+        ind = ctx.indicators or {}
+        primary = ind.get("primary") or {}
+        tf15 = (ind.get("by_timeframe") or {}).get("15m") or {}
+        long = composite > 0
+        if "above_vwap" in primary:
+            if long and not primary["above_vwap"]:
+                return "a long below VWAP is against the day's trend"
+            if not long and primary["above_vwap"]:
+                return "a short above VWAP is against the day's trend"
+        if long and tf15.get("ema_stacked_bear"):
+            return "a long against a falling 15-minute trend (9 < 21 < 50 EMA)"
+        if not long and tf15.get("ema_stacked_bull"):
+            return "a short against a rising 15-minute trend (9 > 21 > 50 EMA)"
+        return ""
 
     def _resolve_conflict(self, composite: float, bulls: list[AgentReport],
                           bears: list[AgentReport], consensus: dict,

@@ -21,7 +21,11 @@ def rm(cfg):
     # risk and 2R, not about the (high-risk paper) profile that ships.
     m.cfg.settings["risk"].update({"risk_per_trade_pct": 1.0,
                                    "max_risk_per_trade_pct": 2.0,
-                                   "min_risk_reward": 2.0})
+                                   "min_risk_reward": 2.0,
+                                   # About sizing, not about what other tests
+                                   # left open or just closed in the shared db.
+                                   "one_position_per_symbol": False,
+                                   "reentry_cooldown_minutes": 0})
     return m
 
 

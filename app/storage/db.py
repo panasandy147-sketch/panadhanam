@@ -198,6 +198,14 @@ def iv_history(symbol: str, days: int = 252) -> list[float]:
     return [float(r[0]) for r in rows]
 
 
+def last_exit(symbol: str) -> str | None:
+    """When this symbol's most recent trade closed (local ISO time), if any."""
+    row = get_conn().execute(
+        "SELECT exit_ts FROM signals WHERE symbol = ? AND exit_ts IS NOT NULL "
+        "ORDER BY exit_ts DESC LIMIT 1", (symbol,)).fetchone()
+    return row[0] if row else None
+
+
 def recent_cycles(limit: int = 2000) -> list[dict[str, Any]]:
     """The CMIO's verdicts, newest first — including every "no trade"."""
     rows = get_conn().execute(

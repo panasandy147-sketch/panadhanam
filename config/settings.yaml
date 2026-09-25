@@ -55,6 +55,13 @@ risk:
   # its stop together (a headline moving correlated names at once). Five at 1%
   # would be 5%; the cap holds it at 4% — the fifth trade takes what is left.
   max_portfolio_heat_pct: 4.0
+  # One position per symbol, and after a close wait this long before the same
+  # symbol is traded again — a stopped-out idea is not re-entered at once.
+  one_position_per_symbol: true
+  reentry_cooldown_minutes: 30
+  # The stop sits at least this many ATRs (primary timeframe) from entry. A
+  # structural level inside a normal bar's range is hit by noise alone.
+  min_stop_atr: 1.0
   # Cap each position at max exposure / max_open_positions, so a tight stop
   # cannot size one trade into the whole limit and crowd out the rest.
   split_exposure_across_positions: true
@@ -127,6 +134,9 @@ consensus:
   # At least one of these must agree with the trade. News and macro are
   # mostly market-wide, so alone they would put the same trade on every name.
   lead_analysts: ["candlestick", "derivatives"]
+  # No counter-trend trades: no long below VWAP or into a falling (stacked)
+  # 15-minute trend, no short above VWAP or into a rising one.
+  trend_filter: true
 
 # --------------------------------------------------------------------------
 # NEWS BLACKOUT — no new entries around high-impact macro releases.

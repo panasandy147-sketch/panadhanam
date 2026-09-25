@@ -188,6 +188,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                      else "is left out of the average rather than watering it down"),
                   g("consensus.silent_below", 0.10),
                   "consensus.silent_analysts_dilute / silent_below"),
+            _rule("No counter-trend trades: no long below VWAP or into a falling "
+                  "15-minute trend, no short above VWAP or into a rising one",
+                  "on" if g("consensus.trend_filter", False) else "off",
+                  "consensus.trend_filter"),
             _rule("At least one of these must agree (news or macro alone never trades)",
                   ", ".join(g("consensus.lead_analysts") or []) or "any",
                   "consensus.lead_analysts"),
@@ -226,6 +230,9 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "more than 5 ATR away, the stop is this many ATR instead",
                   f"{g('risk.atr_stop_multiplier', 1.5)} × ATR(14)",
                   "risk.atr_stop_multiplier"),
+            _rule("…and never closer than this many ATRs (a level inside a normal "
+                  "bar's range is hit by noise alone); size shrinks to keep the risk",
+                  f"{g('risk.min_stop_atr', 0)} × ATR", "risk.min_stop_atr"),
             _rule("Stop distance must be between",
                   f"{_pct(g('risk.min_stop_distance_pct', 0.15))} and "
                   f"{_pct(g('risk.max_stop_distance_pct', 3.0))} of the price "
@@ -282,6 +289,11 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "risk.options_max_premium_pct"),
             _rule("Open positions at once, at most", g("risk.max_open_positions", 3),
                   "risk.max_open_positions"),
+            _rule("One position per stock; after a close, wait before trading "
+                  "the same stock again",
+                  f"{'on' if g('risk.one_position_per_symbol', True) else 'off'}, "
+                  f"{g('risk.reentry_cooldown_minutes', 0)} min",
+                  "risk.one_position_per_symbol / reentry_cooldown_minutes"),
             _rule("Portfolio heat: total lost if EVERY open position hit its stop "
                   "together, at most (a new trade takes what room is left)",
                   (f"{_pct(g('risk.max_portfolio_heat_pct'))} = "
