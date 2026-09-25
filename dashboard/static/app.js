@@ -105,6 +105,7 @@ function handle(event) {
     case "focus.updated":       renderFocus(data); break;
     case "position.update":
       loadPositions();
+      loadRecord();
       loadHistory();
       notifyTrade(data);
       break;
@@ -159,7 +160,8 @@ async function adoptMarket(profile) {
     `<div class="empty">No signals yet for ${esc(profile.name)}.</div>`;
   $("s-today").hidden = true;
 
-  await Promise.all([loadPositions(), loadStatus(), loadTradingDay(), loadFocus()]);
+  await Promise.all([loadPositions(), loadStatus(), loadTradingDay(), loadFocus(),
+                     loadRecord()]);
 }
 
 async function switchMarket(code) {
@@ -841,6 +843,56 @@ function notifyTrade(d) {
 }
 
 /* ====================================================================== */
+/* Paper record                                                           */
+/* ====================================================================== */
+function renderRecord(r) {
+  if (!r) return;
+  const cur = r.currency || "";
+  const m = (v) => `${v < 0 ? "−" : ""}${cur}${fmtInt(Math.abs(Math.round(v || 0)))}`;
+  const tile = (k, v, sub = "", cls = "") => `<div class="stat">
+      <div class="label">${k}</div><div class="value ${cls}">${v}</div>
+      ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  $("record-meta").textContent = `last ${r.days} days · filled paper trades only`;
+  $("record-stats").innerHTML = [
+    tile("Open now", fmtInt(r.open_now), r.open_symbols.join(", ") || "flat"),
+    tile("Closed", fmtInt(r.closed),
+         `${r.exits.target} target · ${r.exits.stop} stop · ${r.exits.time} time`),
+    tile("Win rate", `${fmt(r.win_rate, 0)}%`,
+         `${r.wins}W / ${r.losses}L${r.flat ? ` / ${r.flat} flat` : ""}`),
+    tile("Total P&amp;L", m(r.total_pnl), `${signed(r.total_r)}R`, signClass(r.total_pnl)),
+    tile("Avg win", m(r.avg_win), "", "pos"),
+    tile("Avg loss", m(r.avg_loss), "", "neg"),
+    tile("Expectancy", m(r.expectancy), `per trade · ${signed(r.avg_r)}R`,
+         signClass(r.expectancy)),
+  ].join("");
+  $("record-trades").innerHTML = r.trades.length ? `
+    <table><thead><tr><th>Closed</th><th>Symbol</th><th>Side</th>
+      <th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th>
+      <th class="num">R</th><th class="num">P&amp;L</th><th>Why it sold</th></tr></thead><tbody>
+    ${r.trades.map((t) => `<tr>
+      <td>${t.closed ? new Date(t.closed).toLocaleString("en-GB", { timeZone: marketTz(),
+          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+      <td>${esc(t.symbol)}</td>
+      <td class="${t.side === "BUY" ? "pos" : "neg"}">${esc(t.side)}</td>
+      <td class="num">${fmtInt(t.quantity)}</td>
+      <td class="num">${fmt(t.entry)}</td><td class="num">${fmt(t.exit)}</td>
+      <td class="num ${signClass(t.r_multiple)}">${signed(t.r_multiple)}R</td>
+      <td class="num ${signClass(t.pnl)}">${m(t.pnl)}</td>
+      <td class="why-cell">${esc(t.exit_reason)}</td></tr>`).join("")}
+    </tbody></table>`
+    : `<div class="empty">No paper trades closed in the last ${r.days} days${
+        r.alerts_not_traded ? ` — ${r.alerts_not_traded} alert(s) on unarmed days were
+        followed but never bought` : ""}.</div>`;
+}
+
+async function loadRecord() {
+  try {
+    const res = await fetch("/api/paper-record");
+    if (res.ok) renderRecord(await res.json());
+  } catch { /* the next poll fills it in */ }
+}
+
+/* ====================================================================== */
 /* Focus list                                                             */
 /* ====================================================================== */
 function renderFocus(f) {
@@ -972,10 +1024,11 @@ function bind() {
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
   await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay(),
-                     loadFocus()]);
+                     loadFocus(), loadRecord()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(loadFocus, 60_000);
+  setInterval(loadRecord, 60_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
 })();

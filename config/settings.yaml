@@ -25,7 +25,7 @@ risk:
   # Account size every position is sized against. Set it per-machine with
   # TOTAL_CAPITAL in .env, which overrides this file and survives a git pull:
   #
-  #     python run.py --set TOTAL_CAPITAL=10000
+  #     python run.py --set TOTAL_CAPITAL=100000
   #
   # You can also change it live from the dashboard (Capital tile → "edit"), or
   # edit the value here — but this file is tracked, so an edit here is a change
@@ -36,7 +36,10 @@ risk:
   # even one share" and you get almost no fills to learn from. 10,000 is a
   # sensible practice size. That is the sizing maths being honest, not a fault
   # — and small capital does not make live trading safer, staying in paper does.
-  total_capital: 10000
+  # 100,000 paper: 1% risk is 1,000 a trade, enough to size a real position
+  # on any name in the watchlist. Editing Capital on the dashboard saves the
+  # new figure to .env, so it survives a restart.
+  total_capital: 100000
   # ACTIVE PAPER PROFILE: many trades to learn from (loose entry gates, five
   # positions, 60 names, top 5 per band), each one small, with a hard ceiling
   # on what can be lost at once and in a day.

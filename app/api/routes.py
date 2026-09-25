@@ -150,6 +150,14 @@ async def signal_detail(signal_id: str) -> dict[str, Any]:
             "reports": db.reports_for_signal(signal_id)}
 
 
+@router.get("/paper-record")
+async def paper_record(days: int = 30) -> dict[str, Any]:
+    """Every filled paper trade in the window, and how the book has done."""
+    from app.core.record import build
+
+    return build(get_config(), days=days)
+
+
 @router.get("/focus")
 async def focus(request: Request) -> dict[str, Any]:
     """The names the desk is watching now: the top of each band."""
@@ -305,6 +313,19 @@ async def set_capital(request: Request, body: CapitalRequest) -> dict[str, Any]:
     result = engine.risk.set_capital(body.capital)
     if not result["ok"]:
         raise HTTPException(409, result["reason"])
+    # Saved to .env, which wins over settings.yaml and survives a restart.
+    # Kept only in memory, every `git pull` and restart put it back.
+    try:
+        from pathlib import Path
+
+        from app.core.envfile import set_values
+        root = Path(__file__).resolve().parents[2]
+        set_values(root / ".env", {"TOTAL_CAPITAL": f"{float(body.capital):g}"},
+                   template=root / ".env.example")
+        result["saved"] = True
+    except OSError as exc:
+        result["saved"] = False
+        result["save_error"] = str(exc)
     await bus.publish(Topic.RISK_STATE, engine.risk.snapshot())
     return result
 

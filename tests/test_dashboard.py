@@ -224,8 +224,8 @@ def test_the_page_keeps_only_what_the_desk_needs_on_screen():
     page = (STATIC / "index.html").read_text()
     headings = re.findall(r"<h2>([^<]+)", page)
     headings = [h.strip() for h in headings]
-    assert headings == ["Account", "Watching", "Activity Log", "Open Positions",
-                        "Signals", "Today", "Weekly Review"]
+    assert headings == ["Account", "Paper Record", "Watching", "Activity Log",
+                        "Open Positions", "Signals", "Today", "Weekly Review"]
     for gone in ("Price Action", 'id="chart"', "LightweightCharts",
                  "Trade Opportunities", "Agent Desk", "Position Sizing",
                  "News &amp; Sentiment", "Macro Backdrop", "Option Chain",
@@ -303,3 +303,26 @@ def test_template_risk_defaults_in_env_are_retired_but_choices_are_kept(tmp_path
     assert "TOTAL_CAPITAL=100000" in text
     assert not any(line.startswith("RISK_PER_TRADE_PCT") for line in text.splitlines())
     assert run._retire_template_risk(env) == []            # idempotent
+
+
+def test_the_old_10000_capital_in_env_is_retired(tmp_path):
+    """10,000 at 1% is 100 of risk a trade — a handful of shares."""
+    import run
+
+    env = tmp_path / ".env"
+    env.write_text("TOTAL_CAPITAL=10000\n", encoding="utf-8")
+    assert run._retire_template_risk(env) == ["TOTAL_CAPITAL"]
+
+
+def test_a_capital_set_on_the_dashboard_is_saved(client, monkeypatch):
+    """It lived only in memory, so every restart put the old figure back."""
+    import app.core.envfile as envfile
+    from app.agents.risk import RiskManager
+
+    saved: dict = {}
+    monkeypatch.setattr(envfile, "set_values",
+                        lambda path, updates, template=None: saved.update(updates))
+    client.engine.risk = RiskManager()
+    body = client.post("/api/risk/capital", json={"capital": 250000}).json()
+    assert body["saved"] is True
+    assert saved == {"TOTAL_CAPITAL": "250000"}

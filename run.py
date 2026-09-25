@@ -185,7 +185,9 @@ _REAL_MONEY_BROKERS = {"zerodha", "upstox", "angelone"}
 # copied from the template rather than chosen, and .env beats settings.yaml —
 # so they would pin the desk to the old conservative risk for ever.
 _TEMPLATE_RISK = {"RISK_PER_TRADE_PCT": 1.0, "MAX_DAILY_LOSS_PCT": 3.0,
-                  "MIN_RISK_REWARD": 2.0}
+                  "MIN_RISK_REWARD": 2.0,
+                  # 10,000 at 1% is 100 of risk a trade — a handful of shares.
+                  "TOTAL_CAPITAL": 10000.0}
 
 
 def _retire_template_risk(env_path) -> list[str]:
@@ -214,7 +216,8 @@ def _retire_template_risk(env_path) -> list[str]:
     if retired:
         env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"- Risk: {', '.join(retired)} in .env were the old template "
-              f"defaults — retired, so config/settings.yaml decides")
+              f"defaults — retired, so config/settings.yaml decides "
+              f"(see Rules on the dashboard)")
     return retired
 
 

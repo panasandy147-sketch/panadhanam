@@ -1019,3 +1019,8 @@ tr.why-row td { padding-top: 0; border-top: 0; white-space: normal; }
   color: var(--text-muted); }
 .pill.ready { outline: 1px solid currentColor; }
 .focus-note { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+
+/* Paper record */
+#record-trades { padding: 0 0 6px; }
+#record-trades .why-cell { white-space: normal; font-size: 11.5px; color: var(--text-muted);
+  min-width: 260px; }

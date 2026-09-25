@@ -437,3 +437,42 @@ def test_the_model_does_not_decide_trades_unless_asked(cfg, monkeypatch):
         assert cfg.llm_in_decisions is True
     finally:
         cfg.settings["decisions"]["use_llm"] = False
+
+
+# --------------------------------------------------------------------------- #
+# The paper record
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_paper_record_counts_a_bought_and_sold_trade(engine, cfg, monkeypatch):
+    from app.core import record
+
+    before = record.build(cfg)
+    row = await _open_one(engine)
+    during = record.build(cfg)
+    assert during["open_now"] == before["open_now"] + 1
+
+    _price(engine, monkeypatch, row["target"] + 1.0)
+    await engine.outcomes.poll()
+    after = record.build(cfg)
+    assert after["closed"] == before["closed"] + 1
+    assert after["wins"] == before["wins"] + 1
+    assert after["total_pnl"] > before["total_pnl"]
+    [trade] = [t for t in after["trades"] if t["id"] == row["id"]]
+    assert trade["exit_reason"].startswith("Target")
+    assert after["exits"]["target"] == before["exits"]["target"] + 1
+
+
+@pytest.mark.asyncio
+async def test_an_alert_on_an_unarmed_day_is_not_in_the_p_and_l(engine, cfg, monkeypatch):
+    """It was never bought. The tracker follows it to see what it would have
+    done; counting its outcome as paper P&L would be a trade that never
+    happened."""
+    from app.core import record
+
+    before = record.build(cfg)
+    _votes(engine, {"candlestick": (0.7, 0.9), "derivatives": (0.6, 0.8)})
+    [result] = await engine.run_cycle([SYMBOL])       # not armed
+    assert result["signal_id"] and not engine.broker._orders
+    after = record.build(cfg)
+    assert after["open_now"] == before["open_now"]
+    assert after["alerts_not_traded"] == before["alerts_not_traded"] + 1
