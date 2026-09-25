@@ -38,6 +38,7 @@ MAX_NOTABLE = 400
 NOTABLE_KINDS = frozenset({
     "trade.open", "trade.exit", "setup.fired", "risk.refused",
     "contract.none", "contract.fallback", "graded", "halt", "screen.done", "error",
+    "restored",
 })
 
 

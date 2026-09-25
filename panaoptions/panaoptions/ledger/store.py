@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS open_book (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS signals_seen (
     id TEXT PRIMARY KEY,
     ts TEXT,
@@ -84,6 +89,29 @@ def get_conn() -> sqlite3.Connection:
 def init() -> None:
     get_conn()
     log.info("ledger database at %s", db_path())
+
+
+def save_open_book(trades: list[PaperTrade]) -> None:
+    """The positions still open, exactly as held — replaced wholesale.
+
+    Trades were written only when they closed, so a restart (every git pull)
+    dropped whatever was open: never sold, never graded, gone from the record.
+    """
+    conn = get_conn()
+    conn.execute("DELETE FROM open_book")
+    conn.executemany("INSERT INTO open_book (id, payload) VALUES (?, ?)",
+                     [(t.id, t.model_dump_json()) for t in trades])
+    conn.commit()
+
+
+def load_open_book() -> list[PaperTrade]:
+    out: list[PaperTrade] = []
+    for row in get_conn().execute("SELECT payload FROM open_book").fetchall():
+        try:
+            out.append(PaperTrade.model_validate_json(row[0]))
+        except Exception as exc:                       # noqa: BLE001
+            log.warning("could not restore an open trade: %s", exc)
+    return out
 
 
 def save_trade(trade: PaperTrade) -> None:

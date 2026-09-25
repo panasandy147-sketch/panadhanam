@@ -673,3 +673,19 @@ async def test_a_closed_symbol_waits_out_the_cooldown(desk, monkeypatch):
     desk.ledger.close(trade.id, trade.entry_price, ExitReason.STOP, _at(9, 55))
     assert "waiting 15 min" in desk._symbol_busy(trade.symbol, _at(10, 0))
     assert desk._symbol_busy(trade.symbol, _at(10, 11)) == ""
+
+
+@pytest.mark.asyncio
+async def test_open_positions_survive_a_restart(desk, monkeypatch, cfg):
+    """Trades were saved only on close, so every git pull and restart
+    dropped what was open — never sold, never graded."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+    held = {t.id: t.contract_label for t in desk.ledger.open_trades.values()}
+    assert held
+
+    after = OptionsDesk(cfg=cfg, feed=FakeFeed())        # the restarted desk
+    after._restore_open_book()
+    assert {t.id: t.contract_label for t in after.ledger.open_trades.values()} == held
+    assert after.risk.state.open_trades == len(held)
+    assert after.risk.state.deployed > 0

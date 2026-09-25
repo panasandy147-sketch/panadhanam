@@ -120,6 +120,7 @@ class OptionsDesk:
     async def start(self, cycle_seconds: int = 60) -> None:
         self.cycle_seconds = cycle_seconds
         store.init()
+        self._restore_open_book()
         if not await self.feed.connect():
             log.error("no market data — refusing to start. A desk that cannot "
                       "see prices must not pretend to trade.")
@@ -186,7 +187,32 @@ class OptionsDesk:
                         "Carrying on with the rule engine alone.", exc)
 
     # ------------------------------------------------------------------ #
+    def _restore_open_book(self) -> None:
+        """Pick up the positions a restart would otherwise have dropped."""
+        restored = [t for t in store.load_open_book() if t.is_open
+                    and t.id not in self.ledger.open_trades]
+        for trade in restored:
+            self.ledger.open_trades[trade.id] = trade
+        if restored:
+            self.risk.state.open_trades = len(self.ledger.open_trades)
+            self.risk.state.deployed = self.ledger._deployed()
+            labels = ", ".join(t.contract_label for t in restored)
+            log.info("restored %d open position(s): %s", len(restored), labels)
+            self.activity.add("restored", f"{len(restored)} open position(s) "
+                              f"picked up after the restart: {labels}")
+
     async def cycle(self) -> dict[str, Any]:
+        try:
+            return await self._cycle()
+        finally:
+            # Whatever the cycle opened, marked, tightened or closed, the book
+            # on disk now matches the book in memory.
+            try:
+                store.save_open_book(list(self.ledger.open_trades.values()))
+            except Exception as exc:                   # noqa: BLE001
+                log.warning("could not save the open book: %s", exc)
+
+    async def _cycle(self) -> dict[str, Any]:
         now = clock.now(self.cfg.timezone)
         today = now.date().isoformat()
         self.risk.roll_day(today)
