@@ -644,3 +644,32 @@ def test_the_shipped_screen_rechecks_every_minute(cfg):
     """A name can gap or wake up mid-session; five minutes was too long to
     miss it for."""
     assert int(cfg.get("premarket.rescreen_minutes")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_setup_still_valid_next_cycle_is_not_bought_twice(desk, monkeypatch):
+    """AMZN 250C was bought x5 and then x3 on the same idea, one cycle apart."""
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    desk.cfg.data["account"]["starting_capital"] = 100_000.0
+    desk.risk.capital = 100_000.0
+    desk.cfg.data["risk"]["max_open_trades"] = 3
+    desk.cfg.data["risk"]["max_total_deployed_pct"] = 60.0
+    # One symbol with room for three positions: only a repeat could fill them.
+    desk.cfg.data["universe"]["symbols"] = ["SPY"]
+    for minute in (50, 51, 52):
+        monkeypatch.setattr(clock, "now", lambda tz, m=minute: _at(9, m))
+        await desk.cycle()
+    symbols = [t.symbol for t in desk.ledger.open_trades.values()]
+    assert symbols == ["SPY"], symbols
+
+
+@pytest.mark.asyncio
+async def test_a_closed_symbol_waits_out_the_cooldown(desk, monkeypatch):
+    from panaoptions.models import ExitReason
+
+    monkeypatch.setattr(clock, "now", lambda tz: _at(9, 50))
+    await desk.cycle()
+    trade = next(iter(desk.ledger.open_trades.values()))
+    desk.ledger.close(trade.id, trade.entry_price, ExitReason.STOP, _at(9, 55))
+    assert "waiting 15 min" in desk._symbol_busy(trade.symbol, _at(10, 0))
+    assert desk._symbol_busy(trade.symbol, _at(10, 11)) == ""

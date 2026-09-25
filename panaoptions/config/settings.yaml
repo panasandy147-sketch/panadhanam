@@ -267,6 +267,12 @@ risk:
   # watchlist in the same instant each cycle and takes as many setups as it
   # has room for, rather than queueing them one at a time.
   max_open_trades: 3
+  # One position per symbol: a setup stays valid for several cycles, and
+  # without this the same idea was bought again every minute (AMZN x5, x3).
+  one_position_per_symbol: true
+  # After a symbol's trade closes, wait this long before trading it again —
+  # a stopped-out setup is not bought straight back.
+  reentry_cooldown_minutes: 15
 
   # --- What "wrong" means ------------------------------------------------
   # underlying  the strategy's own invalidation level decides the exit. A

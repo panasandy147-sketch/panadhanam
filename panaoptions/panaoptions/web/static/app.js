@@ -218,7 +218,10 @@ function renderOpen(s) {
   $("open-body").innerHTML = `
     <table>
       <thead><tr><th>Contract</th><th>Side</th><th class="num">Qty</th>
-      <th class="num">Entry</th><th class="num">Stop</th><th class="num">TP1</th>
+      <th class="num">Entry</th>
+      <th class="num" title="The real stop: the stock breaking the level the setup formed at">Exit if stock</th>
+      <th class="num" title="Disaster backstop on the option price — only if it collapses before the stock level breaks">Backstop</th>
+      <th class="num">TP1</th>
       <th class="num">TP2</th><th class="num">Banked</th></tr></thead>
       <tbody>${open.map((t) => `
         <tr>
@@ -226,6 +229,8 @@ function renderOpen(s) {
           <td class="${t.direction === "LONG" ? "pos" : "neg"}">${esc(t.direction)}</td>
           <td class="num">${t.remaining}</td>
           <td class="num">${num(t.entry_price)}</td>
+          <td class="num neg" title="${esc(t.invalidation_note || "")}">${t.underlying_support
+            ? `${t.direction === "LONG" ? "&lt;" : "&gt;"} ${num(t.underlying_support)}` : "—"}</td>
           <td class="num neg">${num(t.stop_price)}</td>
           <td class="num pos">${num(t.target_1)}</td>
           <td class="num pos">${num(t.target_2)}</td>

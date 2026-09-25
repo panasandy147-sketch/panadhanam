@@ -301,6 +301,11 @@ class OptionsDesk:
                     f"after it were not judged this cycle", ts=now)
                 break
 
+            busy = self._symbol_busy(symbol, now)
+            if busy:
+                self.activity.add("hunt.skip", f"{symbol} — {busy}", ts=now)
+                continue
+
             setup, attempts = strategies.evaluate_all(
                 symbol, candles, session_levels, self.cfg)
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
@@ -434,6 +439,35 @@ class OptionsDesk:
             symbol, self.cfg.get("technical.timeframe", "5m"))
         levels = await self._levels_for(symbol, now)
         return candles, levels
+
+    def _symbol_busy(self, symbol: str, now: datetime) -> str:
+        """Why this symbol must not be traded again right now, or "".
+
+        A setup stays valid for several cycles, and nothing stopped the desk
+        buying it again each minute: AMZN 250C was bought x5 and then x3 on
+        the same idea, doubling the risk on one name. One position per
+        symbol; and after a close, a cool-down so a trade just stopped out is
+        not bought straight back on the setup that just failed.
+        """
+        if bool(self.cfg.get("risk.one_position_per_symbol", True)):
+            for trade in self.ledger.open_trades.values():
+                if trade.symbol == symbol:
+                    return (f"already holding {trade.contract_label} — one "
+                            f"position per symbol")
+        cooldown = float(self.cfg.get("risk.reentry_cooldown_minutes", 15) or 0)
+        if cooldown > 0:
+            for trade in reversed(self.ledger.closed):
+                if trade.symbol != symbol or trade.closed_at is None:
+                    continue
+                closed_at = trade.closed_at
+                if closed_at.tzinfo is None and now.tzinfo is not None:
+                    closed_at = closed_at.replace(tzinfo=now.tzinfo)
+                waited = (now - closed_at).total_seconds() / 60.0
+                if 0 <= waited < cooldown:
+                    return (f"closed {waited:.0f} min ago — waiting "
+                            f"{cooldown:.0f} min before trading it again")
+                break
+        return ""
 
     def _note_flow(self, symbol: str, setup, chain) -> None:
         """Say whether the options flow agrees with the setup. Never a veto."""
