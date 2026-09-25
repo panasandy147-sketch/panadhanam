@@ -15,6 +15,7 @@ from typing import Any
 
 from app.agents.graph import TradingDesk
 from app.agents.risk import RiskManager
+from app.analysis.focus import FocusList
 from app.analysis.opportunities import OpportunityScanner
 from app.analysis.replay import WeeklyReplay
 from app.brokers.base import BrokerAdapter
@@ -46,6 +47,7 @@ class TradingEngine:
         self.feedback = FeedbackLoop(self.cfg)
         self.outcomes = OutcomeTracker(broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
+        self.focus = FocusList(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
@@ -130,6 +132,7 @@ class TradingEngine:
         self.macro = MacroCollector(self.cfg)
         self.outcomes = OutcomeTracker(self.broker, self.cfg, risk_manager=self.risk)
         self.scanner = OpportunityScanner(self, self.cfg)
+        self.focus = FocusList(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
@@ -223,7 +226,13 @@ class TradingEngine:
         # Keep the CMIO's weights current with what the learning loop has found.
         self.feedback.apply_learned_weights()
 
-        targets = symbols or [w["symbol"] for w in self.cfg.watchlist()]
+        # The focus list: the top names of each band, re-ranked on its own
+        # clock. An explicit symbol list (a test, a manual cycle) bypasses it.
+        ready: dict[str, Any] = {}
+        if symbols:
+            targets = list(symbols)
+        else:
+            targets, ready = await self.focus.targets(cycle_id, news_items, macro_snap)
         outcomes: list[dict[str, Any]] = []
 
         # Fetch every symbol's data concurrently, then decide one at a time.
@@ -231,7 +240,9 @@ class TradingEngine:
         # than the cycle; deciding one at a time is still required, because
         # each approved trade must count against the limits before the next
         # symbol is judged.
-        contexts = await self._prefetch(targets, cycle_id, news_items, macro_snap)
+        missing = [t for t in targets if t not in ready]
+        contexts = {**ready,
+                    **await self._prefetch(missing, cycle_id, news_items, macro_snap)}
 
         for symbol in targets:
             try:

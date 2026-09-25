@@ -224,8 +224,8 @@ def test_the_page_keeps_only_what_the_desk_needs_on_screen():
     page = (STATIC / "index.html").read_text()
     headings = re.findall(r"<h2>([^<]+)", page)
     headings = [h.strip() for h in headings]
-    assert headings == ["Account", "Activity Log", "Open Positions", "Signals",
-                        "Today", "Weekly Review"]
+    assert headings == ["Account", "Watching", "Activity Log", "Open Positions",
+                        "Signals", "Today", "Weekly Review"]
     for gone in ("Price Action", 'id="chart"', "LightweightCharts",
                  "Trade Opportunities", "Agent Desk", "Position Sizing",
                  "News &amp; Sentiment", "Macro Backdrop", "Option Chain",

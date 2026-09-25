@@ -80,6 +80,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("A full cycle runs every", f"{g('system.cycle_seconds', 60)} s",
                   "system.cycle_seconds"),
             *band_rules,
+            _rule("Of those, only the top of each band is watched and traded, "
+                  "ranked by the desk's own vote and re-ranked every "
+                  f"{g('focus.rerank_minutes', 15)} min",
+                  f"top {g('focus.per_band', 5)} per band"
+                  if g("focus.enabled", True) else "off — all scanned",
+                  "focus.per_band / focus.rerank_minutes"),
             _rule("Market opens", g("system.market_open"), session_key + "market_open"),
             _rule("No new trades after", g("system.no_new_entry_after"),
                   session_key + "no_new_entry_after"),

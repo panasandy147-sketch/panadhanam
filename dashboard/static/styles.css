@@ -1011,3 +1011,11 @@ tr.why-row td { padding-top: 0; border-top: 0; white-space: normal; }
   .rules-table .rs { display: none; }
   .rules-table .rv { white-space: normal; }
 }
+
+/* Watching — the focus list */
+#focus-body { padding: 10px 14px 12px; }
+.focus-band { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.focus-label { width: 64px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-muted); }
+.pill.ready { outline: 1px solid currentColor; }
+.focus-note { margin-top: 6px; font-size: 11px; color: var(--text-muted); }

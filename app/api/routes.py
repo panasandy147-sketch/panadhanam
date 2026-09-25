@@ -150,6 +150,12 @@ async def signal_detail(signal_id: str) -> dict[str, Any]:
             "reports": db.reports_for_signal(signal_id)}
 
 
+@router.get("/focus")
+async def focus(request: Request) -> dict[str, Any]:
+    """The names the desk is watching now: the top of each band."""
+    return _engine(request).focus.snapshot()
+
+
 @router.get("/rules")
 async def rules(request: Request) -> dict[str, Any]:
     """The rules and strategies in words, with the live config's numbers."""

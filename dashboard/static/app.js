@@ -100,6 +100,7 @@ function handle(event) {
     case "market.switched":     adoptMarket(data.market); break;
     case "trading_day.state":   renderTradingDay(data); break;
     case "trading_day.summary": renderDayReport(data, "after square-off"); break;
+    case "focus.updated":       renderFocus(data); break;
     case "position.update":
       loadPositions();
       loadHistory();
@@ -156,7 +157,7 @@ async function adoptMarket(profile) {
     `<div class="empty">No signals yet for ${esc(profile.name)}.</div>`;
   $("s-today").hidden = true;
 
-  await Promise.all([loadPositions(), loadStatus(), loadTradingDay()]);
+  await Promise.all([loadPositions(), loadStatus(), loadTradingDay(), loadFocus()]);
 }
 
 async function switchMarket(code) {
@@ -672,7 +673,7 @@ async function saveWeekly() {
    thing anyone opens the log to find — off the bottom. Decisions are kept in
    their own list that the chatter cannot evict. */
 const DECISION_TOPICS = new Set([
-  "signal.approved", "signal.rejected", "position.update",
+  "signal.approved", "signal.rejected", "position.update", "focus.updated",
   "trading_day.state", "trading_day.summary", "market.switched",
   "premarket.scan", "system.error",
 ]);
@@ -713,6 +714,10 @@ function describe(topic, d) {
           + `${money(Math.round(d.pnl || 0))}`, level: "" };
     case "market.switched":
       return { text: `now trading ${d.market?.name || d.market?.code || ""}`, level: "" };
+    case "focus.updated":
+      return { text: `watching the top ${d.per_band} of each band (from ${d.ranked}) — `
+          + Object.entries(d.bands || {}).map(([b, rows]) =>
+            `${b}: ${rows.map((r) => r.symbol).join(", ")}`).join(" · "), level: "" };
     case "premarket.scan":
       return { text: "pre-market scan done", level: "" };
     case "system.error":
@@ -833,6 +838,35 @@ function notifyTrade(d) {
 }
 
 /* ====================================================================== */
+/* Focus list                                                             */
+/* ====================================================================== */
+function renderFocus(f) {
+  if (!f) return;
+  const bands = Object.entries(f.bands || {});
+  const when = (iso) => iso ? new Date(iso).toLocaleTimeString("en-GB",
+    { timeZone: marketTz(), hour: "2-digit", minute: "2-digit" }) : "—";
+  $("focus-meta").textContent = f.enabled
+    ? `top ${f.per_band} of each band · ${f.ranked} ranked at ${when(f.updated_at)} ${tzLabel()}`
+      + ` · next ${when(f.next_rerank_at)}`
+    : "off — every name is scanned";
+  if (!bands.length) return;
+  $("focus-body").innerHTML = bands.map(([band, rows]) => `
+    <div class="focus-band"><span class="focus-label">Band ${esc(band)}</span>
+      ${rows.map((r) => `<span class="pill ${r.score > 0 ? "up" : r.score < 0 ? "down" : ""}${
+        r.tradeable ? " ready" : ""}" title="${esc(r.why)}">${esc(r.symbol)} ${signed(r.score)}${
+        r.tradeable ? " ●" : ""}</span>`).join("")}
+    </div>`).join("") + `<div class="focus-note">● passes the vote now · hover a name for
+      the reading behind it</div>`;
+}
+
+async function loadFocus() {
+  try {
+    const res = await fetch("/api/focus");
+    if (res.ok) renderFocus(await res.json());
+  } catch { /* the next event or poll fills it in */ }
+}
+
+/* ====================================================================== */
 /* Rules pop-up                                                           */
 /* ====================================================================== */
 /* Read beside the desk, not instead of it. /api/rules writes the text from
@@ -934,9 +968,11 @@ function bind() {
   bind();
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
-  await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay()]);
+  await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay(),
+                     loadFocus()]);
   connect();
   setInterval(loadPositions, 30_000);
+  setInterval(loadFocus, 60_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
 })();

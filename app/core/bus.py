@@ -96,6 +96,7 @@ class Topic:
     SIGNAL_APPROVED = "signal.approved"
     SIGNAL_REJECTED = "signal.rejected"
     POSITION_UPDATE = "position.update"
+    FOCUS = "focus.updated"
     RISK_STATE = "risk.state"
     NEWS = "news.item"
     MACRO = "macro.update"

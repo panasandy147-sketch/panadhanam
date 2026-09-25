@@ -107,6 +107,18 @@ consensus:
   lead_analysts: ["candlestick", "derivatives"]
 
 # --------------------------------------------------------------------------
+# FOCUS LIST — which names the desk actually watches and trades.
+# --------------------------------------------------------------------------
+focus:
+  # Every rerank_minutes the whole watchlist (bands A, B, C) is scored the way
+  # a trade is — every analyst, then the weighted vote — and the top per_band
+  # names of each band become the ONLY ones cycled on and traded until the
+  # next re-rank. Open positions are always managed, on the list or not.
+  enabled: true
+  per_band: 5
+  rerank_minutes: 15
+
+# --------------------------------------------------------------------------
 # DECISIONS — may the local model change a trade decision?
 # --------------------------------------------------------------------------
 decisions:
