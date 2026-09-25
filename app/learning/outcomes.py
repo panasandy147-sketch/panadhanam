@@ -36,6 +36,7 @@ class OutcomeTracker:
 
         closed: list[dict[str, Any]] = []
         unrealised = 0.0
+        still_open: list[tuple[dict[str, Any], float]] = []
 
         for row in open_rows:
             price = await self._current_price(row)
@@ -47,7 +48,6 @@ class OutcomeTracker:
             target = row["target"]
             qty = row["quantity"] or 0
             is_long = row["side"] == "BUY"
-            risk_per_unit = abs(entry - stop) or 1.0
 
             hit_stop = price <= stop if is_long else price >= stop
             hit_target = price >= target if is_long else price <= target
@@ -60,10 +60,6 @@ class OutcomeTracker:
                 exit_price = (stop if hit_stop
                               else target if hit_target
                               else price)
-                direction = 1 if is_long else -1
-                pnl = (exit_price - entry) * qty * direction
-                r_multiple = (exit_price - entry) * direction / risk_per_unit
-
                 status = (SignalStatus.CLOSED_STOP if hit_stop else
                           SignalStatus.CLOSED_TARGET if hit_target else
                           SignalStatus.CLOSED_TIME)
@@ -71,49 +67,93 @@ class OutcomeTracker:
                     log.info("TIME STOP %s — no bounce within %s min, exiting at market",
                              row["symbol"],
                              self.cfg.get("risk.time_stop_minutes", 30))
-
-                db.update_outcome(row["id"], round(exit_price, 2), round(pnl, 2),
-                                  round(r_multiple, 3), status.value)
-                closed.append({"event": "closed",
-                               "signal_id": row["id"], "symbol": row["symbol"],
-                               "side": row["side"],
-                               "status": status.value, "pnl": round(pnl, 2),
-                               "r_multiple": round(r_multiple, 3),
-                               "exit_price": round(exit_price, 2),
-                               "exit_reason": why_sold({
-                                   **row, "status": status.value,
-                                   "exit_detail": ("square_off" if timed_out
-                                                   else "time_stop"),
-                                   "exit_price": round(exit_price, 2),
-                                   "r_multiple": round(r_multiple, 3)})})
-
-                if self.risk:
-                    from app.core.models import TradeSignal
-                    try:
-                        import json
-                        sig = TradeSignal.model_validate(json.loads(row["payload"]))
-                        self.risk.register_close(sig, pnl)
-                    except Exception as exc:
-                        log.debug("risk close bookkeeping failed: %s", exc)
-
-                cur = self.cfg.market.currency_symbol
-                log.info("CLOSED %s %s @ %.2f → %s (%.2fR, %s%.0f)",
-                         row["symbol"], row["side"], exit_price, status.value,
-                         r_multiple, cur, pnl)
-                await bus.publish(Topic.POSITION_UPDATE, closed[-1])
-
-                # Every completed trade gets graded, automatically. A P&L
-                # number alone teaches nothing; the card is the learning.
-                await self._journal(row, exit_price, status.value)
+                closed.append(await self._close(
+                    row, exit_price, status,
+                    "square_off" if timed_out else "time_stop"))
             else:
                 direction = 1 if is_long else -1
                 unrealised += (price - entry) * qty * direction
+                still_open.append((row, price))
 
         if self.risk:
             self.risk.set_unrealised(round(unrealised, 2))
+            closed += await self._maybe_trip_breaker(still_open)
             await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
 
         return closed
+
+    async def _maybe_trip_breaker(self, still_open: list[tuple[dict[str, Any], float]]
+                                  ) -> list[dict[str, Any]]:
+        """The daily circuit breaker: at the loss limit, stop everything.
+
+        Realised plus open P&L at or below -`risk.max_daily_loss_pct`: every
+        open position is closed at market, the desk is halted and the trading
+        day disarmed for the rest of the session. It does not wait for the
+        next entry to be refused — an open book can keep losing after the
+        limit, and "no new trades" alone would let it.
+        """
+        state = self.risk.state
+        if not bool(self.cfg.get("risk.circuit_breaker", True)):
+            return []
+        if state.daily_loss_limit <= 0 or state.daily_pnl > -state.daily_loss_limit:
+            return []
+        first = not state.halted
+        state.halted = True
+        state.halt_reason = (f"Daily circuit breaker: P&L {state.daily_pnl:,.0f} hit the "
+                             f"-{state.daily_loss_limit:,.0f} limit — flat and locked "
+                             f"for the rest of the session")
+        out = [await self._close(row, price, SignalStatus.CLOSED_TIME, "circuit_breaker")
+               for row, price in still_open]
+        self.risk.set_unrealised(0.0)
+        if first:
+            log.warning("CIRCUIT BREAKER — %s", state.halt_reason)
+            day = getattr(self, "trading_day", None)
+            if day is not None:
+                day._auto_disarm(state.halt_reason)
+                await bus.publish("trading_day.state", day.status())
+        return out
+
+    async def _close(self, row: dict[str, Any], exit_price: float,
+                     status: SignalStatus, detail: str) -> dict[str, Any]:
+        entry = row["entry"]
+        qty = row["quantity"] or 0
+        direction = 1 if row["side"] == "BUY" else -1
+        risk_per_unit = abs(entry - row["stop_loss"]) or 1.0
+        pnl = (exit_price - entry) * qty * direction
+        r_multiple = (exit_price - entry) * direction / risk_per_unit
+
+        db.update_outcome(row["id"], round(exit_price, 2), round(pnl, 2),
+                          round(r_multiple, 3), status.value)
+        event = {"event": "closed",
+                 "signal_id": row["id"], "symbol": row["symbol"],
+                 "side": row["side"],
+                 "status": status.value, "pnl": round(pnl, 2),
+                 "r_multiple": round(r_multiple, 3),
+                 "exit_price": round(exit_price, 2),
+                 "exit_reason": why_sold({
+                     **row, "status": status.value, "exit_detail": detail,
+                     "exit_price": round(exit_price, 2),
+                     "r_multiple": round(r_multiple, 3)})}
+
+        if self.risk:
+            from app.core.models import TradeSignal
+            try:
+                import json
+                sig = TradeSignal.model_validate(json.loads(row["payload"]))
+                self.risk.register_close(sig, pnl)
+            except Exception as exc:
+                log.debug("risk close bookkeeping failed: %s", exc)
+
+        cur = self.cfg.market.currency_symbol
+        log.info("CLOSED %s %s @ %.2f → %s (%.2fR, %s%.0f)",
+                 row["symbol"], row["side"], exit_price, status.value,
+                 r_multiple, cur, pnl)
+        await bus.publish(Topic.POSITION_UPDATE, event)
+
+        # Every completed trade gets graded, automatically. A P&L number
+        # alone teaches nothing; the card is the learning.
+        await self._journal(row, exit_price, status.value)
+        return event
 
     async def _journal(self, row: dict[str, Any], exit_price: float,
                        outcome: str) -> None:

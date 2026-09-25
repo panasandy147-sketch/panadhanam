@@ -178,6 +178,22 @@ class CMIOAgent(BaseAgent):
         policy = consensus.get("conflict_policy", "flat")
         tech_ids = {"candlestick", "derivatives"}
 
+        if policy == "technicals_unless_derivatives_oppose":
+            # A chart breakout into an open-interest wall or against dealer
+            # positioning usually fails, so the two price readers must not
+            # disagree. Against news or macro, the chart wins. When the
+            # options analyst has abstained (no real chain), the chart may
+            # trade alone.
+            chart = [r for r in bulls + bears if r.agent_id == "candlestick"]
+            deriv = [r for r in bulls + bears if r.agent_id == "derivatives"]
+            if chart and deriv and (chart[0].score > 0) != (deriv[0].score > 0):
+                conflicts.append("Options & futures oppose the chart — no trade")
+                return 0.0
+            if chart:
+                conflicts.append("Sided with the chart against news/macro")
+                return max(-1.0, min(1.0, chart[0].score))
+            return composite * 0.45
+
         if policy == "flat":
             conflicts.append("Conflict policy 'flat' — conviction damped toward neutral")
             return composite * 0.45

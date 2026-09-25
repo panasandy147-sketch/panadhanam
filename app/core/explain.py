@@ -93,6 +93,10 @@ def why_sold(row: dict[str, Any]) -> str:
                 f"planned loss was taken rather than hoping.")
     if status == "CLOSED_TIME":
         detail = str(row.get("exit_detail") or "")
+        if detail == "circuit_breaker":
+            return (f"Closed at {fmt(exit_price)}{r_text} by the daily circuit "
+                    f"breaker — the day's loss reached the limit, so everything "
+                    f"was closed and the desk locked for the session.")
         if detail == "time_stop":
             cause = "no follow-through within the time stop"
         elif detail == "square_off":

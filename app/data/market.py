@@ -36,6 +36,39 @@ class MarketDataService:
     # a free feed that throttles; 1m and 5m are always fetched fresh.
     _DEFAULT_TTL = {"15m": 120, "30m": 240, "1h": 300, "1d": 900}
 
+    def _dte(self, expiry: str) -> int | None:
+        from app.core import clock
+        try:
+            day = datetime.fromisoformat(str(expiry)[:10]).date()
+        except ValueError:
+            return None
+        today = clock.market_now(str(self.cfg.get("system.timezone",
+                                                  "Asia/Kolkata"))).date()
+        return (day - today).days
+
+    async def _chain_in_window(self, symbol: str):
+        """The chain for an expiry inside derivatives.min/max_days_to_expiry.
+
+        Asking for "the" chain returns the NEAREST expiry — on expiry day that
+        is a 0DTE contract, which a 15-minute pause bleeds to nothing. The
+        window was in the config and never applied. Now: the nearest expiry
+        inside it, or failing that the nearest beyond its floor; never one
+        under the floor.
+        """
+        lo = int(self.cfg.get("derivatives.min_days_to_expiry", 3))
+        hi = int(self.cfg.get("derivatives.max_days_to_expiry", 7))
+        try:
+            expiries = await self.broker.get_expiries(symbol)
+        except Exception:
+            expiries = []
+        dated = sorted((d, e) for e in expiries or []
+                       if (d := self._dte(e)) is not None and d >= lo)
+        if not dated:
+            return None
+        inside = [e for d, e in dated if d <= hi]
+        return await self.broker.get_option_chain(symbol, inside[0] if inside
+                                                  else dated[0][1])
+
     async def _candles(self, symbol: str, tf: str) -> list:
         ttl = float((self.cfg.get("technical.cache_seconds") or self._DEFAULT_TTL)
                     .get(tf, 0) or 0)
@@ -65,7 +98,7 @@ class MarketDataService:
         # Only names marked F&O have a chain worth asking for. Asking NSE for
         # forty cash-only names a minute is how a feed gets rate-limited.
         fno = bool(self.cfg.instrument_meta(symbol).get("fno", True))
-        chain_task = (self.broker.get_option_chain(symbol)
+        chain_task = (self._chain_in_window(symbol)
                       if self.broker.supports_options and fno else None)
 
         quote = await quote_task
@@ -98,6 +131,18 @@ class MarketDataService:
                 quote.change_pct if quote else 0.0,
                 self.cfg.get("derivatives", {}) or {},
             )
+            # Keep a daily ATM IV sample from REAL chains, so IV rank can be
+            # measured against this symbol's own history.
+            atm_iv = ctx.indicators["derivatives"].get("atm_iv")
+            if atm_iv and not getattr(ctx.option_chain, "synthetic", False):
+                try:
+                    from app.core import clock
+                    from app.storage import db
+                    day = clock.market_now(str(self.cfg.get(
+                        "system.timezone", "Asia/Kolkata"))).date().isoformat()
+                    db.record_iv(symbol, day, float(atm_iv))
+                except Exception as exc:
+                    log.debug("IV sample not recorded for %s: %s", symbol, exc)
         return ctx
 
     def _compute_indicators(self, candles: dict[str, list], tech: dict) -> dict[str, Any]:

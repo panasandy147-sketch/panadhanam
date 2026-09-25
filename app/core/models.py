@@ -271,6 +271,8 @@ class RiskState(BaseModel):
     halted: bool = False
     halt_reason: str = ""
     exposure: float = 0.0
+    # Money lost if every open position hit its stop at once — "portfolio heat".
+    open_risk: float = 0.0
 
     @property
     def daily_pnl(self) -> float:

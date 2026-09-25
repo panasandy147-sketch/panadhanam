@@ -51,6 +51,7 @@ class TradingEngine:
         self.replay = WeeklyReplay(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
+        self.outcomes.trading_day = self.trading_day
 
         self.running = False
         self.paused = False
@@ -136,6 +137,7 @@ class TradingEngine:
         self.replay = WeeklyReplay(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
+        self.outcomes.trading_day = self.trading_day
         self._fundamentals.clear()
         self._premarket_done_on = None
 
@@ -222,6 +224,16 @@ class TradingEngine:
                 await bus.publish(Topic.NEWS, item)
         if macro_snap:
             await bus.publish(Topic.MACRO, macro_snap)
+
+        # A macro release in the window (scheduled, or just in the headlines)
+        # pauses every new entry this cycle; open trades are unaffected.
+        from app.core import blackout
+        previous = self.risk.blackout_reason
+        self.risk.blackout_reason = blackout.reason(self.cfg, news_items)
+        if self.risk.blackout_reason != previous:
+            await bus.publish("news.blackout", {
+                "active": bool(self.risk.blackout_reason),
+                "reason": self.risk.blackout_reason or "news blackout over"})
 
         # Keep the CMIO's weights current with what the learning loop has found.
         self.feedback.apply_learned_weights()
@@ -480,6 +492,7 @@ class TradingEngine:
             return
         self.running = True
         db.init_db()
+        self.risk.restore_open(db.open_signals())
         self.feedback.apply_learned_weights()
         self._task = asyncio.create_task(self._loop())
 

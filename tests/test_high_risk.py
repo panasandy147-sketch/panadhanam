@@ -105,7 +105,11 @@ async def test_cash_only_names_are_not_asked_for_a_chain(cfg):
         async def get_candles(self, symbol, tf, count=200):
             return []
 
-        async def get_option_chain(self, symbol):
+        async def get_expiries(self, symbol):
+            from datetime import date, timedelta
+            return [(date.today() + timedelta(days=5)).isoformat()]
+
+        async def get_option_chain(self, symbol, expiry=None):
             asked.append(symbol)
             return None
 

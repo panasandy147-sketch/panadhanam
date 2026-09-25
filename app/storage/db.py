@@ -69,6 +69,13 @@ CREATE TABLE IF NOT EXISTS agent_performance (
     PRIMARY KEY (agent_id, regime)
 );
 
+CREATE TABLE IF NOT EXISTS iv_history (
+    symbol TEXT NOT NULL,
+    day TEXT NOT NULL,
+    atm_iv REAL NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY,
     ts TEXT NOT NULL,
@@ -175,6 +182,20 @@ def save_cycle(result: Any, proceeded: bool) -> None:
         """, (result.cycle_id, result.ts.isoformat(), result.symbol,
               result.bias.value, result.composite_score, int(proceeded),
               result.duration_ms, _dump({"rejected": result.rejected})))
+
+
+def record_iv(symbol: str, day: str, atm_iv: float) -> None:
+    """One ATM IV sample per symbol per day (the latest reading wins)."""
+    with transaction() as conn:
+        conn.execute("INSERT OR REPLACE INTO iv_history (symbol, day, atm_iv) "
+                     "VALUES (?,?,?)", (symbol, day, float(atm_iv)))
+
+
+def iv_history(symbol: str, days: int = 252) -> list[float]:
+    rows = get_conn().execute(
+        "SELECT atm_iv FROM iv_history WHERE symbol = ? ORDER BY day DESC LIMIT ?",
+        (symbol, days)).fetchall()
+    return [float(r[0]) for r in rows]
 
 
 def recent_cycles(limit: int = 2000) -> list[dict[str, Any]]:

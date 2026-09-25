@@ -37,13 +37,21 @@ risk:
   # sensible practice size. That is the sizing maths being honest, not a fault
   # — and small capital does not make live trading safer, staying in paper does.
   total_capital: 10000
-  # HIGH-RISK PAPER PROFILE. These were 1.0 / 2.0 / 3.0 / 3 / 50 / 2.0; raised
-  # so the paper desk takes more and larger trades to learn from. Put them
-  # back before any thought of real money.
-  risk_per_trade_pct: 2.0        # 2% of capital risked per trade (was 1.0)
-  max_risk_per_trade_pct: 3.0    # hard ceiling — never exceed (was 2.0)
-  max_daily_loss_pct: 6.0        # kill-switch: halt all new trades for the day (was 3.0)
-  max_open_positions: 5          # was 3
+  # ACTIVE PAPER PROFILE: many trades to learn from (loose entry gates, five
+  # positions, 60 names, top 5 per band), each one small, with a hard ceiling
+  # on what can be lost at once and in a day.
+  risk_per_trade_pct: 1.0        # 1% of capital risked per trade, while learning
+  max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
+  # Daily circuit breaker: when realised + open P&L reaches -4%, every open
+  # position is closed at market, the desk halts and the day is disarmed —
+  # locked until the next session. Not just "no new trades".
+  max_daily_loss_pct: 4.0
+  circuit_breaker: true
+  max_open_positions: 5
+  # Portfolio heat: the total that would be lost if EVERY open position hit
+  # its stop together (a headline moving correlated names at once). Five at 1%
+  # would be 5%; the cap holds it at 4% — the fifth trade takes what is left.
+  max_portfolio_heat_pct: 4.0
   # Cap each position at max exposure / max_open_positions, so a tight stop
   # cannot size one trade into the whole limit and crowd out the rest.
   split_exposure_across_positions: true
@@ -82,7 +90,14 @@ risk:
   trail_step_r: 0.5
   # Options-specific
   options_max_premium_pct: 25.0  # max % of capital in option premium at once
-  reject_if_iv_percentile_above: 85.0
+  # Options only: refuse when IV RANK (today's ATM IV within this symbol's own
+  # past-year range) is above this — buying right before IV falls crushes the
+  # premium even if the stock moves. Needs iv_rank_min_samples days of IV
+  # history (recorded automatically from real chains); until then the
+  # stand-in is IV above iv_over_realised_max x the stock's realised volatility.
+  reject_if_iv_rank_above: 80.0
+  iv_rank_min_samples: 20
+  iv_over_realised_max: 1.5
 
 # --------------------------------------------------------------------------
 # CONFIRMATION POLICY — how many agents must agree before a signal fires.
@@ -95,7 +110,11 @@ consensus:
   min_composite_score: 0.25      # weighted score threshold (-1..+1)
   veto_on_high_impact_news: true # a -0.7 news score kills a long, and vice versa
   require_macro_alignment: false # set true to demand macro bias agreement too
-  conflict_policy: "side_with_technicals"   # flat | side_with_technicals | side_with_macro
+  # technicals_unless_derivatives_oppose: the chart wins against news or
+  # macro, but never trades against the options & futures read — a breakout
+  # into an open-interest wall usually fails. If the options analyst has no
+  # real chain it abstains, and the chart may trade alone.
+  conflict_policy: "technicals_unless_derivatives_oppose"
   # An analyst scoring under silent_below has nothing to say this cycle. With
   # silent_analysts_dilute false it is left out of the average instead of
   # dragging a real reading toward zero (three quiet analysts made a +0.36
@@ -105,6 +124,33 @@ consensus:
   # At least one of these must agree with the trade. News and macro are
   # mostly market-wide, so alone they would put the same trade on every name.
   lead_analysts: ["candlestick", "derivatives"]
+
+# --------------------------------------------------------------------------
+# NEWS BLACKOUT — no new entries around high-impact macro releases.
+# --------------------------------------------------------------------------
+news_blackout:
+  enabled: true
+  minutes_before: 15
+  minutes_after: 15
+  # Scheduled releases, in the MARKET's own time ("YYYY-MM-DD HH:MM"). Only
+  # releases inside the session matter — CPI and payrolls print at 08:30 ET,
+  # before the US open. Add RBI policy days under IN.
+  events:
+    US:
+      # FOMC rate decisions, 2026 (statement at 14:00 ET)
+      - { name: "FOMC decision", at: "2026-01-28 14:00" }
+      - { name: "FOMC decision", at: "2026-03-18 14:00" }
+      - { name: "FOMC decision", at: "2026-04-29 14:00" }
+      - { name: "FOMC decision", at: "2026-06-17 14:00" }
+      - { name: "FOMC decision", at: "2026-07-29 14:00" }
+      - { name: "FOMC decision", at: "2026-09-16 14:00" }
+      - { name: "FOMC decision", at: "2026-10-28 14:00" }
+      - { name: "FOMC decision", at: "2026-12-09 14:00" }
+    IN: []
+  # A headline naming one of these within the last minutes_after minutes
+  # also starts a blackout — for releases nobody put in the calendar.
+  headline_keywords: ["FOMC", "Fed decision", "rate decision", "nonfarm payrolls",
+                      "CPI report", "inflation data", "RBI policy", "repo rate"]
 
 # --------------------------------------------------------------------------
 # FOCUS LIST — which names the desk actually watches and trades.
@@ -174,8 +220,11 @@ derivatives:
   iv_spike_pct: 20.0
   risk_free_rate: 0.065
   preferred_moneyness: "ATM"     # ATM | ITM | OTM
-  max_days_to_expiry: 10
-  min_days_to_expiry: 1
+  # 3-7 days: far enough out that intraday theta decay and a volatility crush
+  # during a 15-minute pause do not eat the premium; close enough to move.
+  # 0-2 DTE options are never bought.
+  max_days_to_expiry: 7
+  min_days_to_expiry: 3
   avoid_expiry_day_after: "14:00"
 
 # --------------------------------------------------------------------------

@@ -162,6 +162,9 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     # ------------------------------------------------------------------ #
     conflict = str(g("consensus.conflict_policy", "flat"))
     conflict_text = {
+        "technicals_unless_derivatives_oppose": (
+            "the chart wins against news or macro, but never trades against the "
+            "options & futures read; with no real chain the chart may trade alone"),
         "flat": "votes pulling in opposite directions damp the score toward zero",
         "side_with_technicals": "the technical analysts win a disagreement",
         "side_with_macro": "the macro analyst wins a disagreement",
@@ -169,8 +172,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     sections.append({
         "title": "The vote (when there is enough agreement)",
         "intro": ("This is the gate most setups stop at. Both numbers must be "
-                  "met together. The desk ships with a high-risk paper profile: "
-                  "one strong analyst is enough."),
+                  "met together. The paper profile is active on entries (one "
+                  "strong price-based analyst is enough) and strict on risk."),
         "rules": [
             _rule("Analysts agreeing, at least (each voting ±0.25 or stronger "
                   "in the trade's direction; the fundamental filter does not count)",
@@ -195,6 +198,13 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "writes the journal and the weekly coach either way)",
                   "yes" if g("decisions.use_llm", False) else "no — the rules decide",
                   "decisions.use_llm"),
+            _rule("News blackout: no new entries this many minutes before and "
+                  "after a macro release (FOMC and other scheduled events, or a "
+                  "fresh headline naming one)",
+                  (f"{g('news_blackout.minutes_before', 15)} / "
+                   f"{g('news_blackout.minutes_after', 15)} min")
+                  if g("news_blackout.enabled", True) else "off",
+                  "news_blackout.events / headline_keywords"),
             _rule("High-impact news against the trade vetoes it",
                   "yes" if g("consensus.veto_on_high_impact_news", True) else "no",
                   "consensus.veto_on_high_impact_news"),
@@ -225,9 +235,18 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   f"{g('risk.min_risk_reward', 2.0)} : 1", "risk.min_risk_reward"),
             _rule("…and not more than (implausible targets are refused)",
                   f"{g('risk.max_risk_reward', 10.0)} : 1", "risk.max_risk_reward"),
-            _rule("Options: refuse when implied volatility is richer than this "
-                  "percentile", _pct(g("risk.reject_if_iv_percentile_above", 85.0)),
-                  "risk.reject_if_iv_percentile_above"),
+            _rule("Options: expiry between (0–2 day options are never bought — "
+                  "intraday theta and an IV crush eat them)",
+                  f"{g('derivatives.min_days_to_expiry', 3)}–"
+                  f"{g('derivatives.max_days_to_expiry', 7)} days",
+                  "derivatives.min_days_to_expiry / max_days_to_expiry"),
+            _rule("Options: refuse when IV rank (today's IV in this symbol's own "
+                  "past-year range) is above — until "
+                  f"{g('risk.iv_rank_min_samples', 20)} days of IV are recorded, "
+                  f"when IV is over {g('risk.iv_over_realised_max', 1.5)}x the "
+                  "stock's realised volatility",
+                  g("risk.reject_if_iv_rank_above", 80.0),
+                  "risk.reject_if_iv_rank_above"),
         ],
     })
 
@@ -240,6 +259,9 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         "rules": [
             _rule("Account size", money(capital),
                   "risk.total_capital (TOTAL_CAPITAL in .env, or Capital → edit)"),
+            _rule("Quantity = capital × risk % ÷ (entry − stop), then trimmed "
+                  "by the caps below", "by the stop, not fixed",
+                  "sizing formula (uses risk.risk_per_trade_pct)"),
             _rule("Risked per trade (entry to stop × quantity)",
                   f"{_pct(risk_pct)} = {money(capital * risk_pct / 100)}",
                   "risk.risk_per_trade_pct"),
@@ -260,7 +282,16 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "risk.options_max_premium_pct"),
             _rule("Open positions at once, at most", g("risk.max_open_positions", 3),
                   "risk.max_open_positions"),
-            _rule("Stop taking trades for the day after losing",
+            _rule("Portfolio heat: total lost if EVERY open position hit its stop "
+                  "together, at most (a new trade takes what room is left)",
+                  (f"{_pct(g('risk.max_portfolio_heat_pct'))} = "
+                   f"{money(capital * float(g('risk.max_portfolio_heat_pct')) / 100)}")
+                  if g("risk.max_portfolio_heat_pct") else "no cap",
+                  "risk.max_portfolio_heat_pct"),
+            _rule("Daily circuit breaker: at this loss (closed + open) every "
+                  "position is closed at market and the desk is locked for the "
+                  "session" if g("risk.circuit_breaker", True)
+                  else "Stop taking trades for the day after losing",
                   f"{_pct(loss_pct)} = {money(capital * loss_pct / 100)}",
                   "risk.max_daily_loss_pct"),
         ],

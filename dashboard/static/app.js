@@ -100,6 +100,8 @@ function handle(event) {
     case "market.switched":     adoptMarket(data.market); break;
     case "trading_day.state":   renderTradingDay(data); break;
     case "trading_day.summary": renderDayReport(data, "after square-off"); break;
+    case "news.blackout":
+      return { text: d.reason || "news blackout", level: d.active ? "bad" : "" };
     case "focus.updated":       renderFocus(data); break;
     case "position.update":
       loadPositions();
@@ -674,6 +676,7 @@ async function saveWeekly() {
    their own list that the chatter cannot evict. */
 const DECISION_TOPICS = new Set([
   "signal.approved", "signal.rejected", "position.update", "focus.updated",
+  "news.blackout",
   "trading_day.state", "trading_day.summary", "market.switched",
   "premarket.scan", "system.error",
 ]);

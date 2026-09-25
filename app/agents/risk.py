@@ -58,6 +58,9 @@ class RiskManager:
             daily_loss_limit=float(self.cfg.get("risk.total_capital", 100_000))
             * float(self.cfg.get("risk.max_daily_loss_pct", 3.0)) / 100.0,
         )
+        # Set each cycle by the engine from the news blackout rules; while it
+        # holds, no new entry is allowed anywhere.
+        self.blackout_reason: str = ""
         self._day = clock.market_now(
             str(self.cfg.get("system.timezone", "Asia/Kolkata"))).date()
 
@@ -99,6 +102,14 @@ class RiskManager:
         max_pos = int(self.cfg.get("risk.max_open_positions", 3))
         if self.state.open_positions >= max_pos:
             reasons.append(f"Max open positions reached ({self.state.open_positions}/{max_pos})")
+
+        heat_pct = float(self.cfg.get("risk.max_portfolio_heat_pct", 0) or 0)
+        if heat_pct > 0 and self.state.open_risk >= self.state.capital * heat_pct / 100.0:
+            reasons.append(f"Portfolio heat cap reached ({self.state.open_risk:,.0f} at "
+                           f"risk, cap {heat_pct:g}% of capital)")
+
+        if self.blackout_reason:
+            reasons.append(self.blackout_reason)
 
         max_exposure = self._max_exposure()
         if self.state.exposure >= max_exposure:
@@ -301,6 +312,29 @@ class RiskManager:
                 cap_note = (f"size trimmed from {quantity} to {max_qty} by the {label}")
                 quantity = max_qty
 
+        # ---- portfolio heat: total open risk, whatever the position count ----
+        # Five positions at 1% each is 5% at risk the moment one headline moves
+        # correlated names through their stops together. The heat cap bounds
+        # the sum; a new trade takes what room is left, or waits.
+        heat_pct = float(self.cfg.get("risk.max_portfolio_heat_pct", 0) or 0)
+        if heat_pct > 0 and quantity > 0 and stop_points > 0:
+            room = self.state.capital * heat_pct / 100.0 - self.state.open_risk
+            fits = room / stop_points
+            max_qty = (int(math.floor(fits / lot_size)) * lot_size
+                       if lot_size > 1 else int(math.floor(fits)))
+            if max_qty < quantity:
+                cur = self.cfg.market.currency_symbol
+                if max_qty <= 0:
+                    reasons.append(
+                        f"Portfolio heat cap: {cur}{self.state.open_risk:,.0f} already at "
+                        f"risk across open positions, cap {heat_pct:g}% = "
+                        f"{cur}{self.state.capital * heat_pct / 100:,.0f}")
+                    quantity = 0
+                else:
+                    cap_note = (f"size trimmed from {quantity} to {max_qty} by the "
+                                f"{heat_pct:g}% portfolio heat cap")
+                    quantity = max_qty
+
         lots = quantity // lot_size if lot_size > 1 else quantity
         notional = quantity * entry
         if cap_note:
@@ -308,10 +342,19 @@ class RiskManager:
 
         # ---- option premium richness ----
         if is_option:
-            iv = (ctx.indicators or {}).get("derivatives", {}).get("atm_iv", 0.0)
-            iv_cap = float(self.cfg.get("risk.reject_if_iv_percentile_above", 85.0))
-            if iv and iv > iv_cap:
-                reasons.append(f"ATM IV {iv:.1f}% above the {iv_cap}% ceiling — premium too rich")
+            rich = self._iv_too_rich(ctx)
+            if rich:
+                reasons.append(rich)
+            floor = int(self.cfg.get("derivatives.min_days_to_expiry", 3))
+            try:
+                expiry_day = datetime.fromisoformat(str(instrument.expiry)[:10]).date()
+                dte = (expiry_day - clock.market_now(str(self.cfg.get(
+                    "system.timezone", "Asia/Kolkata"))).date()).days
+            except (TypeError, ValueError):
+                dte = None
+            if dte is not None and dte < floor:
+                reasons.append(f"Option expires in {dte} day(s) — under the {floor}-day "
+                               f"floor; intraday theta and an IV crush would eat it")
 
         # ---- finalise ----
         if quantity <= 0 and not any("size" in r or "Cannot fit" in r or "0 lots" in r
@@ -497,11 +540,78 @@ class RiskManager:
         self.state.open_positions += 1
         self.state.trades_today += 1
         self.state.exposure += signal.notional
+        self.state.open_risk += signal.total_risk
+
+    def _iv_too_rich(self, ctx: MarketContext) -> str:
+        """Is the option expensive enough that an IV drop would crush it?
+
+        IV RANK: where today's ATM IV sits in this symbol's own range over the
+        past year of samples. It needs history, so until
+        `risk.iv_rank_min_samples` days are recorded the stand-in is IV
+        against the stock's realised volatility: paying well above what the
+        stock actually moves is buying the premium before it deflates.
+        """
+        iv = float((ctx.indicators or {}).get("derivatives", {}).get("atm_iv", 0.0) or 0)
+        if iv <= 0:
+            return ""
+        cap = float(self.cfg.get("risk.reject_if_iv_rank_above", 80.0))
+        need = int(self.cfg.get("risk.iv_rank_min_samples", 20))
+        try:
+            from app.storage import db
+            history = db.iv_history(ctx.symbol)
+        except Exception:
+            history = []
+        if len(history) >= need:
+            low, high = min(history), max(history)
+            rank = 100.0 * (iv - low) / (high - low) if high > low else 50.0
+            if rank > cap:
+                return (f"IV rank {rank:.0f} is above {cap:g} (ATM IV {iv:.1f}% vs a "
+                        f"{low:.1f}-{high:.1f}% range over {len(history)} days) — "
+                        f"premium too rich, an IV drop would crush it")
+            return ""
+
+        closes = [c.close for c in (ctx.candles or {}).get("1d", [])][-21:]
+        if len(closes) >= 10:
+            rets = [math.log(b / a) for a, b in zip(closes, closes[1:], strict=False) if a > 0 and b > 0]
+            if len(rets) >= 5:
+                mean = sum(rets) / len(rets)
+                hv = math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)) \
+                    * math.sqrt(252) * 100
+                ratio = float(self.cfg.get("risk.iv_over_realised_max", 1.5))
+                if hv > 0 and iv > hv * ratio:
+                    return (f"ATM IV {iv:.1f}% is {iv / hv:.1f}x the stock's realised "
+                            f"{hv:.1f}% (limit {ratio:g}x) — premium too rich; IV rank "
+                            f"takes over once {need} days of IV are recorded")
+        return ""
+
+    def restore_open(self, rows: list[dict[str, Any]]) -> int:
+        """Count positions still open in the database after a restart.
+
+        The desk restarts on every `git pull`. Starting from zero, it thought
+        nothing was open while the outcome tracker was still managing trades,
+        so the position limit, exposure and heat caps all had full room.
+        """
+        import json
+
+        restored = 0
+        for row in rows:
+            try:
+                signal = TradeSignal.model_validate(json.loads(row.get("payload") or "{}"))
+            except Exception:
+                continue
+            self.state.open_positions += 1
+            self.state.exposure += signal.notional
+            self.state.open_risk += signal.total_risk
+            restored += 1
+        if restored:
+            log.info("restored %d open position(s) from the database", restored)
+        return restored
 
     def register_close(self, signal: TradeSignal, pnl: float) -> None:
         self.state.open_positions = max(0, self.state.open_positions - 1)
         self.state.realised_pnl += pnl
         self.state.exposure = max(0.0, self.state.exposure - signal.notional)
+        self.state.open_risk = max(0.0, self.state.open_risk - signal.total_risk)
         if pnl >= 0:
             self.state.wins_today += 1
         else:
