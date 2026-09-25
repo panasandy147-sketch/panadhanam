@@ -435,6 +435,22 @@ class OptionsDesk:
         levels = await self._levels_for(symbol, now)
         return candles, levels
 
+    def _note_flow(self, symbol: str, setup, chain) -> None:
+        """Say whether the options flow agrees with the setup. Never a veto."""
+        from panaoptions.engine import flow as flow_mod
+
+        seen = flow_mod.scan(chain, self.cfg)
+        if not seen.found:
+            return
+        want = 1 if setup.direction is Direction.LONG else -1
+        verdict = ("agrees" if seen.bias == want else
+                   "OPPOSES" if seen.bias == -want else "is mixed")
+        line = f"Options flow {verdict}: {seen.headline()}"
+        if self.candidate and self.candidate.get("symbol") == symbol:
+            self.candidate.setdefault("reasoning", []).append(line)
+        self.activity.add("flow", f"{symbol} — {line}",
+                          level="good" if verdict == "agrees" else "warn")
+
     def _candidate_refused(self, symbol: str, reason: str) -> None:
         """Put the refusal on the candidate card itself.
 
@@ -562,6 +578,7 @@ class OptionsDesk:
         # considered. choose() still prefers the setup's window.
         shortest = min(min_dte, int(self.cfg.get("contracts.min_dte", 7)))
         chain = await self.feed.chain_for_window(symbol, spot, shortest, max_dte)
+        self._note_flow(symbol, setup, chain)
         search = contract_filter.choose(symbol, chain, setup.direction,
                                         self.cfg, setup=setup,
                                         budget=self.risk.budget_room())

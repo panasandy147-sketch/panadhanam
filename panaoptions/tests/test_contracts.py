@@ -246,13 +246,16 @@ def test_when_nothing_fits_it_says_exactly_why(cfg):
     assert "$10-$2000 budget" not in search.note
 
 
-def test_why_names_the_reason_setups_were_not_bought(cfg, capsys):
+def test_why_names_the_reason_setups_were_not_bought(cfg, capsys, monkeypatch, tmp_path):
     """"It is not buying" has to become one line naming the rule doing it."""
     from datetime import datetime
 
     import run
     from panaoptions.ledger import store
 
+    # A throwaway ledger: this must never write into the desk's real one.
+    monkeypatch.setattr(store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(store, "_conn", None)
     store.init()
     now = datetime.now()
     store.save_signal_seen("WHY-1", now, "TWLO", "SHORT", False,

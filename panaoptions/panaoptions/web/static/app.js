@@ -484,6 +484,37 @@ function flashCandidate(c) {
   setTimeout(() => el.classList.remove("flash-call", "flash-put"), 15000);
 }
 
+function renderWhy(w) {
+  $("why-meta").textContent =
+    `code ${w.version} · budget $${Math.round(w.budget).toLocaleString()} a trade · ${w.provider}`;
+  if (!w.setups_fired) {
+    $("why-body").innerHTML = `<p>No setup has fired today — the strategies looked
+      ${w.strategies_looked} times and none triggered, so nothing reached the
+      contract step. That is the market not giving a setup, not a refusal.</p>`;
+    return;
+  }
+  const reasons = w.reasons.map((x) =>
+    `<tr><td class="num">${x.count}×</td><td>${esc(x.reason)}</td></tr>`).join("");
+  const latest = w.latest.map((x) =>
+    `<tr><td>${esc(x.time)}</td><td>${esc(x.symbol)} ${esc(x.direction)}</td>
+      <td>${esc(x.reason)}</td></tr>`).join("");
+  $("why-body").innerHTML = `
+    <p><b>${w.setups_fired}</b> setups fired today · <b>${w.bought}</b> bought ·
+      <b>${w.not_bought}</b> not bought.</p>
+    ${reasons ? `<table><thead><tr><th class="num">Count</th><th>Why not bought</th></tr>
+      </thead><tbody>${reasons}</tbody></table>` : ""}
+    ${latest ? `<h3 style="margin:12px 0 4px;font-size:12px">Latest</h3>
+      <table><tbody>${latest}</tbody></table>` : ""}`;
+}
+
+async function refreshWhy() {
+  try {
+    renderWhy(await getJSON("/api/why"));
+  } catch {
+    /* the next tick retries */
+  }
+}
+
 async function refreshCandidate() {
   try {
     renderCandidate(await getJSON("/api/candidate"));
@@ -939,6 +970,8 @@ $("activity-decisions")?.addEventListener("change", refreshActivity);
 $("notify-trades").checked = notifyWanted();
 $("notify-trades").addEventListener("change", (e) => toggleNotify(e.target.checked));
 refreshCandidate();
+refreshWhy();
+setInterval(refreshWhy, 30000);
 setInterval(refresh, 15000);
 setInterval(refreshActivity, 5000);
 // The candidate and its chart are what you actually watch, so they lead.

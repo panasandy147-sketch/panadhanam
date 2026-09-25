@@ -98,6 +98,19 @@ async def screen(feed, cfg, now_et: datetime) -> list[PreMarketRead]:
             read.reasons.append(f"RVOL {read.rvol:.2f} is below {min_rvol}")
 
         read.passed = gap_ok and rvol_ok
+        if not read.passed and bool(cfg.get("flow.pass_screen", True)):
+            # Unusual options activity is a catalyst of its own: new positions
+            # opened in size, often before the stock gaps or wakes up.
+            try:
+                from panaoptions.engine import flow as flow_mod
+                chain = await feed.chain_for_window(
+                    symbol, last, 0, int(cfg.get("flow.max_dte", 60)))
+                seen = flow_mod.scan(chain, cfg)
+                if seen.found:
+                    read.passed = True
+                    read.reasons.append(f"passed on {seen.headline()}")
+            except Exception as exc:          # a flow check never breaks a screen
+                log.debug("%s: flow check failed: %s", symbol, exc)
         return read
 
     reads = await asyncio.gather(*[one(s) for s in symbols])

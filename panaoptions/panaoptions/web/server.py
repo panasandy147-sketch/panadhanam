@@ -265,6 +265,13 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         symbols = desk.reset_universe()
         return {"symbols": symbols, "source": "config"}
 
+    @app.get("/api/why")
+    async def why_not() -> dict[str, Any]:
+        """Today's setups and the exact reason each was or was not bought."""
+        from panaoptions import why
+
+        return why.report(cfg, desk.risk.budget_room())
+
     @app.get("/api/activity")
     async def activity(limit: int = 60, decisions: bool = False
                        ) -> dict[str, Any]:

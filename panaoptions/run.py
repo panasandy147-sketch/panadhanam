@@ -21,7 +21,6 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -288,51 +287,12 @@ def _ensure_capital() -> int:
 
 
 def _why() -> int:
-    """Why today's setups were, or were not, bought — from this desk's records.
-
-    Every setup the desk considers is written to signals_seen with the reason
-    it was taken or refused. This groups today's by reason, so "it is not
-    buying" becomes one line that names the rule doing it.
-    """
-    import subprocess
-    from collections import Counter
-
-    from panaoptions.ledger import store
+    """Why today's setups were, or were not, bought. See panaoptions/why.py."""
+    from panaoptions import why
     from panaoptions.risk.guardrails import RiskManager
 
     cfg = get_config()
-    try:
-        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
-                             text=True, cwd=Path(__file__).resolve().parent,
-                             timeout=5).stdout.strip()
-    except Exception:
-        sha = "unknown"
-    risk = RiskManager(cfg)
-    print(f"\n  Code version      {sha}   (the desk must be RESTARTED after a git pull)")
-    print(f"  Capital           ${cfg.capital:,.0f}")
-    print(f"  Budget per trade  ${risk.budget_room():,.0f}")
-    print(f"  Data provider     {cfg.get('data.provider')}")
-
-    store.init()
-    today = datetime.now().date().isoformat()
-    rows = store.get_conn().execute(
-        "SELECT ts, symbol, direction, taken, reason FROM signals_seen "
-        "WHERE ts >= ? ORDER BY ts", (today,)).fetchall()
-    if not rows:
-        print("\n  No setups have fired today — nothing has reached the contract step.")
-        print("  Check the Strategies panel (are they live?) and the pre-market screen.\n")
-        return 0
-    taken = [r for r in rows if r[3]]
-    refused = [r for r in rows if not r[3]]
-    print(f"\n  Setups today      {len(rows)}   bought {len(taken)}   not bought {len(refused)}")
-    if refused:
-        print("\n  Why not, most common first:")
-        for reason, n in Counter((r[4] or "")[:150] for r in refused).most_common(8):
-            print(f"    {n:>3}x  {reason}")
-        print("\n  The last few, in full:")
-        for ts, symbol, direction, _, reason in refused[-4:]:
-            print(f"    {ts[11:16]}  {symbol} {direction}: {reason}")
-    print()
+    print(why.render(why.report(cfg, RiskManager(cfg).budget_room())))
     return 0
 
 

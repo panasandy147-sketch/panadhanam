@@ -71,6 +71,17 @@ universe:
   small_account_alternative:
     ["IWM", "PLTR", "INTC", "SOFI", "HOOD", "F", "XLF", "GDX"]
 
+flow:
+  # Unusual options activity: a contract trading min_volume_to_oi times its
+  # open interest (and at least min_volume contracts) means new positions in
+  # size. With pass_screen, a symbol showing it passes the screen even without
+  # the gap and RVOL. On a fired setup it is reported as agreeing or opposing
+  # — never a veto. Free feeds cannot show whether it traded at the ask.
+  pass_screen: true
+  min_volume_to_oi: 3.0
+  min_volume: 1000
+  max_dte: 60
+
 premarket:
   min_rvol: 1.5          # relative volume vs the 20-day average at this time
   min_gap_pct: 1.0       # |open vs previous close|, in percent
