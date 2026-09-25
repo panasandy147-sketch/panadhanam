@@ -192,3 +192,22 @@ def test_the_budget_matches_what_sizing_will_accept(cfg):
     guard = RiskManager(cfg)
     per_trade = guard.capital * float(cfg.get("risk.max_capital_deployed_pct")) / 100
     assert guard.budget_room() == pytest.approx(per_trade)
+
+
+def test_start_raises_a_stale_env_capital_to_the_shipped_800_budget(cfg, monkeypatch, tmp_path):
+    """.env.example shipped 2000 and .env wins, so the desk ran on a $400
+    budget while settings.yaml said $800."""
+    import run
+    from panaoptions import config as config_mod
+
+    env = tmp_path / ".env"
+    env.write_text("PANAOPTIONS_CAPITAL=2000\n", encoding="utf-8")
+    monkeypatch.setattr(config_mod, "ENV_PATH", env)
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "2000")
+    assert run._ensure_capital() == 0
+    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")
+
+    env.write_text("PANAOPTIONS_CAPITAL=9000\n", encoding="utf-8")
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "9000")
+    run._ensure_capital()
+    assert "PANAOPTIONS_CAPITAL=9000" in env.read_text(encoding="utf-8")   # never lowered

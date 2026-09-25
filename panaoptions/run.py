@@ -252,6 +252,40 @@ async def _probe_sources() -> int:
     return 0
 
 
+def _ensure_capital() -> int:
+    """Raise a .env capital below the shipped figure up to it. Paper only.
+
+    .env.example shipped PANAOPTIONS_CAPITAL=2000 and .env wins over
+    settings.yaml, so a desk configured for $4,000 ($800 a trade) ran on
+    $2,000 — a $400 budget that no setup's contract fitted. start.sh only
+    ever applied the FIRST suggested fix, so this one could wait for ever.
+    Never lowers a figure, and never touches anything else.
+    """
+    from panaoptions import preflight
+    from panaoptions.config import ENV_PATH, ROOT
+    from panaoptions.envfile import write
+
+    cfg = get_config()
+    shipped = preflight._shipped_capital(cfg)
+    pinned = os.getenv("PANAOPTIONS_CAPITAL")
+    try:
+        current = float(pinned) if pinned else None
+    except ValueError:
+        current = None
+    pct = float(cfg.get("risk.max_capital_deployed_pct", 20.0))
+    if shipped and current is not None and current < shipped:
+        if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
+            ENV_PATH.write_text((ROOT / ".env.example").read_text(encoding="utf-8"),
+                                encoding="utf-8")
+        write(ENV_PATH, {"PANAOPTIONS_CAPITAL": str(int(shipped))})
+        print(f"- Capital: .env had ${current:,.0f} (${current * pct / 100:,.0f} a "
+              f"trade) — raised to ${shipped:,.0f} (${shipped * pct / 100:,.0f} a trade)")
+    else:
+        capital = current if current is not None else shipped
+        print(f"- Capital: ${capital:,.0f} — ${capital * pct / 100:,.0f} a trade")
+    return 0
+
+
 def _suggest_fix() -> int:
     """Print the one command that resolves the first finding carrying one.
 
@@ -657,6 +691,8 @@ def main() -> None:
                         help="can all the rules hold at once?")
     # action="extend" matters: with a plain nargs="+" argparse keeps only the
     # LAST --set on the line and silently drops the rest.
+    parser.add_argument("--ensure-capital", action="store_true",
+                        help="raise a .env capital below the shipped figure to it")
     parser.add_argument("--set", nargs="+", action="extend", metavar="KEY=VALUE",
                         dest="set_env",
                         help="write settings into .env; repeatable")
@@ -706,6 +742,8 @@ def main() -> None:
         raise SystemExit(_check_config())
     if args.check_llm:
         raise SystemExit(asyncio.run(_check_llm()))
+    if args.ensure_capital:
+        raise SystemExit(_ensure_capital())
     if args.suggest_fix:
         raise SystemExit(_suggest_fix())
     if args.probe_sources:
