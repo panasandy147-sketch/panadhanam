@@ -342,7 +342,8 @@ class Pattern:
     requires_trend: int = 0
 
 
-def detect(df: pd.DataFrame, tolerance: float = 0.0015) -> Pattern | None:
+def detect(df: pd.DataFrame, tolerance: float = 0.0015,
+           allowed: set[str] | None = None) -> Pattern | None:
     """The strongest pattern completing on the LAST bar, or None.
 
     Ordered by how much confirmation each one carries: a three-candle
@@ -350,6 +351,11 @@ def detect(df: pd.DataFrame, tolerance: float = 0.0015) -> Pattern | None:
     """
     if len(df) < 2:
         return None
+    # Every pattern completing on this bar, strongest first; the first one
+    # the caller allows wins. A 0DTE desk trading only single- and two-candle
+    # patterns must still see an engulfing that a three-line strike on the
+    # same bar would otherwise have hidden.
+    hits: list[Pattern] = []
     prev, bar = df.iloc[-2], df.iloc[-1]
     # The average range of the recent tape, so "a long body" means something
     # on a $12 stock and on a $570 one.
@@ -358,109 +364,110 @@ def detect(df: pd.DataFrame, tolerance: float = 0.0015) -> Pattern | None:
     if len(df) >= 4:
         a, b, c = df.iloc[-4], df.iloc[-3], df.iloc[-2]
         if is_three_line_strike_bullish(a, b, c, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Bullish Three-Line Strike", True,
                 float(bar["high"]) + 0.01, float(bar["low"]), bars=4,
                 requires_trend=-1,
                 note="Three sessions of selling undone by one. Everyone short "
                      "through the run is offside at once, and their covering "
-                     "is what carries it.")
+                     "is what carries it."))
         if is_three_line_strike_bearish(a, b, c, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Bearish Three-Line Strike", False,
                 float(bar["low"]) - 0.01, float(bar["high"]), bars=4,
                 requires_trend=1,
                 note="One candle giving back three sessions of buying, "
-                     "stranding everyone who bought the trend.")
+                     "stranding everyone who bought the trend."))
 
     if len(df) >= 3:
         first, star = df.iloc[-3], df.iloc[-2]
         if is_abandoned_baby_bullish(first, star, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Bullish Abandoned Baby", True, float(bar["high"]),
                 float(star["low"]), bars=3, requires_trend=-1,
                 note="An island bottom: a doji stranded below everything "
-                     "around it, where sellers ran out of inventory outright.")
+                     "around it, where sellers ran out of inventory outright."))
         if is_abandoned_baby_bearish(first, star, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Bearish Abandoned Baby", False, float(bar["low"]),
                 float(star["high"]), bars=3, requires_trend=1,
-                note="An island top: buying exhausted on a stranded doji.")
+                note="An island top: buying exhausted on a stranded doji."))
         if is_three_white_soldiers(first, star, bar, reference):
-            return Pattern(
+            hits.append(Pattern(
                 "Three White Soldiers", True, float(bar["high"]),
                 float(star["open"] + (star["close"] - star["open"]) / 2),
                 bars=3, requires_trend=-1,
                 note="Three long green closes near their highs — systematic "
-                     "accumulation rather than one spike that fades.")
+                     "accumulation rather than one spike that fades."))
         if is_three_black_crows(first, star, bar, reference):
-            return Pattern(
+            hits.append(Pattern(
                 "Three Black Crows", False, float(bar["low"]),
                 float(star["high"]), bars=3, requires_trend=1,
                 note="Three long red closes near their lows. Every intraday "
-                     "bounce failed; this is distribution, not a dip.")
+                     "bounce failed; this is distribution, not a dip."))
         if is_morning_star(first, star, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Morning Star", True, float(bar["high"]), float(star["low"]),
                 bars=3, requires_trend=-1,
                 note="A downtrend exhausting on the middle candle, then buyers "
-                     "closing past the midpoint of the first body.")
+                     "closing past the midpoint of the first body."))
         if is_evening_star(first, star, bar):
-            return Pattern(
+            hits.append(Pattern(
                 "Evening Star", False, float(bar["low"]), float(star["high"]),
                 bars=3, requires_trend=1,
                 note="Buying ran out at the star, and sellers closed back "
-                     "inside the first body.")
+                     "inside the first body."))
 
     if is_bullish_engulfing(prev, bar):
-        return Pattern(
+        hits.append(Pattern(
             "Bullish Engulfing", True, float(bar["high"]), float(bar["low"]),
             bars=2,
-            note="Aggressive buying swallowed the previous red body outright.")
+            note="Aggressive buying swallowed the previous red body outright."))
     if is_bearish_engulfing(prev, bar):
-        return Pattern(
+        hits.append(Pattern(
             "Bearish Engulfing", False, float(bar["low"]), float(bar["high"]),
             bars=2,
-            note="Sellers took complete charge, covering the whole green body.")
+            note="Sellers took complete charge, covering the whole green body."))
 
     if is_piercing_line(prev, bar):
-        return Pattern(
+        hits.append(Pattern(
             "Piercing Line", True, float(bar["high"]), float(bar["low"]),
             bars=2, requires_trend=-1,
             note="Sellers had it at the open and lost it — the close came "
-                 "back past the midpoint of the red body.")
+                 "back past the midpoint of the red body."))
     if is_dark_cloud_cover(prev, bar):
-        return Pattern(
+        hits.append(Pattern(
             "Dark Cloud Cover", False, float(bar["low"]), float(bar["high"]),
             bars=2, requires_trend=1,
             note="A push to a new high sold off into the close, deep inside "
-                 "the green body it was meant to extend.")
+                 "the green body it was meant to extend."))
 
     if is_tweezer_bottom(prev, bar, tolerance):
-        return Pattern(
+        hits.append(Pattern(
             "Tweezer Bottom", True, float(bar["high"]),
             float(min(prev["low"], bar["low"])), bars=2,
-            note="The same low tested and rejected on two consecutive candles.")
+            note="The same low tested and rejected on two consecutive candles."))
     if is_tweezer_top(prev, bar, tolerance):
-        return Pattern(
+        hits.append(Pattern(
             "Tweezer Top", False, float(bar["low"]),
             float(max(prev["high"], bar["high"])), bars=2,
-            note="The same high rejected twice in a row.")
+            note="The same high rejected twice in a row."))
 
     if is_hammer(bar):
-        return Pattern(
+        hits.append(Pattern(
             "Hammer", True, float(bar["high"]), float(bar["low"]),
             note="Sellers drove it down and buyers took the whole move back "
-                 "before the close.")
+                 "before the close."))
     if is_shooting_star(bar):
-        return Pattern(
+        hits.append(Pattern(
             "Shooting Star", False, float(bar["low"]), float(bar["high"]),
-            note="A rally into the close met selling that rejected all of it.")
-    return None
+            note="A rally into the close met selling that rejected all of it."))
+    return next((h for h in hits if allowed is None or h.name in allowed), None)
 
 
 def detect_recent(df: pd.DataFrame, within: int = 2,
-                  tolerance: float = 0.0015) -> tuple[Pattern, int] | None:
+                  tolerance: float = 0.0015,
+                  allowed: set[str] | None = None) -> tuple[Pattern, int] | None:
     """The most recent pattern completing within the last `within` bars.
 
     The entry rule is "break above the hammer's high", and that break happens
@@ -475,7 +482,7 @@ def detect_recent(df: pd.DataFrame, within: int = 2,
         window = df.iloc[: len(df) - ago] if ago else df
         if len(window) < 2:
             continue
-        found = detect(window, tolerance)
+        found = detect(window, tolerance, allowed)
         if found is not None:
             return found, ago
     return None

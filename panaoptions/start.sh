@@ -36,6 +36,7 @@ echo
 # The per-trade budget is 20% of capital; a stale .env below the shipped
 # $4,000 would quietly cut it. Raises only, never lowers, prints what it did.
 "$PY" run.py --ensure-capital || true
+"$PY" run.py --ensure-profile || true
 
 FIX="$("$PY" run.py --suggest-fix 2>/dev/null)" || FIX=""
 if [ -n "$FIX" ]; then

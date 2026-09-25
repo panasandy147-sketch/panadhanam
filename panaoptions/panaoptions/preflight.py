@@ -272,9 +272,16 @@ def check(cfg) -> list[Finding]:
     patterns_cfg = cfg.get("strategies.candlestick_at_level.patterns", {}) or {}
     if bool(cfg.get("strategies.candlestick_at_level.enabled", True)):
         out_of_reach: list[tuple[str, float, float, int]] = []
+        allowed = cfg.get("strategies.candlestick_at_level.allowed_patterns")
+        allowed_keys = ({a.lower().replace(" ", "_").replace("-", "_") for a in allowed}
+                        | ({"liquidity_sweep_rejection"} if allowed and
+                           {"Hammer", "Shooting Star"} & set(allowed) else set())
+                        if allowed else None)
         for key, block in patterns_cfg.items():
             if not isinstance(block, dict):
                 continue
+            if allowed_keys is not None and key not in allowed_keys:
+                continue    # a pattern this profile does not trade
             band = block.get("delta") or []
             window = block.get("dte") or []
             if len(band) != 2 or len(window) != 2:

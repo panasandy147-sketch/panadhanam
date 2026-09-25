@@ -32,6 +32,7 @@ REM a figure here, which goes stale the moment the shipped one moves.
 REM The per-trade budget is 20%% of capital; raise a stale .env below the
 REM shipped figure. Raises only, never lowers.
 "%PY%" run.py --ensure-capital
+"%PY%" run.py --ensure-profile
 
 for /f "usebackq delims=" %%F in (`"%PY%" run.py --suggest-fix 2^>nul`) do (
   echo - Applying: %%F

@@ -61,8 +61,14 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "under the position and capital limits. Everything is in New "
                   "York time."),
         "rules": [
+            _rule("Desk profile",
+                  {"zerodte": "zerodte — same-day options, 5-minute triggers",
+                   "scalp": "scalp — 1-minute, SPY/QQQ/IWM 0DTE"}.get(
+                      getattr(cfg, "profile", "") or "", "default — 7–30 day options"),
+                  "PANAOPTIONS_PROFILE in .env"),
             _rule("Symbols the desk watches",
-                  ", ".join(g("universe.symbols", []) or []), "universe.symbols"),
+                  ", ".join(getattr(cfg, "symbols", None) or g("universe.symbols", []) or []),
+                  "the Watchlist box on the dashboard (or universe.symbols)"),
             _rule("Pre-market screen: relative volume at least",
                   f"{g('premarket.min_rvol', 1.5)}x the 20-day average",
                   "premarket.min_rvol"),
@@ -90,6 +96,7 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     tol = g("strategies.candlestick_at_level.level_tolerance_atr", 0.5)
     within = g("strategies.candlestick_at_level.trigger_within_bars", 2)
     tf = g("strategies.candlestick_at_level.timeframe", "15m")
+    allowed_patterns = list(g("strategies.candlestick_at_level.allowed_patterns") or [])
     strategies = [
         {
             "key": "orb_vwap", "name": "1 · Opening Range Breakout + VWAP",
@@ -140,10 +147,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             "window": window("candlestick_at_level"),
             "enabled": enabled("candlestick_at_level"),
             "buy": [
-                f"A reversal pattern on the {tf} chart. Calls: hammer, bullish "
-                "engulfing, morning star, tweezer bottom, piercing line, three "
-                "white soldiers, bullish three-line strike, bullish abandoned "
-                "baby. Puts: the bearish mirror of each.",
+                (f"A reversal pattern on the {tf} chart — only these: "
+                 + ", ".join(allowed_patterns)
+                 + " (a hammer or shooting star that pierced the level and closed "
+                   "back counts as a liquidity sweep rejection)."
+                 if allowed_patterns else
+                 f"A reversal pattern on the {tf} chart. Calls: hammer, bullish "
+                 "engulfing, morning star, tweezer bottom, piercing line, three "
+                 "white soldiers, bullish three-line strike, bullish abandoned "
+                 "baby. Puts: the bearish mirror of each."),
                 f"It prints AT a level the market has turned at before, within "
                 f"{tol} ATR: a swing high or low, the pre-market extreme, the "
                 "opening range edge, yesterday's close, VWAP or a moving average. "
@@ -170,8 +182,13 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
 
     # ------------------------------------------------------------------ #
     pattern_rows = []
+    allowed_keys = {a.lower().replace(" ", "_").replace("-", "_") for a in allowed_patterns}
+    if allowed_keys & {"hammer", "shooting_star"}:
+        allowed_keys.add("liquidity_sweep_rejection")
     for key, block in (g("strategies.candlestick_at_level.patterns", {}) or {}).items():
         if not isinstance(block, dict):
+            continue
+        if allowed_keys and key not in allowed_keys:
             continue
         delta = block.get("delta") or ["—", "—"]
         dte = block.get("dte") or ["—", "—"]
@@ -188,7 +205,11 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         "intro": ("Calls for a long setup, puts for a short one. Always a "
                   "single-leg option you buy: no selling, no spreads."),
         "rules": [
-            _rule("Days to expiry (strategies 1–3)",
+            _rule("Days to expiry (strategies 1–3)"
+                  + (" — the NEAREST expiry first: 0DTE where the symbol lists "
+                     "one (SPY/QQQ/IWM daily; most stocks only on Friday), "
+                     "otherwise that week's"
+                     if g("contracts.prefer_nearest_expiry", False) else ""),
                   f"{g('contracts.min_dte', 7)}–{g('contracts.max_dte', 14)} days",
                   "contracts.min_dte / max_dte"),
             _rule("Delta (strategies 1–3)",
@@ -197,6 +218,16 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Bid/ask spread no wider than",
                   f"{_pct(g('contracts.max_spread_pct_of_mid', 5.0))} of the mid price",
                   "contracts.max_spread_pct_of_mid"),
+            _rule("Over budget: take the same delta with less time, then the "
+                  "highest delta that fits — never below this delta",
+                  g("contracts.budget_fallback_min_delta", 0.30) or "off",
+                  "contracts.budget_fallback_min_delta"),
+            _rule("Unusual options flow (volume ≥ "
+                  f"{g('flow.min_volume_to_oi', 3.0)}x open interest, ≥ "
+                  f"{g('flow.min_volume', 1000)} contracts) passes the screen "
+                  "and is shown as agreeing or opposing a setup — never a veto",
+                  "on" if g("flow.pass_screen", True) else "off",
+                  "flow.pass_screen / min_volume_to_oi"),
             _rule("Contract price between",
                   f"${g('contracts.min_contract_price', 0.10)} and "
                   f"${g('contracts.max_contract_price', 20.0)} "

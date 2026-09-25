@@ -286,6 +286,30 @@ def _ensure_capital() -> int:
     return 0
 
 
+def _ensure_profile() -> int:
+    """Put the desk on the same-day (0DTE) profile unless one was chosen.
+
+    Asked for explicitly: same-day contracts on the four 5-minute strategies.
+    A PANAOPTIONS_PROFILE already in .env is left alone — "default" included —
+    so switching back is one line and nothing overwrites it.
+    """
+    from panaoptions.config import ENV_PATH, ROOT
+    from panaoptions.envfile import read, write
+
+    existing = read(ENV_PATH) if ENV_PATH.exists() else {}
+    if existing.get("PANAOPTIONS_PROFILE") or os.getenv("PANAOPTIONS_PROFILE"):
+        print(f"- Profile: {existing.get('PANAOPTIONS_PROFILE') or os.getenv('PANAOPTIONS_PROFILE')}")
+        return 0
+    if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
+        ENV_PATH.write_text((ROOT / ".env.example").read_text(encoding="utf-8"),
+                            encoding="utf-8")
+    write(ENV_PATH, {"PANAOPTIONS_PROFILE": "zerodte"})
+    os.environ["PANAOPTIONS_PROFILE"] = "zerodte"
+    print("- Profile: zerodte (same-day options) — set in .env; "
+          "PANAOPTIONS_PROFILE=default switches back to multi-day")
+    return 0
+
+
 def _why() -> int:
     """Why today's setups were, or were not, bought. See panaoptions/why.py."""
     from panaoptions import why
@@ -701,6 +725,8 @@ def main() -> None:
                         help="can all the rules hold at once?")
     # action="extend" matters: with a plain nargs="+" argparse keeps only the
     # LAST --set on the line and silently drops the rest.
+    parser.add_argument("--ensure-profile", action="store_true",
+                        help="put the desk on the zerodte profile unless one is set")
     parser.add_argument("--why", action="store_true",
                         help="why today's setups were or were not bought")
     parser.add_argument("--ensure-capital", action="store_true",
@@ -754,6 +780,8 @@ def main() -> None:
         raise SystemExit(_check_config())
     if args.check_llm:
         raise SystemExit(asyncio.run(_check_llm()))
+    if args.ensure_profile:
+        raise SystemExit(_ensure_profile())
     if args.why:
         raise SystemExit(_why())
     if args.ensure_capital:

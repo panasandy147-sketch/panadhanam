@@ -1,0 +1,86 @@
+# ==========================================================================
+# profile: zerodte — the same four strategies, traded with SAME-DAY options.
+#
+# Same watchlist, same 5-minute strategies as the default desk; what changes
+# is the contract (expiring today where the name lists one) and everything
+# that has to change with it:
+#
+#   * Only fast 5-minute triggers. Multi-candle structures (three-line strike,
+#     three soldiers/crows, abandoned baby) take longer to play out than a
+#     same-day contract lives, so they are not traded.
+#   * Nearest expiry first: 0DTE when the symbol lists one (SPY, QQQ, IWM
+#     daily; most single stocks only on their Friday weekly), otherwise that
+#     week's expiry — never more than 4 days out.
+#   * 0.35-0.50 delta, $0.50-$3.50 a share ($50-$350 a contract), spread 7%.
+#   * Entries stop at 15:00 (14:30 for the sweep); everything is out by 15:45,
+#     before the closing gamma.
+#
+# The stop is still the STRUCTURAL level on the underlying — never the
+# option's price, which swings with IV — with the 45% disaster backstop and
+# the 10% daily circuit breaker unchanged.
+#
+# Switch back to multi-day contracts with:  PANAOPTIONS_PROFILE=default in
+# .env (or remove the line). Values here are merged over settings.yaml.
+# ==========================================================================
+
+session:
+  entry_open: "09:45"
+  entry_close: "15:00"
+  force_exit_at: "15:45"
+
+contracts:
+  min_dte: 0
+  max_dte: 4
+  prefer_nearest_expiry: true
+  min_delta: 0.35
+  max_delta: 0.50
+  max_spread_pct_of_mid: 7.0
+  min_contract_price: 0.50      # below this rarely survives the day's theta
+  max_contract_price: 3.50      # $350 a contract
+  budget_fallback_min_delta: 0.30
+
+strategies:
+  orb_vwap:
+    enabled: true
+    from: "09:45"
+    to:   "15:00"               # no entries into the closing gamma
+    volume_multiple: 1.5
+    target_range_multiple: 1.5  # 1:1.5 — or the 9-EMA trail, first wins
+  vwap_ema_pullback:
+    enabled: true
+    from: "10:00"
+    to:   "15:00"
+  liquidity_sweep:
+    enabled: true
+    from: "09:45"
+    to:   "14:30"
+    volume_multiple: 1.5
+  candlestick_at_level:
+    enabled: true
+    from: "09:45"
+    to:   "15:00"
+    timeframe: "5m"             # the intraday edition: 5-minute patterns
+    min_dte: 0
+    max_dte: 4
+    allowed_patterns:
+      - "Hammer"
+      - "Shooting Star"
+      - "Bullish Engulfing"
+      - "Bearish Engulfing"
+      - "Tweezer Bottom"
+      - "Tweezer Top"
+    patterns:
+      hammer:                     { delta: [0.40, 0.50], dte: [0, 4] }
+      shooting_star:              { delta: [0.40, 0.50], dte: [0, 4] }
+      bullish_engulfing:          { delta: [0.40, 0.50], dte: [0, 4] }
+      bearish_engulfing:          { delta: [0.40, 0.50], dte: [0, 4] }
+      tweezer_bottom:             { delta: [0.40, 0.50], dte: [0, 4] }
+      tweezer_top:                { delta: [0.40, 0.50], dte: [0, 4] }
+      # A hammer or shooting star that pierced the level and closed back.
+      liquidity_sweep_rejection:  { delta: [0.40, 0.50], dte: [0, 4] }
+
+risk:
+  stop_mode: "underlying"       # the structural level decides, not the premium
+  disaster_stop_pct: 45.0       # out if the option loses 45% first
+  daily_loss_limit_pct: 10.0    # $400 on $4,000 — then halted for the day
+  trail_on_ema: true

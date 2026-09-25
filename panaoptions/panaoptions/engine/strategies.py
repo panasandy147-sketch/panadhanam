@@ -469,7 +469,11 @@ class CandlestickAtLevel(Strategy):
         # LATER candle — so the pattern is allowed to be a bar or two back.
         lookback = int(self.cfg.get(
             "strategies.candlestick_at_level.trigger_within_bars", 2))
-        recent = patterns.detect_recent(frame, within=lookback)
+        # A profile can narrow the patterns: a same-day desk has no time for
+        # structures that take sessions to play out.
+        allowed_cfg = self.cfg.get("strategies.candlestick_at_level.allowed_patterns")
+        allowed = set(allowed_cfg) if allowed_cfg else None
+        recent = patterns.detect_recent(frame, within=lookback, allowed=allowed)
         if recent is None:
             setup.blockers.append(
                 f"no reversal pattern on the last {lookback + 1} "

@@ -105,6 +105,11 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
             return search
 
     if survivors:
+        # A same-day desk wants the nearest expiry first: 0DTE when the name
+        # lists one, otherwise that week's. Among those, cheapest.
+        if bool(cfg.get("contracts.prefer_nearest_expiry", False)):
+            nearest = min(c.dte for c in survivors)
+            survivors = [c for c in survivors if c.dte == nearest]
         # Cheapest first: on a small account the premium is the binding
         # constraint, and a cheaper contract leaves more room to be wrong.
         search.chosen = min(survivors, key=lambda c: c.mid)

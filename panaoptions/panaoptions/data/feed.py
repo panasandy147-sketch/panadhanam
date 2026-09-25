@@ -234,6 +234,17 @@ def parse_candles(payload: dict[str, Any] | None) -> list[Candle]:
     return sorted(out, key=lambda c: c.ts)
 
 
+def _days_to_close(expiry_date, now: datetime | None = None) -> float:
+    """Fractional days until 16:00 ET on the expiry date, never below 5 min."""
+    from datetime import time as dtime
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")
+    now = (now or datetime.now(UTC)).astimezone(et)
+    close = datetime.combine(expiry_date, dtime(16, 0), tzinfo=et)
+    return max((close - now).total_seconds() / 86400.0, 5 / 1440)
+
+
 def parse_chain(payload: dict[str, Any] | None, symbol: str,
                 spot: float) -> list[OptionContract]:
     try:
@@ -245,6 +256,10 @@ def parse_chain(payload: dict[str, Any] | None, symbol: str,
 
     expiry_date = datetime.fromtimestamp(expiry_epoch, tz=UTC).date()
     dte = max((expiry_date - datetime.now(UTC).date()).days, 0)
+    # Time left to the 16:00 ET expiry, in days, for the delta estimate. A
+    # whole-day count is 0 on expiry day, where Black-Scholes has no answer and
+    # returned 0 delta — every same-day contract then failed the delta filter.
+    years_days = _days_to_close(expiry_date)
 
     out: list[OptionContract] = []
     for right, key in ((OptionRight.CALL, "calls"), (OptionRight.PUT, "puts")):
@@ -261,7 +276,7 @@ def parse_chain(payload: dict[str, Any] | None, symbol: str,
                 implied_volatility=iv,
                 open_interest=int(row.get("openInterest") or 0),
                 volume=int(row.get("volume") or 0),
-                delta=bs_delta(spot, float(strike), dte, iv,
+                delta=bs_delta(spot, float(strike), years_days, iv,
                                right is OptionRight.CALL),
             ))
     return out
