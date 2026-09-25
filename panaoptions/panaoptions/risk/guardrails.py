@@ -101,6 +101,19 @@ class RiskManager:
         return None, reason
 
     # ------------------------------------------------------------------ #
+    def budget_room(self) -> float:
+        """What one new trade may spend on premium right now.
+
+        The tighter of the per-trade cap and the room left under the total
+        ceiling — exactly what `size` will enforce, so the contract picker can
+        choose something `size` will then accept.
+        """
+        deployed_pct = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
+        total_pct = float(self.cfg.get("risk.max_total_deployed_pct", deployed_pct))
+        per_trade = self.capital * deployed_pct / 100.0
+        room = self.capital * total_pct / 100.0 - self.state.deployed
+        return max(0.0, min(per_trade, room))
+
     def size(self, setup: Setup, contract: OptionContract,
              signal_id: str, ts: datetime,
              ml_probability: float | None = None) -> tuple[Signal | None, str]:

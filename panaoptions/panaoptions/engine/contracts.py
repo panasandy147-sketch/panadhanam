@@ -19,7 +19,7 @@ from panaoptions.models import ContractSearch, Direction, OptionContract, Option
 
 
 def choose(symbol: str, chain: list[OptionContract], direction: Direction,
-           cfg, setup=None) -> ContractSearch:
+           cfg, setup=None, budget: float | None = None) -> ContractSearch:
     """The cheapest qualifying contract, or a full account of why there is none.
 
     A setup may ask for its own delta band and expiry window: a hammer off
@@ -77,7 +77,30 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
             reject(f"dearer than ${max_price:.2f}")
             price_only_failures.append(c)
             continue
+        if budget is not None and c.cost(multiplier) > budget:
+            reject(f"over the ${budget:,.0f} budget")
+            price_only_failures.append(c)
+            continue
         survivors.append(c)
+
+    if not survivors and budget is not None:
+        fallback = _within_budget(chain, want, min_dte, max_dte, min_delta,
+                                  max_spread, min_price, max_price, budget,
+                                  multiplier, cfg)
+        if fallback is not None:
+            ideal = min(price_only_failures, key=lambda c: c.mid, default=None)
+            search.chosen = fallback
+            search.budget_fallback = True
+            search.note = (
+                (f"The {min_delta:.2f}-{max_delta:.2f} delta contract "
+                 f"({ideal.label}) costs ${ideal.cost(multiplier):,.0f}, over the "
+                 f"${budget:,.0f} budget — " if ideal else
+                 f"Nothing in the {min_delta:.2f}-{max_delta:.2f} delta band fits "
+                 f"the ${budget:,.0f} budget — ")
+                + f"took the highest delta that fits: {fallback.label} "
+                  f"({abs(fallback.delta):.2f} delta) at "
+                  f"${fallback.cost(multiplier):,.0f}.")
+            return search
 
     if survivors:
         # Cheapest first: on a small account the premium is the binding
@@ -107,6 +130,29 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
                                  sorted(search.rejected.items(),
                                         key=lambda kv: -kv[1])))
     return search
+
+
+def _within_budget(chain, want, min_dte, max_dte, min_delta, max_spread,
+                   min_price, max_price, budget, multiplier, cfg):
+    """The highest-delta contract below the band that the budget can buy.
+
+    A 0.60-delta option on a $170 stock 30 days out is ~$900 a contract; on a
+    $4,000 account at 20% that never fits, so every setup on it was skipped.
+    Stepping down the delta keeps the same direction and expiry at a price
+    the account can pay, with less leverage per dollar of move. Below
+    `contracts.budget_fallback_min_delta` it is a lottery ticket, and the
+    trade is skipped instead. Set that to 0 to switch the fallback off.
+    """
+    floor = float(cfg.get("contracts.budget_fallback_min_delta", 0.30) or 0)
+    if floor <= 0:
+        return None
+    pool = [c for c in chain
+            if c.right is want and min_dte <= c.dte <= max_dte and c.mid > 0
+            and floor <= abs(c.delta) < min_delta
+            and c.spread_pct_of_mid <= max_spread
+            and min_price <= c.mid <= max_price
+            and c.cost(multiplier) <= budget]
+    return max(pool, key=lambda c: abs(c.delta)) if pool else None
 
 
 def affordable_delta(chain: list[OptionContract], direction: Direction,

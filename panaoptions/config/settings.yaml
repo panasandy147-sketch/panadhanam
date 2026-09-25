@@ -98,7 +98,13 @@ contracts:
   max_dte: 14
   min_delta: 0.45
   max_delta: 0.60
-  max_spread_pct_of_mid: 5.0
+  # Delayed quotes on single-stock options 2-6 weeks out routinely show
+  # 5-10% spreads; at 5% nearly every name but SPY and QQQ was turned away.
+  max_spread_pct_of_mid: 10.0
+  # When the setup's delta band is over budget, buy the highest-delta contract
+  # that fits instead of skipping the trade — but never below this delta.
+  # 0 switches the fallback off.
+  budget_fallback_min_delta: 0.30
 
   # --------------------------------------------------------------------
   # These two are a SANITY CEILING, not position sizing.

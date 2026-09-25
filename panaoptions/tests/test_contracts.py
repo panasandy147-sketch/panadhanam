@@ -113,3 +113,82 @@ def test_affordable_delta_answers_what_the_budget_does_buy(cfg):
     assert band is not None
     low, high = band
     assert high < 0.45, "a $100 budget buys out-of-the-money, and says so"
+
+
+# --------------------------------------------------------------------------- #
+# The budget fallback: take the trade at a delta the account can pay for.
+# --------------------------------------------------------------------------- #
+def _put(strike, delta, mid, dte=21, spread=0.20):
+    from panaoptions.models import OptionContract, OptionRight
+
+    return OptionContract(symbol="FTNT", right=OptionRight.PUT, strike=strike,
+                          expiry="2026-10-16", dte=dte, bid=mid - spread / 2,
+                          ask=mid + spread / 2, delta=-delta)
+
+
+def _setup():
+    class _S:
+        delta_band = (0.55, 0.65)
+        min_dte_override = 14
+        max_dte_override = 30
+    return _S()
+
+
+def test_an_over_budget_band_falls_back_to_the_best_delta_that_fits(cfg):
+    """From the desk: FTNT's 0.55-0.65 put 14-30 days out is ~$900; the
+    budget is $800. Every such setup fired and nothing was ever bought."""
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    chain = [_put(180, 0.62, 9.00), _put(175, 0.48, 6.50),
+             _put(172, 0.40, 5.10), _put(165, 0.22, 2.40)]
+    search = contracts.choose("FTNT", chain, Direction.SHORT, cfg,
+                              setup=_setup(), budget=800.0)
+    assert search.chosen is not None and search.budget_fallback
+    assert abs(search.chosen.delta) == 0.48          # highest delta that fits
+    assert "over the $800 budget" in search.note
+    assert "0.48 delta" in search.note
+
+
+def test_the_fallback_never_goes_below_its_delta_floor(cfg):
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    chain = [_put(180, 0.62, 9.00), _put(165, 0.22, 2.40)]
+    search = contracts.choose("FTNT", chain, Direction.SHORT, cfg,
+                              setup=_setup(), budget=800.0)
+    assert search.chosen is None                     # 0.22 is a lottery ticket
+
+
+def test_an_in_band_contract_that_fits_is_still_preferred(cfg):
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    chain = [_put(178, 0.58, 7.50), _put(172, 0.40, 5.10)]
+    search = contracts.choose("FTNT", chain, Direction.SHORT, cfg,
+                              setup=_setup(), budget=800.0)
+    assert abs(search.chosen.delta) == 0.58 and not search.budget_fallback
+
+
+def test_the_fallback_can_be_switched_off(cfg):
+    from panaoptions.engine import contracts
+    from panaoptions.models import Direction
+
+    cfg.data["contracts"]["budget_fallback_min_delta"] = 0
+    try:
+        chain = [_put(180, 0.62, 9.00), _put(175, 0.48, 6.50)]
+        search = contracts.choose("FTNT", chain, Direction.SHORT, cfg,
+                                  setup=_setup(), budget=800.0)
+        assert search.chosen is None
+    finally:
+        cfg.data["contracts"]["budget_fallback_min_delta"] = 0.30
+
+
+def test_the_budget_matches_what_sizing_will_accept(cfg):
+    """If the picker's budget and the sizer's differ, the picker chooses a
+    contract the sizer then refuses — the same dead end one step later."""
+    from panaoptions.risk.guardrails import RiskManager
+
+    guard = RiskManager(cfg)
+    per_trade = guard.capital * float(cfg.get("risk.max_capital_deployed_pct")) / 100
+    assert guard.budget_room() == pytest.approx(per_trade)

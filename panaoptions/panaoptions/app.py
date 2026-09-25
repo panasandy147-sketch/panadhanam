@@ -356,7 +356,11 @@ class OptionsDesk:
             self._remember_candidate(symbol, setup, now)
 
             search = await self._pick_contract(symbol, setup, now)
+            if search.chosen is not None and search.budget_fallback:
+                self.activity.add("contract.fallback", f"{symbol} — {search.note}",
+                                  level="warn", ts=now)
             if search.chosen is None:
+                self._candidate_refused(symbol, search.note or "no contract qualified")
                 store.save_signal_seen(signal_id, now, symbol,
                                        setup.direction.value, False,
                                        search.note or "no contract qualified",
@@ -371,6 +375,7 @@ class OptionsDesk:
             signal, refusal = self.risk.size(setup, search.chosen, signal_id,
                                              now, probability)
             if signal is None:
+                self._candidate_refused(symbol, refusal)
                 store.save_signal_seen(signal_id, now, symbol,
                                        setup.direction.value, False, refusal)
                 actions.append(f"{symbol}: {refusal}")
@@ -429,6 +434,15 @@ class OptionsDesk:
             symbol, self.cfg.get("technical.timeframe", "5m"))
         levels = await self._levels_for(symbol, now)
         return candles, levels
+
+    def _candidate_refused(self, symbol: str, reason: str) -> None:
+        """Put the refusal on the candidate card itself.
+
+        "Not filled — see the activity log" sent people hunting for the one
+        line that mattered; the card now says it.
+        """
+        if self.candidate and self.candidate.get("symbol") == symbol:
+            self.candidate["refused"] = reason
 
     def _remember_candidate(self, symbol: str, setup, now: datetime) -> None:
         """Keep the case for the newest setup, for the dashboard to show.
@@ -545,7 +559,8 @@ class OptionsDesk:
         max_dte = setup.max_dte_override or int(self.cfg.get("contracts.max_dte", 14))
         chain = await self.feed.chain_for_window(symbol, spot, min_dte, max_dte)
         search = contract_filter.choose(symbol, chain, setup.direction,
-                                        self.cfg, setup=setup)
+                                        self.cfg, setup=setup,
+                                        budget=self.risk.budget_room())
 
         # An empty chain has two very different causes and one useless
         # message. "No put contracts came back" reads as "the market has no

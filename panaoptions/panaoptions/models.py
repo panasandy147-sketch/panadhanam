@@ -173,6 +173,9 @@ class ContractSearch(BaseModel):
     rejected: dict[str, int] = Field(default_factory=dict)
     closest_by_price: OptionContract | None = None
     note: str = ""
+    # True when the setup's own delta band was over budget and the desk took
+    # the highest-delta contract that fits instead of skipping the trade.
+    budget_fallback: bool = False
 
 
 class Signal(BaseModel):

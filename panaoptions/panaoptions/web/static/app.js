@@ -459,8 +459,9 @@ function renderCandidate(d) {
       ${c.delta_band[0]} – ${c.delta_band[1]}.</p>` : ""}
     ${c.taken && c.contract ? `<p style="color:var(--muted)">Filled:
       <b>${esc(c.contract)}</b> x${c.quantity} at ${fmtPrice(c.entry)}.</p>`
-      : `<p style="color:var(--muted)">Not filled — see the activity log for
-         why.</p>`}`;
+      : `<p style="color:var(--muted)">${c.refused
+          ? `<b>Not filled:</b> ${esc(c.refused)}`
+          : "Waiting for a fill — the next cycle prices the contract."}</p>`}`;
 
   loadCandChart(c.symbol);
   flashCandidate(c);
