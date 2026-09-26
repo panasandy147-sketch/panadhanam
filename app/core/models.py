@@ -237,6 +237,8 @@ class TradeSignal(BaseModel):
     rejection_reasons: list[str] = Field(default_factory=list)
     reports: list[AgentReport] = Field(default_factory=list)
     regime: Regime | None = None
+    # The code that placed it, so results can be read per version.
+    code_version: str = ""
 
     # Outcome tracking (filled by the learning loop)
     exit_price: float | None = None

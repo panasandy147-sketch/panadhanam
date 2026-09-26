@@ -25,6 +25,29 @@ def _filled(row: dict[str, Any]) -> bool:
         return False
 
 
+def _version(row: dict[str, Any]) -> str:
+    try:
+        return json.loads(row.get("payload") or "{}").get("code_version") or ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _summary(closed: list[dict[str, Any]]) -> dict[str, Any]:
+    wins = [r for r in closed if (r.get("pnl") or 0) > 0]
+    losses = [r for r in closed if (r.get("pnl") or 0) < 0]
+    total = sum(r.get("pnl") or 0.0 for r in closed)
+    exits = {name: 0 for name in _EXITS.values()}
+    for r in closed:
+        exits[_EXITS[r["status"]]] += 1
+    return {
+        "closed": len(closed), "wins": len(wins), "losses": len(losses),
+        "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else 0.0,
+        "total_pnl": round(total, 2),
+        "total_r": round(sum(r.get("r_multiple") or 0.0 for r in closed), 2),
+        "exits": exits,
+    }
+
+
 def build(cfg: Any, days: int = 30, recent: int = 12) -> dict[str, Any]:
     from app.storage import db
 
@@ -53,7 +76,14 @@ def build(cfg: Any, days: int = 30, recent: int = 12) -> dict[str, Any]:
         exits[_EXITS[r["status"]]] += 1
 
     latest = sorted(closed, key=lambda r: r.get("exit_ts") or r["ts"], reverse=True)[:recent]
+    from app.core.version import code_version
+    current = code_version()
     return {
+        # Only trades placed by the code running now — so a fix is judged on
+        # what it did, not blended with the trades from before it.
+        "current": {"version": current,
+                    **_summary([r for r in closed if _version(r) == current]),
+                    "open_now": len([r for r in open_now if _version(r) == current])},
         "days": days,
         "currency": getattr(cfg.market, "currency_symbol", ""),
         "open_now": len(open_now),

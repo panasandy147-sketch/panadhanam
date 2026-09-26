@@ -483,3 +483,21 @@ async def test_an_alert_on_an_unarmed_day_is_not_in_the_p_and_l(engine, cfg, mon
     after = record.build(cfg)
     assert after["open_now"] == before["open_now"]
     assert after["alerts_not_traded"] == before["alerts_not_traded"] + 1
+
+
+@pytest.mark.asyncio
+async def test_the_record_separates_the_code_running_now(engine, cfg, monkeypatch):
+    """A fix has to be judged on what it did, not blended with trades placed
+    by the code before it."""
+    from app.core import record
+    from app.core.version import code_version
+
+    before = record.build(cfg)["current"]
+    row = await _open_one(engine)
+    assert json.loads(row["payload"])["code_version"] == code_version()
+    _price(engine, monkeypatch, row["target"] + 1.0)
+    await engine.outcomes.poll()
+    after = record.build(cfg)["current"]
+    assert after["version"] == code_version()
+    assert after["closed"] == before["closed"] + 1
+    assert after["exits"]["target"] == before["exits"]["target"] + 1

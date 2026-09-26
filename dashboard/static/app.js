@@ -852,7 +852,14 @@ function renderRecord(r) {
   const tile = (k, v, sub = "", cls = "") => `<div class="stat">
       <div class="label">${k}</div><div class="value ${cls}">${v}</div>
       ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  const c = r.current || {};
   $("record-meta").textContent = `last ${r.days} days · filled paper trades only`;
+  $("record-current").innerHTML = c.version ? `<b>Since the code running now
+    (${esc(c.version)}):</b> ${fmtInt(c.closed)} closed · ${fmt(c.win_rate, 0)}% win
+    (${c.wins}W / ${c.losses}L) · <span class="${signClass(c.total_pnl)}">${m(c.total_pnl)}
+    (${signed(c.total_r)}R)</span> · ${c.exits.target} target · ${c.exits.stop} stop ·
+    ${c.exits.time} time${c.open_now ? ` · ${c.open_now} open` : ""}. The tiles below are the
+    whole ${r.days} days, including trades from earlier code.` : "";
   $("record-stats").innerHTML = [
     tile("Open now", fmtInt(r.open_now), r.open_symbols.join(", ") || "flat"),
     tile("Closed", fmtInt(r.closed),

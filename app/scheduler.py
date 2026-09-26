@@ -321,6 +321,8 @@ class TradingEngine:
             signal_id = result.signal.id if result.signal else None
             db.save_reports(result.reports, symbol, result.cycle_id, signal_id)
             if result.signal:
+                from app.core.version import code_version
+                result.signal.code_version = code_version()
                 db.save_signal(result.signal)
                 self.risk.register_open(result.signal)
         except Exception as exc:
