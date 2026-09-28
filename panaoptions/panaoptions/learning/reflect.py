@@ -39,7 +39,8 @@ from panaoptions.models import SetupType
 log = get_logger("reflect")
 
 STRATEGIES: tuple[str, ...] = ("orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
-                               "candlestick_at_level")
+                               "candlestick_at_level", "va_rejection",
+                               "lvn_acceleration", "poc_bounce")
 WEIGHT_MIN, WEIGHT_MAX = 0.25, 1.5
 
 SYSTEM = (

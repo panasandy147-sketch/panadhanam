@@ -57,6 +57,10 @@ class SetupType(str, Enum):
     VWAP_EMA_PULLBACK = "VWAP / 9-EMA Pullback"
     LIQUIDITY_SWEEP = "Liquidity Sweep Reversal"
     CANDLESTICK_AT_LEVEL = "Candlestick at a Key Level"
+    # The volume-profile family (strategies/volume_profile_strategies.py).
+    VA_REJECTION = "Value Area Rejection"
+    LVN_ACCELERATION = "LVN Pocket Acceleration"
+    POC_BOUNCE = "POC Magnet / Bounce"
     OTHER = "Other"
 
 

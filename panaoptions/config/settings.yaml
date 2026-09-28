@@ -268,6 +268,44 @@ strategies:
         dte:   [14, 30]
         claimed_accuracy: 0.80
 
+  # --- The volume-profile family ----------------------------------------
+  # Built on each session's volume by price (RTH 09:30-16:00 ET): the POC,
+  # the 70% value area (VAL-VAH) and the low/high volume nodes. See
+  # strategies/volume_profile_strategies.py and the volume_profile block.
+  va_rejection:            # failed auction at the VAH (put) / VAL (call) → POC
+    enabled: true
+    from: "09:45"
+    to:   "15:45"
+    lookback_bars: 2       # the poke/test may be this many bars back
+  lvn_acceleration:        # shelf → close into a volume pocket on RVOL ≥ 1.5x
+    enabled: true
+    from: "09:45"
+    to:   "15:45"
+    min_rvol: 1.5
+    shelf_bars: 3
+  poc_bounce:              # ≥ 1 ATR away, back to the POC, rejected there
+    enabled: true
+    from: "10:00"
+    to:   "15:45"
+    away_atr: 1.0
+
+volume_profile:
+  rth_open: "09:30"
+  rth_close: "16:00"
+  bins: 40                 # price bins per session
+  value_area_pct: 0.70
+  lvn_ratio: 0.30          # a bin at <= 0.30x the mean bin is thin (LVN)
+  hvn_ratio: 1.5           # a bin at >= 1.5x the mean bin is thick (HVN)
+  # Confluence on EVERY signal, in the Technical agent: entering at a VAL/POC
+  # (calls) or VAH/POC (puts) adds alignment_boost to its score; a thick HVN
+  # straight ahead costs hvn_penalty within hvn_near_atr ATR, and is a veto
+  # within hvn_veto_atr ATR.
+  alignment_tolerance_atr: 0.25
+  alignment_boost: 0.30
+  hvn_near_atr: 1.0
+  hvn_veto_atr: 0.25
+  hvn_penalty: 0.30
+
 risk:
   # Three names can be live at once. The desk reads every symbol on the
   # watchlist in the same instant each cycle and takes as many setups as it
@@ -432,6 +470,9 @@ strategy_weights:
   vwap_ema_pullback: 1.0
   liquidity_sweep: 1.0
   candlestick_at_level: 1.0
+  va_rejection: 1.0
+  lvn_acceleration: 1.0
+  poc_bounce: 1.0
 
 reflection:
   enabled: true                 # run after Friday's close, once a week

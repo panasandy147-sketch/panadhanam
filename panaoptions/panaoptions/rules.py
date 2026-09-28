@@ -109,6 +109,14 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                       "be at least",
                       f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below",
                       "agents.technical.min_rvol"),
+                _rule("Volume profile confluence on every signal: a call at the "
+                      "VAL or POC, or a put at the VAH or POC, scores "
+                      f"+{g('volume_profile.alignment_boost', 0.30)}; a thick High "
+                      "Volume Node straight ahead costs "
+                      f"{g('volume_profile.hvn_penalty', 0.30)} within "
+                      f"{g('volume_profile.hvn_near_atr', 1.0)} ATR and is a veto "
+                      f"within {g('volume_profile.hvn_veto_atr', 0.25)} ATR",
+                      "boost / penalty / veto", "volume_profile.*"),
                 _rule("Extreme options flow (a contract at "
                       f"{g('agents.derivatives.extreme_flow_ratio', 10.0):g}x+ its open "
                       "interest): AGAINST the trade = strict veto (no calls into "
@@ -224,6 +232,50 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             ],
             "wrong": "Price breaks the structure the pattern formed at.",
             "target": "The desk's standard exits (below).",
+        },
+        {
+            "key": "va_rejection", "name": "5 · Value Area Rejection (failed auction)",
+            "window": window("va_rejection"), "enabled": enabled("va_rejection"),
+            "buy": [
+                "Built on the session volume profile (RTH 09:30–16:00): the POC "
+                f"and the {float(g('volume_profile.value_area_pct', 0.70)):.0%} "
+                "value area (VAL–VAH), for the prior and the current session.",
+                "Puts: price pushes clearly above the VAH, fails to hold (a "
+                "one-sided rejection wick or a bearish engulfing) and closes back "
+                "inside value.",
+                "Calls: price drops to the VAL, tests it, and rejects with a "
+                "hammer or bullish engulfing, closing back above it.",
+            ],
+            "wrong": "Beyond the poke's high (puts) or the test's low (calls).",
+            "target": "The POC.",
+        },
+        {
+            "key": "lvn_acceleration", "name": "6 · LVN Pocket Acceleration",
+            "window": window("lvn_acceleration"), "enabled": enabled("lvn_acceleration"),
+            "buy": [
+                "A Low Volume Node is a price pocket inside the profile where "
+                f"almost nothing traded (≤ {g('volume_profile.lvn_ratio', 0.30)}x the "
+                "average bin) — price tends to travel through it fast.",
+                f"After a {g('strategies.lvn_acceleration.shelf_bars', 3)}-bar "
+                "consolidation shelf, a 5-minute candle closes cleanly INTO the "
+                f"pocket on relative volume ≥ "
+                f"{g('strategies.lvn_acceleration.min_rvol', 1.5)}x.",
+                "Calls on an upside break, puts on a downside one.",
+            ],
+            "wrong": "Back inside the shelf it broke out of.",
+            "target": "The far edge of the pocket.",
+        },
+        {
+            "key": "poc_bounce", "name": "7 · POC Magnet / Bounce",
+            "window": window("poc_bounce"), "enabled": enabled("poc_bounce"),
+            "buy": [
+                f"Price moves at least {g('strategies.poc_bounce.away_atr', 1.0)} ATR "
+                "away from the POC, then comes back to retest it.",
+                "A clean rejection candle prints at the POC: calls when it came "
+                "back down from above, puts when it came back up from below.",
+            ],
+            "wrong": "A close through the POC.",
+            "target": "The swing it came back from.",
         },
     ]
     sections.append({

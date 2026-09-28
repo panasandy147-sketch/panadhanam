@@ -596,3 +596,21 @@ class CandlestickAtLevel(Strategy):
 
 
 ALL.append(CandlestickAtLevel)
+
+
+def _register_volume_profile() -> None:
+    """Add the volume-profile family after the core four.
+
+    Imported here so that anything using ALL sees all seven. If that module
+    is the one being imported first it registers itself at its end instead.
+    """
+    try:
+        from panaoptions.strategies import volume_profile_strategies as vp
+        for cls in vp.STRATEGIES:
+            if cls not in ALL:
+                ALL.append(cls)
+    except (ImportError, AttributeError):
+        pass
+
+
+_register_volume_profile()

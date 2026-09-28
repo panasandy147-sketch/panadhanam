@@ -246,9 +246,11 @@ def test_the_strategies_endpoint_lists_them_all_with_their_windows(client):
     body = client.get("/api/strategies").json()
     names = [s["name"] for s in body["strategies"]]
 
-    assert len(names) == 4
+    assert len(names) == 7
     assert "ORB + VWAP" in names
     assert "Candlestick at a Key Level" in names
+    for vp in ("Value Area Rejection", "LVN Pocket Acceleration", "POC Magnet / Bounce"):
+        assert vp in names
     for strategy in body["strategies"]:
         assert strategy["from"] < strategy["to"]
         assert strategy["from"] >= "09:45", \

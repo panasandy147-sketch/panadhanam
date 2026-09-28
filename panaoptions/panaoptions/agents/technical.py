@@ -74,6 +74,17 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
         result.reasons.append(override)
         result.data["rvol_override"] = override
 
+    # Volume profile confluence: +0.30 at a VAL/POC (calls) or VAH/POC (puts);
+    # a thick HVN straight ahead costs points, or vetoes when it is right there.
+    profile = consensus.profile_confluence(signal, setup, candles, cfg)
+    result.score += profile.boost
+    result.reasons.extend(profile.notes)
+    if profile.veto:
+        result.veto = True
+        result.reasons.insert(0, f"volume profile veto: {profile.veto}")
+    if profile.profiles:
+        result.data["volume_profile"] = profile.profiles
+
     if trend == want:
         result.score += 0.10
         result.reasons.append("15m trend agrees")

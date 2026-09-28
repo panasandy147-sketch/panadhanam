@@ -59,6 +59,18 @@ strategies:
     from: "09:45"
     to:   "14:30"
     volume_multiple: 1.5
+  va_rejection:
+    enabled: true
+    from: "09:45"
+    to:   "15:00"
+  lvn_acceleration:
+    enabled: true
+    from: "09:45"
+    to:   "15:00"
+  poc_bounce:
+    enabled: true
+    from: "10:00"
+    to:   "15:00"
   candlestick_at_level:
     enabled: true
     from: "09:45"

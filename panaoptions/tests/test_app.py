@@ -123,14 +123,17 @@ def test_the_entry_window_never_outlasts_the_force_exit(cfg):
 
 
 def test_a_disabled_strategy_does_not_hold_the_window_open(cfg):
-    cfg.data["strategies"]["candlestick_at_level"]["enabled"] = False
+    later = ("candlestick_at_level", "va_rejection", "lvn_acceleration", "poc_bounce")
+    for key in later:
+        cfg.data["strategies"][key]["enabled"] = False
     try:
         cfg.data["strategies"]["orb_vwap"]["to"] = "11:00"
         cfg.data["strategies"]["vwap_ema_pullback"]["to"] = "13:30"
         cfg.data["strategies"]["liquidity_sweep"]["to"] = "12:00"
         assert cfg.last_entry_hhmm == "13:30"      # the pullback, next longest
     finally:
-        cfg.data["strategies"]["candlestick_at_level"]["enabled"] = True
+        for key in later:
+            cfg.data["strategies"][key]["enabled"] = True
         for key in ("orb_vwap", "vwap_ema_pullback", "liquidity_sweep"):
             cfg.data["strategies"][key]["to"] = "15:45"
 
@@ -612,7 +615,8 @@ async def test_after_the_last_window_the_note_says_so_instead(desk,
     # there is nothing left to ask.
     monkeypatch.setattr(clock, "now", lambda tz: _at(10, 0))
     for key in ("orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
-                "candlestick_at_level"):
+                "candlestick_at_level", "va_rejection", "lvn_acceleration",
+                "poc_bounce"):
         desk.cfg.data["strategies"][key]["to"] = "09:50"
     await desk.cycle()
     notes = [e["detail"] for e in desk.activity.recent(40)
