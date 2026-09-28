@@ -212,8 +212,11 @@ def _votes(signal_id: str | None) -> tuple[str, dict[str, float]]:
 
 def closed_trades(since: date, until: date) -> list[dict[str, Any]]:
     """The week's graded trades as plain JSON-ready dicts."""
+    from app.core import audit
     from app.journal import store
 
+    # What the desk wrote at the fill and at the exit (app/core/audit.py).
+    trail = audit.by_signal(audit.entries(since=since, until=until))
     out = []
     for row in store.entries(limit=1000, since=since.isoformat(),
                              until=until.isoformat()):
@@ -232,8 +235,21 @@ def closed_trades(since: date, until: date) -> list[dict[str, Any]]:
             "mistakes": mistakes,
             "for": sorted(a for a, s in scores.items() if want and s * want >= 0.25),
             "against": sorted(a for a, s in scores.items() if want and s * want <= -0.25),
+            **_audit_fields(trail.get(str(row.get("signal_id")), {})),
         })
     return out
+
+
+def _audit_fields(pair: dict[str, Any]) -> dict[str, Any]:
+    """The audit's reasons for one trade, trimmed for the prompt."""
+    buy, sell = pair.get("buy") or {}, pair.get("sell") or {}
+    if not buy and not sell:
+        return {}
+    return {"why_bought": (buy.get("why") or {}).get("headline", ""),
+            "setup": (buy.get("volume_profile") or {}).get("name") or "",
+            "composite": buy.get("composite_score"),
+            "why_sold": sell.get("why_sold", ""),
+            "held_minutes": sell.get("held_minutes")}
 
 
 def summarise(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

@@ -459,6 +459,11 @@ class OptionsDesk:
                 continue
 
             trade = self.ledger.open(signal, now)
+            # The audit log: the fill and the whole case for it, as known now.
+            from panaoptions import audit
+            audit.record_buy(self.cfg, trade, signal, setup,
+                             self.candidate if self.candidate
+                             and self.candidate.get("symbol") == symbol else None)
             if self.candidate and self.candidate.get("symbol") == symbol:
                 self.candidate["taken"] = True
                 self.candidate["trade_id"] = trade.id
@@ -846,6 +851,9 @@ class OptionsDesk:
         A P&L number teaches nothing on its own. The card is the learning, and
         it grades the decision rather than the result.
         """
+        # Every close passes through here, so the audit's SELL is written here.
+        from panaoptions import audit
+        audit.record_sell(self.cfg, trade)
         if not bool(self.cfg.get("journal.auto_grade", True)):
             return
         try:

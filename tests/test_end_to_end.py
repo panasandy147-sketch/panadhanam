@@ -17,10 +17,12 @@ The criteria being exercised, from config/settings.yaml:
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 
 from app.brokers.paper import PaperBroker
+from app.core import clock
 from app.core.models import AgentReport, Bias, Quote, SignalStatus
 from app.scheduler import TradingEngine
 from app.storage import db
@@ -501,3 +503,62 @@ async def test_the_record_separates_the_code_running_now(engine, cfg, monkeypatc
     assert after["version"] == code_version()
     assert after["closed"] == before["closed"] + 1
     assert after["exits"]["target"] == before["exits"]["target"] + 1
+
+
+# --------------------------------------------------------------------------- #
+# The day's record and the audit log
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_every_buy_and_sell_is_in_the_audit_log_with_its_reasons(engine, cfg,
+                                                                       monkeypatch):
+    from app.core import audit
+
+    row = await _open_one(engine)
+    today = clock.market_now(str(cfg.get("system.timezone"))).date()
+    [buy] = [e for e in audit.entries(today) if e.get("signal_id") == row["id"]]
+    assert buy["event"] in {"BUY", "SELL_SHORT"}
+    assert buy["entry"] == row["entry"] and buy["stop_loss"] == row["stop_loss"]
+    assert buy["why"]["headline"] and buy["analysts"]
+    assert buy["code_version"]
+
+    _price(engine, monkeypatch, row["target"] + 1.0)
+    await engine.outcomes.poll()
+    halves = audit.by_signal(audit.entries(today))[row["id"]]
+    sell = halves["sell"]
+    assert sell["status"] == "CLOSED_TARGET" and sell["pnl"] > 0
+    assert sell["why_sold"].startswith("Target")
+    assert sell["held_minutes"] is not None
+    text = audit.day_markdown(today)
+    assert row["id"] in text and "How it ended" in text and "Why:" in text
+
+
+@pytest.mark.asyncio
+async def test_the_paper_record_panel_is_today_only_and_saved_at_the_close(
+        engine, cfg, monkeypatch):
+    from datetime import timedelta
+
+    from app.core import record
+    from app.journal import store
+
+    before = record.build(cfg, period="day")
+    row = await _open_one(engine)
+    _price(engine, monkeypatch, row["target"] + 1.0)
+    await engine.outcomes.poll()
+    today = record.build(cfg, period="day")
+    assert today["period"] == "day" and today["date"]
+    assert today["closed"] == before["closed"] + 1
+    assert any(t["id"] == row["id"] for t in today["trades"])
+    assert row["symbol"] in today["by_symbol"]
+
+    # Yesterday's page does not contain today's trade.
+    yesterday = record.build(cfg, period="day",
+                             day=date.fromisoformat(today["date"]) - timedelta(days=1))
+    assert all(t["id"] != row["id"] for t in yesterday["trades"])
+
+    saved = record.save_day(cfg)
+    md = open(saved["markdown"], encoding="utf-8").read()
+    data = json.loads(open(saved["json"], encoding="utf-8").read())
+    assert f"Paper record — {today['date']}" in md and row["id"] in md
+    assert data["record"]["closed"] == today["closed"]
+    assert any(e["signal_id"] == row["id"] for e in data["audit"])
+    assert (store.JOURNAL_DIR / "daily").is_dir()

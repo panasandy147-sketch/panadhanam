@@ -10,8 +10,9 @@ CLOSED_*, but the saved payload keeps what it was at entry.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.core.explain import why_sold
 
@@ -48,15 +49,40 @@ def _summary(closed: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build(cfg: Any, days: int = 30, recent: int = 12) -> dict[str, Any]:
+def _market_date(ts: str | None, tz: str) -> date | None:
+    """The market-local date a trade was opened on (rows are stored in UTC)."""
+    try:
+        stamp = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(ZoneInfo(tz)).date()
+
+
+def build(cfg: Any, days: int = 30, recent: int = 12, period: str = "days",
+          day: date | None = None) -> dict[str, Any]:
+    """The record for the last `days` days, or with period="day" for one
+    market day (today by default) — every trade that day, not a sample."""
     from app.storage import db
 
     universe = {i["symbol"] for i in (cfg.universe.get("indices") or [])} | \
                {i["symbol"] for i in (cfg.universe.get("stocks") or [])}
-    since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-    rows = [r for r in db.recent_signals(limit=5000)
-            if r["symbol"] in universe and (r.get("ts") or "") >= since
-            and r["status"] != "REJECTED"]
+    tz = str(cfg.get("system.timezone", "Asia/Kolkata"))
+    if period == "day":
+        from app.core import clock
+        day = day or clock.market_now(tz).date()
+        since = (datetime.combine(day, datetime.min.time(), tzinfo=ZoneInfo(tz))
+                 - timedelta(days=1)).astimezone(UTC).isoformat()
+        rows = [r for r in db.recent_signals(limit=5000)
+                if r["symbol"] in universe and (r.get("ts") or "") >= since
+                and r["status"] != "REJECTED" and _market_date(r.get("ts"), tz) == day]
+        recent = max(recent, 200)
+    else:
+        since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        rows = [r for r in db.recent_signals(limit=5000)
+                if r["symbol"] in universe and (r.get("ts") or "") >= since
+                and r["status"] != "REJECTED"]
 
     filled = [r for r in rows if _filled(r)]
     alerts = [r for r in rows if not _filled(r)]
@@ -85,6 +111,9 @@ def build(cfg: Any, days: int = 30, recent: int = 12) -> dict[str, Any]:
                     **_summary([r for r in closed if _version(r) == current]),
                     "open_now": len([r for r in open_now if _version(r) == current])},
         "days": days,
+        "period": period,
+        "date": day.isoformat() if period == "day" and day else None,
+        "market": getattr(cfg, "active_market", ""),
         "currency": getattr(cfg.market, "currency_symbol", ""),
         "open_now": len(open_now),
         "open_symbols": [r["symbol"] for r in open_now],
@@ -113,5 +142,64 @@ def build(cfg: Any, days: int = 30, recent: int = 12) -> dict[str, Any]:
             "pnl": r.get("pnl"),
             "r_multiple": r.get("r_multiple"),
             "exit_reason": why_sold(r),
+            "status": r["status"],
         } for r in latest],
+        # Where the losses come from — the question the weekend review asks.
+        "by_exit": _breakdown(closed, lambda r: _EXITS[r["status"]]),
+        "by_symbol": _breakdown(closed, lambda r: r["symbol"]),
+        "by_side": _breakdown(closed, lambda r: r["side"]),
     }
+
+
+def _breakdown(closed: list[dict[str, Any]], key) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for r in closed:
+        b = out.setdefault(str(key(r)), {"trades": 0, "wins": 0, "pnl": 0.0, "r": 0.0})
+        b["trades"] += 1
+        b["wins"] += 1 if (r.get("pnl") or 0) > 0 else 0
+        b["pnl"] = round(b["pnl"] + (r.get("pnl") or 0.0), 2)
+        b["r"] = round(b["r"] + (r.get("r_multiple") or 0.0), 2)
+    for b in out.values():
+        b["win_rate"] = round(b["wins"] / b["trades"] * 100, 1) if b["trades"] else 0.0
+    return out
+
+
+def save_day(cfg: Any, day: date | None = None) -> dict[str, str]:
+    """Write the day's record and its audit to journal/daily/ for the weekly
+    review: <date>-record.json (machine) and <date>-record.md (you)."""
+    import json
+
+    from app.core import audit
+    from app.journal import store
+
+    rec = build(cfg, period="day", day=day)
+    day = date.fromisoformat(rec["date"])
+    folder = store.JOURNAL_DIR / "daily"
+    folder.mkdir(parents=True, exist_ok=True)
+    events = audit.entries(day)
+    js = folder / f"{day.isoformat()}-record.json"
+    js.write_text(json.dumps({"record": rec, "audit": events}, indent=2, default=str),
+                  encoding="utf-8")
+    md = folder / f"{day.isoformat()}-record.md"
+    md.write_text(day_markdown(rec) + "\n" + audit.day_markdown(day), encoding="utf-8")
+    return {"json": str(js), "markdown": str(md)}
+
+
+def day_markdown(rec: dict[str, Any]) -> str:
+    cur = rec.get("currency", "")
+    lines = [f"# Paper record — {rec.get('date')} ({rec.get('market')})", "",
+             f"- Closed **{rec['closed']}** · win rate **{rec['win_rate']}%** "
+             f"({rec['wins']}W / {rec['losses']}L"
+             + (f" / {rec['flat']} flat" if rec.get("flat") else "") + ")",
+             f"- P&L **{cur}{rec['total_pnl']:,.2f}** ({rec['total_r']:+.2f}R) · "
+             f"avg win {cur}{rec['avg_win']:,.2f} · avg loss {cur}{rec['avg_loss']:,.2f} · "
+             f"expectancy {cur}{rec['expectancy']:,.2f}",
+             f"- Exits: {rec['exits']['target']} target · {rec['exits']['stop']} stop · "
+             f"{rec['exits']['time']} time", ""]
+    if rec.get("by_symbol"):
+        lines += ["| Symbol | Trades | Win % | P&L | R |", "|---|---|---|---|---|"]
+        for sym, b in sorted(rec["by_symbol"].items(), key=lambda kv: kv[1]["pnl"]):
+            lines.append(f"| {sym} | {b['trades']} | {b['win_rate']} | "
+                         f"{cur}{b['pnl']:,.2f} | {b['r']:+.2f} |")
+        lines.append("")
+    return "\n".join(lines)

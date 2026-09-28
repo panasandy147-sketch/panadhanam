@@ -151,11 +151,31 @@ async def signal_detail(signal_id: str) -> dict[str, Any]:
 
 
 @router.get("/paper-record")
-async def paper_record(days: int = 30) -> dict[str, Any]:
-    """Every filled paper trade in the window, and how the book has done."""
+async def paper_record(period: str = "day", days: int = 30,
+                       day: str | None = None) -> dict[str, Any]:
+    """Filled paper trades and how they did: today by default (period=day,
+    or a past `day`), or the last `days` days with period=days."""
+    from datetime import date as _date
+
     from app.core.record import build
 
+    if period == "day":
+        return build(get_config(), period="day",
+                     day=_date.fromisoformat(day) if day else None)
     return build(get_config(), days=days)
+
+
+@router.get("/audit")
+async def audit_log(day: str | None = None) -> dict[str, Any]:
+    """Every BUY and SELL of one market day, with the reasons (today by default)."""
+    from datetime import date as _date
+
+    from app.core import audit, clock
+
+    cfg = get_config()
+    d = (_date.fromisoformat(day) if day
+         else clock.market_now(str(cfg.get("system.timezone", "Asia/Kolkata"))).date())
+    return {"day": d.isoformat(), "events": audit.entries(d)}
 
 
 @router.get("/focus")

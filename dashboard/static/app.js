@@ -859,13 +859,16 @@ function renderRecord(r) {
       <div class="label">${k}</div><div class="value ${cls}">${v}</div>
       ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
   const c = r.current || {};
-  $("record-meta").textContent = `last ${r.days} days · filled paper trades only`;
-  $("record-current").innerHTML = c.version ? `<b>Since the code running now
-    (${esc(c.version)}):</b> ${fmtInt(c.closed)} closed · ${fmt(c.win_rate, 0)}% win
-    (${c.wins}W / ${c.losses}L) · <span class="${signClass(c.total_pnl)}">${m(c.total_pnl)}
-    (${signed(c.total_r)}R)</span> · ${c.exits.target} target · ${c.exits.stop} stop ·
-    ${c.exits.time} time${c.open_now ? ` · ${c.open_now} open` : ""}. The tiles below are the
-    whole ${r.days} days, including trades from earlier code.` : "";
+  const today = r.period === "day";
+  $("record-meta").textContent = `${today ? `today · ${r.date || ""}` : `last ${r.days} days`}`
+    + " · filled paper trades only";
+  $("record-current").innerHTML = `<b>${today ? "Today" : `Last ${r.days} days`}:</b>
+    ${fmtInt(r.closed)} closed · ${fmt(r.win_rate, 0)}% win (${r.wins}W / ${r.losses}L) ·
+    <span class="${signClass(r.total_pnl)}">${m(r.total_pnl)} (${signed(r.total_r)}R)</span>
+    ${r.open_now ? ` · ${r.open_now} open` : ""}${c.version ? ` · code ${esc(c.version)}` : ""}.
+    ${today ? `Saved at the close to <code>journal/daily/${esc(r.date || "")}-record.md</code>
+    for the weekly review; every buy and sell, with its reasons, is in the
+    <a href="/api/audit" target="_blank" rel="noopener">audit log</a>.` : ""}`;
   $("record-stats").innerHTML = [
     tile("Open now", fmtInt(r.open_now), r.open_symbols.join(", ") || "flat"),
     tile("Closed", fmtInt(r.closed),
@@ -893,14 +896,14 @@ function renderRecord(r) {
       <td class="num ${signClass(t.pnl)}">${m(t.pnl)}</td>
       <td class="why-cell">${esc(t.exit_reason)}</td></tr>`).join("")}
     </tbody></table>`
-    : `<div class="empty">No paper trades closed in the last ${r.days} days${
+    : `<div class="empty">No paper trades closed ${today ? "today" : `in the last ${r.days} days`}${
         r.alerts_not_traded ? ` — ${r.alerts_not_traded} alert(s) on unarmed days were
         followed but never bought` : ""}.</div>`;
 }
 
 async function loadRecord() {
   try {
-    const res = await fetch("/api/paper-record");
+    const res = await fetch("/api/paper-record?period=day");
     if (res.ok) renderRecord(await res.json());
   } catch { /* the next poll fills it in */ }
 }

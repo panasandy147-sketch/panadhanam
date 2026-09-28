@@ -421,6 +421,15 @@ _AGENT_NAMES = {
 }
 
 
+def _audit_days(start: date, end: date) -> list[str]:
+    """The days of this week that have an audit file."""
+    folder = store.JOURNAL_DIR / "audit"
+    if not folder.is_dir():
+        return []
+    return sorted(p.stem for p in folder.glob("*.jsonl")
+                  if start.isoformat() <= p.stem <= end.isoformat())
+
+
 def to_markdown(review: WeekReview) -> str:
     s = review.stats
     cur = review.currency
@@ -434,6 +443,16 @@ def to_markdown(review: WeekReview) -> str:
     if not review.complete:
         out += ["> **This week is not finished.** These numbers are provisional "
                 "and will change before Friday's close.", ""]
+
+    # Every buy and sell of the week, with the reasons, day by day.
+    days = _audit_days(review.week_start, review.week_end)
+    if days:
+        out += ["## Audit log", "",
+                "Every buy and sell with the case for it and how it ended, as "
+                "written at the time:", ""]
+        out += [f"- {d}: `journal/audit/{d}.md` · day record "
+                f"`journal/daily/{d}-record.md`" for d in days]
+        out.append("")
 
     if not review.trades:
         out += ["No trades were logged in this window, so there is nothing to "

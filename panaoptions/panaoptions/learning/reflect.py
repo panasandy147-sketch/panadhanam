@@ -191,8 +191,11 @@ def strategy_key(value: str) -> str:
 
 def closed_trades(since: str, until: str) -> list[dict[str, Any]]:
     """The week's graded trades as plain JSON-ready dicts."""
+    from panaoptions import audit
     from panaoptions.journal.store import entries
 
+    trail = audit.by_trade(audit.entries(since=date.fromisoformat(since),
+                                         until=date.fromisoformat(until)))
     out = []
     for row in entries(limit=1000, since=since, until=until):
         try:
@@ -209,8 +212,20 @@ def closed_trades(since: str, until: str) -> list[dict[str, Any]]:
             "pnl": round(float(row.get("pnl") or 0.0), 2),
             "return_pct": round(float(row.get("return_pct") or 0.0), 1),
             "exit": row.get("exit_reason"), "mistakes": mistakes,
+            **_audit_fields(trail.get(str(row.get("trade_id")), {})),
         })
     return out
+
+
+def _audit_fields(pair: dict[str, Any]) -> dict[str, Any]:
+    """The audit's reasons for one trade, trimmed for the prompt."""
+    buy, sell = pair.get("buy") or {}, pair.get("sell") or {}
+    if not buy and not sell:
+        return {}
+    committee = buy.get("committee") or {}
+    return {"why": "; ".join(buy.get("confirmations") or [])[:300],
+            "committee_score": committee.get("score"),
+            "held_minutes": sell.get("held_minutes")}
 
 
 def summarise(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

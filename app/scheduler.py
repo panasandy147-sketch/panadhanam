@@ -450,6 +450,12 @@ class TradingEngine:
             return
 
         self._day_summary_on = today
+        # Keep the day for the weekly review: its record and its audit.
+        try:
+            from app.core.record import save_day
+            save_day(self.cfg, now.date())
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not save the day's record: %s", exc)
         summary["published_at"] = now.isoformat()
         self._last_day_summary = summary
         await bus.publish("trading_day.summary", summary)

@@ -60,6 +60,9 @@ class Dispatcher:
             if order.ok:
                 signal.status = SignalStatus.OPEN
                 log.info("order placed for %s → %s", signal.id, order.order_id)
+                # The audit log: the fill and the whole case for it, as known now.
+                from app.core import audit
+                audit.record_buy(self.cfg, signal, order.dict())
             else:
                 log.error("order FAILED for %s: %s", signal.id, order.message)
             # Everything a person needs to know what just happened, in the

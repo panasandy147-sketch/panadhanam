@@ -369,6 +369,16 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         capital = getattr(getattr(desk, "risk", None), "capital", None)
         return rules_mod.build(cfg, capital=capital or cfg.capital)
 
+    @app.get("/api/audit")
+    async def audit_log(day: str | None = None) -> dict[str, Any]:
+        """Every BUY and SELL of one session, with the reasons (today by default)."""
+        from datetime import date as _date
+
+        from panaoptions import audit
+
+        d = _date.fromisoformat(day) if day else clock.now(cfg.timezone).date()
+        return {"day": d.isoformat(), "events": audit.entries(d)}
+
     @app.get("/api/strategies")
     async def strategies() -> dict[str, Any]:
         """Every strategy, its window, and whether it is live now."""

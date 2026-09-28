@@ -261,7 +261,17 @@ def test_the_exit_appears_in_every_panel_without_a_reload(desk, page):
     page.wait_for_function(
         "!document.getElementById('positions').innerText.includes('SPY')", timeout=15000)
     _wait_text(page, "#record-current", "1 closed")
+    _wait_text(page, "#record-current", "Today")
+    _wait_text(page, "#record-meta", "today")
     _wait_text(page, "#record-trades", "Target")
+
+    # The audit log has both halves of the trade, with the reasons.
+    events = _api(desk, "GET", "/api/audit")["events"]
+    mine = [e for e in events if e.get("signal_id") == row["id"]]
+    assert {e["event"] for e in mine} == {"BUY", "SELL"}
+    buy = next(e for e in mine if e["event"] == "BUY")
+    assert buy["why"]["headline"] and buy["analysts"]
+    assert next(e for e in mine if e["event"] == "SELL")["why_sold"].startswith("Target")
 
 
 # --------------------------------------------------------------------------- #

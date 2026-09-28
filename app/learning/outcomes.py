@@ -146,6 +146,11 @@ class OutcomeTracker:
                      "exit_price": round(exit_price, 2),
                      "r_multiple": round(r_multiple, 3)})}
 
+        from app.core import audit
+        audit.record_sell(self.cfg, row, exit_price=exit_price, pnl=pnl,
+                          r_multiple=r_multiple, status=status.value, detail=detail,
+                          exit_reason=event["exit_reason"])
+
         if self.risk:
             from app.core.models import TradeSignal
             try:
