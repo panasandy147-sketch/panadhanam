@@ -18,10 +18,10 @@
        PUT off it from below. Target: the swing it came back from. Wrong on a
        close through the POC.
 
-The detectors are pure: bars in, a `VPSignal` or None out. The same
-functions back the panaoptions strategy pipeline (the Strategy classes at the
-bottom) and the confluence check the Technical agent runs on every signal
-(`level_alignment`, `hvn_wall`).
+The detectors are pure: bars in, a `VPSignal` or None out. The Volume
+Profile analyst (agents/volume_profile.py) runs them each cycle, and the CMIO
+uses `level_alignment` / `hvn_wall` on every trade (agents/consensus.py).
+panaoptions carries the same detectors; the two apps share no code.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from panaoptions.indicators.volume_profile import VolumeProfile, Zone, session_profiles
+from app.indicators.volume_profile import VolumeProfile, Zone, session_profiles
 
 
 # --------------------------------------------------------------------------- #
@@ -308,117 +308,40 @@ def hvn_wall(price: float, direction: int, profiles: dict[str, VolumeProfile],
     return "", None
 
 
-# --------------------------------------------------------------------------- #
-# The panaoptions strategy pipeline
-# --------------------------------------------------------------------------- #
-from panaoptions.engine import indicators as ta  # noqa: E402
-from panaoptions.engine.strategies import Strategy, _base  # noqa: E402
-from panaoptions.models import Direction, SetupType  # noqa: E402
-
-
-def frame_bars(df5) -> list[dict[str, Any]]:
-    """A localised 5m frame as bar dicts carrying their timestamps."""
-    return [{"ts": ts, "open": float(r["open"]), "high": float(r["high"]),
-             "low": float(r["low"]), "close": float(r["close"]),
-             "volume": float(r.get("volume", 0.0) or 0.0)}
-            for ts, r in df5.iterrows()]
-
-
-def profiles_for(df5, cfg) -> dict[str, VolumeProfile]:
+def profiles_for(candles: Sequence[Any], cfg: Any) -> dict[str, VolumeProfile]:
+    """Prior and current RTH session profiles, in the active market's hours."""
+    g = cfg.get
     return session_profiles(
-        frame_bars(df5), str(cfg.get("session.timezone", "America/New_York")),
-        str(cfg.get("volume_profile.rth_open", "09:30")),
-        str(cfg.get("volume_profile.rth_close", "16:00")),
-        bins=int(cfg.get("volume_profile.bins", 40)),
-        value_area_pct=float(cfg.get("volume_profile.value_area_pct", 0.70)),
-        lvn_ratio=float(cfg.get("volume_profile.lvn_ratio", 0.30)),
-        hvn_ratio=float(cfg.get("volume_profile.hvn_ratio", 1.5)))
+        candles, str(g("system.timezone", "America/New_York")),
+        str(g("volume_profile.rth_open") or g("system.market_open", "09:30")),
+        str(g("volume_profile.rth_close") or g("system.market_close", "16:00")),
+        bins=int(g("volume_profile.bins", 40)),
+        value_area_pct=float(g("volume_profile.value_area_pct", 0.70)),
+        lvn_ratio=float(g("volume_profile.lvn_ratio", 0.30)),
+        hvn_ratio=float(g("volume_profile.hvn_ratio", 1.5)))
 
 
-class _VolumeProfileStrategy(Strategy):
-    """Shared plumbing: profiles, today's bars, the Setup it fills in."""
-
-    detector: str = ""
-    window = ("09:45", "15:45")
-
-    def evaluate(self, symbol, df5, df15, levels):
-        setup = _base(symbol, df5, self.name)
-        profiles = profiles_for(df5, self.cfg)
-        if not profiles:
-            setup.blockers.append("no RTH session to build a volume profile from")
-            return setup
-        snapshot = ta.compute(df5, self.cfg)
-        setup.indicators = snapshot
-        bars = [as_bar(b) for b in frame_bars(df5.tail(40))]
-        found = self._detect(bars, profiles, snapshot)
-        if found is None:
-            names = ", ".join(f"{k} POC {p.poc:.2f} VA {p.val:.2f}-{p.vah:.2f}"
-                              for k, p in profiles.items())
-            setup.blockers.append(f"no {self.name.value.lower()} trigger ({names})")
-            return setup
-
-        setup.direction = Direction.LONG if found.direction > 0 else Direction.SHORT
-        setup.pattern = found.name
-        setup.confirmations = list(found.confirmations)
-        setup.entry_trigger = found.trigger
-        setup.underlying_support = found.invalidation
-        setup.underlying_target = found.target
-        setup.key_level = found.level
-        setup.key_level_source = found.level_name
-        setup.trend_aligned = found.strategy == "lvn_acceleration"
-        setup.invalidation_note = (f"a close back through {found.invalidation:.2f} "
-                                   f"({found.level_name})")
-        setup.reasoning = [
-            f"**Buy a {found.right}** on {symbol}.",
-            f"**The setup.** {found.name} at the {found.level_name} "
-            f"({found.level:.2f}).",
-            *[f"- {c}" for c in found.confirmations],
-            f"**What kills it.** {setup.invalidation_note}. Sold on that, whatever "
-            f"the premium is doing.",
-        ]
-        return setup
-
-    def _detect(self, bars, profiles, snapshot):
-        raise NotImplementedError
-
-
-class ValueAreaRejection(_VolumeProfileStrategy):
-    """Strategy 5 — Value Area Boundary Rejection (failed auction)."""
-    name = SetupType.VA_REJECTION
-
-    def _detect(self, bars, profiles, snapshot):
-        return detect_value_area_rejection(
-            bars, profiles, snapshot.atr,
-            lookback=int(self.cfg.get("strategies.va_rejection.lookback_bars", 2)))
-
-
-class LvnAcceleration(_VolumeProfileStrategy):
-    """Strategy 6 — Low Volume Node pocket acceleration."""
-    name = SetupType.LVN_ACCELERATION
-
-    def _detect(self, bars, profiles, snapshot):
-        return detect_lvn_acceleration(
-            bars, profiles, snapshot.atr,
-            min_rvol=float(self.cfg.get("strategies.lvn_acceleration.min_rvol", 1.5)),
-            shelf_bars=int(self.cfg.get("strategies.lvn_acceleration.shelf_bars", 3)),
-            rvol=snapshot.rvol or None)
-
-
-class PocBounce(_VolumeProfileStrategy):
-    """Strategy 7 — POC magnet / bounce."""
-    name = SetupType.POC_BOUNCE
-
-    def _detect(self, bars, profiles, snapshot):
-        return detect_poc_bounce(
-            bars, profiles, snapshot.atr,
-            away_atr=float(self.cfg.get("strategies.poc_bounce.away_atr", 1.0)))
-
-
-STRATEGIES: list[type[Strategy]] = [ValueAreaRejection, LvnAcceleration, PocBounce]
-
-# Register with the strategy pipeline, whichever module was imported first.
-from panaoptions.engine import strategies as _pipeline  # noqa: E402
-
-for _cls in STRATEGIES:
-    if _cls not in _pipeline.ALL:
-        _pipeline.ALL.append(_cls)
+def evaluate(candles: Sequence[Any], cfg: Any, atr: float
+             ) -> tuple[VPSignal | None, dict[str, VolumeProfile]]:
+    """Run the three detectors in order; the first to trigger wins."""
+    profiles = profiles_for(candles, cfg)
+    if not profiles:
+        return None, profiles
+    bars = [as_bar(c) for c in list(candles)[-40:]]
+    g = cfg.get
+    enabled = lambda key: bool(g(f"volume_profile.strategies.{key}", True))  # noqa: E731
+    checks = (
+        ("va_rejection", lambda: detect_value_area_rejection(
+            bars, profiles, atr, lookback=int(g("volume_profile.va_lookback_bars", 2)))),
+        ("lvn_acceleration", lambda: detect_lvn_acceleration(
+            bars, profiles, atr, min_rvol=float(g("volume_profile.lvn_min_rvol", 1.5)),
+            shelf_bars=int(g("volume_profile.lvn_shelf_bars", 3)))),
+        ("poc_bounce", lambda: detect_poc_bounce(
+            bars, profiles, atr, away_atr=float(g("volume_profile.poc_away_atr", 1.0)))),
+    )
+    for key, check in checks:
+        if enabled(key):
+            found = check()
+            if found is not None:
+                return found, profiles
+    return None, profiles

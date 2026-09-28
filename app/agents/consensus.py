@@ -1,6 +1,7 @@
 """The four-agent consensus pipeline, and the news veto that overrides it.
 
     Alpha / Technical     candlestick         the chart: patterns, trend, VWAP
+                          volume_profile      POC, value area, LVN/HVN setups
     Derivative / Flow     derivatives         the chain: OI walls, PCR, IV, leg
     Macro / Sentiment     news_sentiment      headlines for this symbol
                           macro_flow          indices, futures, VIX, flows
@@ -36,14 +37,14 @@ ROOT = Path(__file__).resolve().parents[2]
 STRATEGY_WEIGHTS_PATH = ROOT / "config" / "strategy_weights.json"
 
 PIPELINE: dict[str, tuple[str, ...]] = {
-    "Alpha / Technical": ("candlestick",),
+    "Alpha / Technical": ("candlestick", "volume_profile"),
     "Derivative / Flow": ("derivatives",),
     "Macro / Sentiment": ("news_sentiment", "macro_flow"),
     "CMIO / Risk Manager": ("cmio", "risk"),
 }
 # The analysts whose weight the Friday review may tune.
-VOTING_AGENTS: tuple[str, ...] = ("candlestick", "derivatives", "news_sentiment",
-                                  "macro_flow")
+VOTING_AGENTS: tuple[str, ...] = ("candlestick", "volume_profile", "derivatives",
+                                  "news_sentiment", "macro_flow")
 MULTIPLIER_MIN, MULTIPLIER_MAX = 0.25, 1.5
 NEWS_AGENTS = ("news_sentiment",)
 
@@ -114,3 +115,79 @@ def pipeline_view(reports: list[Any]) -> dict[str, list[dict[str, Any]]]:
     return {seat: [{"agent": a, "score": round(float(by_id[a].score), 3)}
                    for a in agents if a in by_id]
             for seat, agents in PIPELINE.items()}
+
+
+# --------------------------------------------------------------------------- #
+# Volume profile confluence — on every trade, whichever analyst led it
+# --------------------------------------------------------------------------- #
+def volume_profile_confluence(ctx: Any, reports: list[Any], composite: float,
+                              cfg: Any) -> tuple[float, list[str], str]:
+    """(adjusted composite, notes, veto reason).
+
+    An entry at a volume-profile level in the trade's favour — long at a VAL
+    or POC, short at a VAH or POC — moves the composite
+    `volume_profile.alignment_boost` (0.30) toward the trade. A thick High
+    Volume Node straight ahead moves it `hvn_penalty` toward zero, or is a
+    veto when it is within `hvn_veto_atr` ATR (buying straight into accepted
+    inventory). A node that holds the trade's own target is where it is meant
+    to go, not a wall.
+    """
+    if composite == 0:
+        return composite, [], ""
+    from app.strategies import volume_profile_strategies as vp
+
+    tf = str(cfg.get("technical.primary_timeframe", "5m"))
+    candles = (getattr(ctx, "candles", None) or {}).get(tf) or []
+    quote = getattr(ctx, "quote", None)
+    price = float(getattr(quote, "last_price", 0.0) or 0.0)
+    atr = float(((getattr(ctx, "indicators", None) or {}).get("primary") or {})
+                .get("atr", 0.0) or 0.0)
+    if not candles or price <= 0:
+        return composite, [], ""
+    profiles = vp.profiles_for(candles, cfg)
+    if not profiles:
+        return composite, [], ""
+
+    want = 1 if composite > 0 else -1
+    g = cfg.get
+    notes: list[str] = []
+    aligned = vp.level_alignment(price, want, profiles, atr,
+                                 float(g("volume_profile.alignment_tolerance_atr", 0.25)))
+    if aligned:
+        gain = float(g("volume_profile.alignment_boost", 0.30))
+        composite = max(-1.0, min(1.0, composite + want * gain))
+        notes.append(f"Volume profile: {'long' if want > 0 else 'short'} at the "
+                     f"{aligned} (+{gain:.2f})")
+
+    target = None
+    for report in reports or []:
+        if getattr(report, "agent_id", "") in {"volume_profile", "candlestick"} \
+                and getattr(report, "suggested_target", None) \
+                and (getattr(report, "score", 0.0) or 0.0) * want > 0:
+            target = float(report.suggested_target)
+            break
+    wall, zone = vp.hvn_wall(price, want, profiles, atr, target,
+                             float(g("volume_profile.hvn_near_atr", 1.0)),
+                             float(g("volume_profile.hvn_veto_atr", 0.25)))
+    veto = ""
+    if wall == "veto" and zone is not None:
+        veto = (f"Volume profile veto: {'buying' if want > 0 else 'selling'} straight "
+                f"into a thick HVN {zone.low:.2f}-{zone.high:.2f} — accepted "
+                f"inventory stalls the move")
+    elif wall == "penalty" and zone is not None:
+        cost = float(g("volume_profile.hvn_penalty", 0.30))
+        composite = composite - want * min(cost, abs(composite))
+        notes.append(f"Volume profile: HVN {zone.low:.2f}-{zone.high:.2f} within "
+                     f"{g('volume_profile.hvn_near_atr', 1.0)} ATR ahead (-{cost:.2f})")
+    return composite, notes, veto
+
+
+def volume_profile_backs(reports: list[Any], composite: float) -> bool:
+    """Did the Volume Profile analyst trigger in this trade's direction?"""
+    for report in reports or []:
+        score = float(getattr(report, "score", 0.0) or 0.0)
+        if getattr(report, "agent_id", "") == "volume_profile" \
+                and getattr(report, "data_available", True) \
+                and abs(score) >= 0.25 and score * composite > 0:
+            return True
+    return False

@@ -129,6 +129,14 @@ class CMIOAgent(BaseAgent):
             conflicts.append(news_vetoed)
             composite = 0.0
 
+        # --- volume profile confluence: +0.30 at a level, HVN wall ahead ---
+        composite, vp_notes, vp_veto = consensus_mod.volume_profile_confluence(
+            ctx, active, composite, self.cfg)
+        conflicts.extend(vp_notes)
+        if vp_veto:
+            conflicts.append(vp_veto)
+            composite = 0.0
+
         # --- fundamental veto ---
         fundamental = next((r for r in reports if r.agent_id == "fundamental"), None)
         if fundamental and fundamental.data_available and not fundamental.extra.get("eligible", True):
@@ -159,15 +167,24 @@ class CMIOAgent(BaseAgent):
 
         against = self._against_the_trend(ctx, composite) \
             if consensus.get("trend_filter", False) else ""
+        # A volume-profile reversal (a call at the VAL, a put at the VAH) is
+        # counter to the move that brought price there by design.
+        if against and consensus.get("trend_filter_exempt_volume_profile", True) \
+                and consensus_mod.volume_profile_backs(active, composite):
+            conflicts.append(f"Trend filter stood aside for a volume-profile setup "
+                             f"({against})")
+            against = ""
 
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
                    and abs(composite) >= min_score
-                   and led and not against and not news_vetoed)
+                   and led and not against and not news_vetoed and not vp_veto)
 
         reasons = []
         if news_vetoed:
             reasons.append(news_vetoed)
+        if vp_veto:
+            reasons.append(vp_veto)
         if bias != Bias.NEUTRAL and against:
             reasons.append(against)
         if bias != Bias.NEUTRAL and not led:

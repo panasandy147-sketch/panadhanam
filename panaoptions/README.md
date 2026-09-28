@@ -547,7 +547,22 @@ default profile's rules assume:
   daily bars. Applying them to a 1-minute chart on a 0-DTE contract is two
   extrapolations stacked, which is why the journal measures them here.
 
-## The four strategies
+## The strategies
+
+Seven, in the order they are asked: the four below, then the volume-profile
+family (`strategies/volume_profile_strategies.py`, built on
+`indicators/volume_profile.py` — each session's POC, 70% value area and
+low/high volume nodes, RTH 09:30–16:00 ET):
+
+| # | Strategy | Calls | Puts | Target |
+|---|---|---|---|---|
+| 5 | Value Area Rejection | VAL tested and held (hammer / bullish engulfing) | clear poke above the VAH fails back inside | the POC |
+| 6 | LVN Pocket Acceleration | shelf → 5m close up into a volume pocket, RVOL ≥ 1.5x | the same, down | the pocket's far edge |
+| 7 | POC Magnet / Bounce | back to the POC from above, rejected | back from below, rejected | the swing it came from |
+
+The Technical agent also scores every signal against the profile: +0.30 for
+a call at a VAL/POC or a put at a VAH/POC; a thick HVN straight ahead costs
+0.30 within 1 ATR and vetoes within 0.25 ATR (unless it holds the target).
 
 Every entry is tagged with the strategy that produced it, so the journal can
 answer *which of these actually pays* rather than lumping them together. They

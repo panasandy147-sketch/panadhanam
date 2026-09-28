@@ -151,10 +151,14 @@ consensus:
   silent_below: 0.10
   # At least one of these must agree with the trade. News and macro are
   # mostly market-wide, so alone they would put the same trade on every name.
-  lead_analysts: ["candlestick", "derivatives"]
+  lead_analysts: ["candlestick", "derivatives", "volume_profile"]
   # No counter-trend trades: no long below VWAP or into a falling (stacked)
   # 15-minute trend, no short above VWAP or into a rising one.
   trend_filter: true
+  # ...except a volume-profile reversal: buying a call at the VAL or POC is by
+  # design against the move that brought price there. When the Volume Profile
+  # analyst triggers in the trade's direction the trend filter stands aside.
+  trend_filter_exempt_volume_profile: true
 
 # --------------------------------------------------------------------------
 # NEWS BLACKOUT — no new entries around high-impact macro releases.
@@ -215,6 +219,32 @@ decisions:
 # the four voting analysts below. They are bounded and written to
 # config/strategy_weights.json (git-ignored), which the CMIO applies on top
 # of these weights. Delete that file to go back to these numbers.
+# VOLUME PROFILE — the Volume Profile analyst and the CMIO's confluence rule.
+# Sessions follow the active market's hours (US 09:30-16:00 ET) unless
+# rth_open / rth_close are set here.
+volume_profile:
+  bins: 40
+  value_area_pct: 0.70
+  lvn_ratio: 0.30          # a bin at <= 0.30x the mean bin is thin (LVN)
+  hvn_ratio: 1.5           # a bin at >= 1.5x the mean bin is thick (HVN)
+  strategies:
+    va_rejection: true     # failed auction at the VAH (put) / VAL (call) → POC
+    lvn_acceleration: true # shelf → close into a volume pocket on RVOL ≥ 1.5x
+    poc_bounce: true       # ≥ 1 ATR away, back to the POC, rejected there
+  va_lookback_bars: 2
+  lvn_min_rvol: 1.5
+  lvn_shelf_bars: 3
+  poc_away_atr: 1.0
+  # CMIO confluence on every trade: an entry at a VAL/POC (long) or VAH/POC
+  # (short) moves the composite alignment_boost toward the trade; a thick HVN
+  # straight ahead costs hvn_penalty within hvn_near_atr ATR, and vetoes
+  # within hvn_veto_atr ATR (unless it holds the trade's own target).
+  alignment_tolerance_atr: 0.25
+  alignment_boost: 0.30
+  hvn_near_atr: 1.0
+  hvn_veto_atr: 0.25
+  hvn_penalty: 0.30
+
 feedback:
   enabled: true
   min_trades: 5          # fewer closed trades in the week = no adjustment
@@ -222,6 +252,7 @@ feedback:
 
 weights:
   candlestick: 1.0
+  volume_profile: 1.0
   derivatives: 1.0
   news_sentiment: 0.8
   macro_flow: 0.7

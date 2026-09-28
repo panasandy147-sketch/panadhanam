@@ -38,7 +38,8 @@ def test_every_analyst_is_described(cfg):
     doc = build(cfg, capital=100_000)
     [section] = [s for s in doc["sections"] if s.get("analysts")]
     names = [a["name"] for a in section["analysts"]]
-    assert len(names) == 5 and all(a["reads"] for a in section["analysts"])
+    assert len(names) == 6 and all(a["reads"] for a in section["analysts"])
+    assert "Volume profile" in names
 
 
 def test_every_rule_names_the_setting_that_changes_it(cfg):

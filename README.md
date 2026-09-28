@@ -178,11 +178,12 @@ confidence.
 | Agent | Reads | Produces |
 |---|---|---|
 | **Candlestick & Technical** | 1m/5m/15m/1d candles, EMA 9/21/50, VWAP, RSI, ATR, patterns, volume | Score −1..+1 + the price where the structure breaks |
+| **Volume Profile** | Session volume by price (RTH): POC, 70% value area, low/high volume nodes, prior + current session | Value Area Rejection, LVN Pocket Acceleration or POC Bounce — score + its structural stop |
 | **Options & Futures (F&O)** | Live option chain: OI buildup, PCR, Max Pain, IV, Greeks | Score + the exact strike to trade |
 | **News & Sentiment** | RSS from Moneycontrol, ET, Mint, Business Standard, Google News | Impact score with time decay |
 | **Macro & FII/DII Flow** | GIFT Nifty, US futures, Brent, DXY, USD/INR, India VIX | Session risk appetite |
 | **Fundamental Filter** | ROE, P/E vs industry, EPS, profit growth, D/E, liquidity | Pass / fail eligibility (a **veto**, never a direction) |
-| **CMIO** | Every report above | One bias + confirmations + the strongest counter-argument |
+| **CMIO** | Every report above | One bias + confirmations + the strongest counter-argument. Every trade also gets the volume-profile check: +0.30 at a VAL/POC (long) or VAH/POC (short); a thick HVN straight ahead costs 0.30, or vetoes within 0.25 ATR |
 | **Risk Manager** | The CMIO's candidate | Sized, validated signal — or a rejection with reasons |
 
 Every agent works two ways: a **deterministic rule engine** (always runs) and an

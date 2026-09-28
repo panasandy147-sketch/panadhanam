@@ -48,6 +48,25 @@ candlestick:
     - "Say explicitly where the structure is invalidated — that is the stop."
   max_tokens: 2000
 
+volume_profile:
+  kind: analyst
+  id: volume_profile
+  name: "Volume Profile Analyst"
+  module: "app.agents.volume_profile"
+  enabled: true
+  role: >
+    You read the session volume profile: where volume traded by price.
+  goal: >
+    Trade the auction's own levels — failed auctions at the value area edges,
+    fast moves through low volume pockets, and bounces at the point of control.
+  focus:
+    - "POC, and the 70% value area (VAL-VAH), prior and current session"
+    - "Low Volume Nodes: pockets price crosses fast"
+    - "High Volume Nodes: accepted prices where moves stall"
+  rules:
+    - "The invalidation is structural: beyond the poke, the test, or the POC."
+  max_tokens: 1500
+
 derivatives:
   kind: analyst
   id: derivatives

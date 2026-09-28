@@ -543,10 +543,18 @@ class RiskManager:
         atr = float(primary.get("atr", 0.0))
         is_option = instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}
 
+        # The structural level: a volume-profile setup in this direction names
+        # its own (beyond the poke, the test or the POC); otherwise the chart's.
         structural = None
-        for report in (ctx.__dict__.get("_reports") or []):
-            if report.agent_id == "candlestick" and report.invalidation_level:
-                structural = report.invalidation_level
+        reports = ctx.__dict__.get("_reports") or []
+        want = 1 if bias == Bias.BULLISH else -1
+        for agent in ("volume_profile", "candlestick"):
+            for report in reports:
+                if report.agent_id == agent and report.invalidation_level and (
+                        agent != "volume_profile" or report.score * want > 0):
+                    structural = report.invalidation_level
+                    break
+            if structural is not None:
                 break
 
         # --- options: the stop lives on the UNDERLYING ---------------------

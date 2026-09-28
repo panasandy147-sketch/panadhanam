@@ -123,6 +123,29 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                  "Names the structural level that would prove the idea wrong. "
                  "The stop is placed beyond it.",
              ]},
+            {"name": "Volume profile", "weight": weight("volume_profile"),
+             "reads": [
+                 "Builds each session's volume by price (regular hours): the POC, "
+                 f"the {float(g('volume_profile.value_area_pct', 0.70)):.0%} value "
+                 "area (VAL–VAH), and low/high volume nodes, for the prior and "
+                 "the current session.",
+                 "Value Area Rejection: a failed poke above the VAH closing back "
+                 "inside (put), or a held VAL test with a bullish candle (call); "
+                 "target the POC.",
+                 "LVN Pocket Acceleration: a close from a shelf into a volume "
+                 f"pocket on RVOL ≥ {g('volume_profile.lvn_min_rvol', 1.5)}x — "
+                 "price crosses thin volume fast; target the pocket's far edge.",
+                 "POC Bounce: back to the POC after a "
+                 f"{g('volume_profile.poc_away_atr', 1.0)}-ATR move away, rejected "
+                 "there.",
+                 "Can lead a trade, and names its own structural stop.",
+                 f"On every trade: an entry at a VAL/POC (long) or VAH/POC (short) "
+                 f"adds {g('volume_profile.alignment_boost', 0.30)} to the "
+                 f"composite; a thick volume node straight ahead subtracts "
+                 f"{g('volume_profile.hvn_penalty', 0.30)} within "
+                 f"{g('volume_profile.hvn_near_atr', 1.0)} ATR and vetoes within "
+                 f"{g('volume_profile.hvn_veto_atr', 0.25)} ATR.",
+             ]},
             {"name": "Options & futures", "weight": weight("derivatives"),
              "reads": [
                  "Abstains when the option chain is simulated (no feed served "
@@ -190,7 +213,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   g("consensus.silent_below", 0.10),
                   "consensus.silent_analysts_dilute / silent_below"),
             _rule("No counter-trend trades: no long below VWAP or into a falling "
-                  "15-minute trend, no short above VWAP or into a rising one",
+                  "15-minute trend, no short above VWAP or into a rising one"
+                  + (" — except a volume-profile setup in the trade's direction "
+                     "(a call at the VAL is counter to the move by design)"
+                     if g("consensus.trend_filter_exempt_volume_profile", True) else ""),
                   "on" if g("consensus.trend_filter", False) else "off",
                   "consensus.trend_filter"),
             _rule("At least one of these must agree (news or macro alone never trades)",

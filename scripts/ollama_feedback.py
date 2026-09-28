@@ -60,7 +60,7 @@ WEIGHT_MIN, WEIGHT_MAX = consensus.MULTIPLIER_MIN, consensus.MULTIPLIER_MAX
 
 SYSTEM = (
     "You review one week of a paper-trading desk whose trades are approved by "
-    "a vote of four analysts: " + ", ".join(AGENTS) + ". Tune how much each "
+    f"a vote of {len(AGENTS)} analysts: " + ", ".join(AGENTS) + ". Tune how much each "
     "analyst's vote counts. Grade PROCESS over outcome: a BAD_WIN (money made "
     "while breaking a rule) is not evidence for the analysts that voted for "
     "it; GOOD_LOSSes with clean execution that an analyst kept voting for ARE "
