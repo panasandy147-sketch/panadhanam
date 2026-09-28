@@ -57,7 +57,7 @@ class Event:
     def to_dict(self) -> dict[str, Any]:
         return {"ts": self.ts.isoformat(), "time": self.ts.strftime("%H:%M:%S"),
                 "kind": self.kind, "detail": self.detail, "level": self.level,
-                "notable": self.notable}
+                "notable": self.notable, "seq": self.seq}
 
 
 class ActivityLog:

@@ -838,6 +838,25 @@ function maybeNotify(events) {
 
 /* The log is the one panel worth polling faster — it is what tells you the
    desk is alive between trades. */
+/* The panels poll on timers, so a fill could sit unseen in the open position,
+   the paper record and "why not bought" for up to half a minute while the
+   activity log already showed it. Any new decision refreshes everything at
+   once, so the page moves together. */
+let lastDecisionSeq = null;
+const DECISIVE = new Set(["trade.open", "trade.exit", "setup.fired", "contract.none",
+  "contract.fallback", "risk.refused", "screen.done", "restored", "halt", "graded"]);
+
+function followDecisions(events) {
+  const newest = events.filter((e) => DECISIVE.has(e.kind))
+    .reduce((m, e) => Math.max(m, e.seq ?? 0), 0);
+  if (lastDecisionSeq !== null && newest > lastDecisionSeq) {
+    refresh();
+    refreshWhy();
+    refreshCandidate();
+  }
+  if (newest) lastDecisionSeq = Math.max(lastDecisionSeq ?? 0, newest);
+}
+
 async function refreshActivity() {
   const decisionsOnly = $("activity-decisions")?.checked ?? true;
   try {
@@ -845,6 +864,7 @@ async function refreshActivity() {
       `/api/activity?limit=120&decisions=${decisionsOnly}`);
     renderActivity(d, decisionsOnly);
     maybeNotify(d.events || []);
+    followDecisions(d.events || []);
   } catch {
     /* the next tick will retry; a log gap is not worth an error banner */
   }
@@ -976,8 +996,8 @@ $("notify-trades").checked = notifyWanted();
 $("notify-trades").addEventListener("change", (e) => toggleNotify(e.target.checked));
 refreshCandidate();
 refreshWhy();
-setInterval(refreshWhy, 30000);
-setInterval(refresh, 15000);
+setInterval(refreshWhy, 10000);
+setInterval(refresh, 5000);
 setInterval(refreshActivity, 5000);
 // The candidate and its chart are what you actually watch, so they lead.
 setInterval(refreshCandidate, 5000);

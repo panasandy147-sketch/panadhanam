@@ -34,7 +34,7 @@ echo
 #
 # Only ever writes .env, and prints what it changed.
 # The per-trade budget is 20% of capital; a stale .env below the shipped
-# $4,000 would quietly cut it. Raises only, never lowers, prints what it did.
+# $5,000 ($1,000 a trade) would quietly cut it. Raises only, never lowers, prints what it did.
 "$PY" run.py --ensure-capital || true
 "$PY" run.py --ensure-profile || true
 

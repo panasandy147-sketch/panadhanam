@@ -40,23 +40,22 @@ def test_the_shipped_capital_can_actually_buy_the_shipped_universe(shipped):
     """
     from panaoptions.preflight import check
 
-    assert shipped.capital >= 4000.0
+    assert shipped.capital >= 5000.0
     blockers = [f for f in check(shipped) if f.level == "blocker"]
     assert not blockers, f"the shipped config blocks itself: {blockers}"
 
 
 def test_the_shipped_capital_funds_most_of_the_pattern_bands(shipped):
-    """$800 a trade is the point of the figure.
+    """$1,000 a trade is the point of the figure (raised from $800).
 
-    It reaches every pattern band except the two three-line strikes, which
-    ask for 0.65 delta at 30 DTE and cost around $973 on the cheapest
-    large-cap name.
+    It reaches every pattern band, the three-line strikes included (0.65
+    delta at 30 DTE, around $973 on the cheapest large-cap name).
     """
     from panaoptions.preflight import check
 
     budget = shipped.capital * float(
         shipped.get("risk.max_capital_deployed_pct")) / 100
-    assert budget == 800.0
+    assert budget == 1000.0
 
     unaffordable = [f for f in check(shipped)
                     if f.setting == "strategies.candlestick_at_level.patterns"]
@@ -316,9 +315,9 @@ def test_a_stale_env_capital_is_noticed_after_an_upgrade(cfg, monkeypatch):
     cfg.data["account"]["starting_capital"] = 2000.0
     found = [f for f in preflight.check(cfg) if f.setting == "PANAOPTIONS_CAPITAL"]
     assert found, "an override below the shipped figure must be reported"
-    assert "$2,000" in found[0].problem and "$4,000" in found[0].problem
+    assert "$2,000" in found[0].problem and "$5,000" in found[0].problem
     # And it hands over a command rather than a description of one.
-    assert "PANAOPTIONS_CAPITAL=4000" in found[0].command
+    assert "PANAOPTIONS_CAPITAL=5000" in found[0].command
 
 
 def test_matching_or_higher_capital_raises_nothing(cfg, monkeypatch):

@@ -7,6 +7,25 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _desk_files_elsewhere(tmp_path, monkeypatch):
+    """Never let a test write into the desk's own data folder.
+
+    The ledger store and the watchlist copy DATA_DIR when they are imported,
+    so patching config.DATA_DIR alone did not reach them: tests appended rows
+    to the real data/trades.csv and a browser test saved a watchlist over the
+    real one — fake trades in someone's paper record, and a watchlist they
+    never chose.
+    """
+    from panaoptions import watchlist
+    from panaoptions.ledger import store
+
+    data = tmp_path / "desk-data"
+    data.mkdir(exist_ok=True)
+    monkeypatch.setattr(store, "DATA_DIR", data)
+    monkeypatch.setattr(watchlist, "STORE", data / "watchlist.json")
+
+
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
     """The shipped config, isolated from this machine.

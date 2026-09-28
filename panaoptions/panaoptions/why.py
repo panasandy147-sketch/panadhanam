@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import subprocess
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +24,13 @@ def code_version() -> str:
 
 
 def report(cfg: Any, budget: float) -> dict[str, Any]:
+    from panaoptions import clock
     from panaoptions.ledger import store
 
     store.init()
-    today = datetime.now().date().isoformat()
+    # The desk's day is New York's, not the computer's: on a PC in another
+    # timezone (or after 8 PM ET) the two differ and "today" came up empty.
+    today = clock.now(cfg.timezone).date().isoformat()
     rows = store.get_conn().execute(
         "SELECT ts, symbol, direction, taken, reason, payload FROM signals_seen "
         "WHERE ts >= ? ORDER BY ts", (today,)).fetchall()

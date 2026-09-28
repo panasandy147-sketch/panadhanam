@@ -205,7 +205,7 @@ def test_start_raises_a_stale_env_capital_to_the_shipped_800_budget(cfg, monkeyp
     monkeypatch.setattr(config_mod, "ENV_PATH", env)
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "2000")
     assert run._ensure_capital() == 0
-    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")
+    assert "PANAOPTIONS_CAPITAL=5000" in env.read_text(encoding="utf-8")
 
     env.write_text("PANAOPTIONS_CAPITAL=9000\n", encoding="utf-8")
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "9000")

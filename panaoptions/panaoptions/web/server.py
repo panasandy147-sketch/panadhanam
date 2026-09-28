@@ -106,9 +106,9 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
     @app.get("/api/trades")
     async def trades(days: int = 30) -> dict[str, Any]:
-        from datetime import date, timedelta
+        from datetime import timedelta
 
-        since = (date.today() - timedelta(days=days)).isoformat()
+        since = (clock.now(cfg.timezone).date() - timedelta(days=days)).isoformat()
         rows = store.trades(limit=500, since=since)
         return {
             "days": days,
@@ -151,12 +151,12 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
     @app.get("/api/journal")
     async def journal(days: int = 30) -> dict[str, Any]:
         """Graded trades: which strategy pays, and what indiscipline cost."""
-        from datetime import date, timedelta
+        from datetime import timedelta
 
         from panaoptions.journal.analytics import analyse
         from panaoptions.journal.store import cards, entries
 
-        since = (date.today() - timedelta(days=days)).isoformat()
+        since = (clock.now(cfg.timezone).date() - timedelta(days=days)).isoformat()
         rows = entries(limit=500, since=since)
         from panaoptions.ml import llm
 
