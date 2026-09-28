@@ -30,6 +30,10 @@ def _default(obj: Any) -> Any:
     return str(obj)
 
 
+_CHATTER = frozenset({"agent.start", "agent.report", "quote.update",
+                      "cycle.start", "risk.state"})
+
+
 class EventBus:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue] = set()
@@ -42,15 +46,24 @@ class EventBus:
             "ts": datetime.now().isoformat(),
             "data": json.loads(json.dumps(payload, default=_default)),
         }
-        self._replay.append(event)
-        dead = []
+        # What a freshly opened page is shown. Analyst chatter and ticks would
+        # push every decision out of it within seconds of a busy cycle.
+        if topic not in _CHATTER:
+            self._replay.append(event)
         for q in list(self._subscribers):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            self._subscribers.discard(q)
+                # A slow reader loses the OLDEST event, never its whole feed.
+                # Dropping the subscriber here left the dashboard's socket open
+                # and silent for good: after one burst (ranking 60 symbols is
+                # ~600 analyst events) the Activity Log never updated again,
+                # with nothing on screen saying so.
+                try:
+                    q.get_nowait()
+                    q.put_nowait(event)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    pass
 
     def publish_nowait(self, topic: str, payload: Any) -> None:
         """Fire-and-forget from sync code."""
@@ -61,7 +74,7 @@ class EventBus:
         loop.create_task(self.publish(topic, payload))
 
     async def subscribe(self, replay: bool = True) -> AsyncIterator[dict[str, Any]]:
-        q: asyncio.Queue = asyncio.Queue(maxsize=500)
+        q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self._subscribers.add(q)
         try:
             if replay:

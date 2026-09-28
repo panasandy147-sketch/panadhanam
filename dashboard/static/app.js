@@ -99,7 +99,13 @@ function handle(event) {
     case "risk.state":          renderRisk(data); break;
     case "market.switched":     adoptMarket(data.market); break;
     case "trading_day.state":   renderTradingDay(data); break;
-    case "trading_day.summary": renderDayReport(data, "after square-off"); break;
+    case "trading_day.summary":
+      // A summary for another market (India's close, arriving just before
+      // the desk moves to the US) is not today's review for this screen.
+      if (!data?.market || data.market === state.market?.code) {
+        renderDayReport(data, "after square-off");
+      }
+      break;
     case "news.blackout":
       return { text: d.reason || "news blackout", level: d.active ? "bad" : "" };
     case "focus.updated":       renderFocus(data); break;

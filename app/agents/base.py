@@ -89,8 +89,13 @@ class BaseAgent(abc.ABC):
     # ----------------------- orchestration -----------------------
     async def run(self, ctx: MarketContext) -> AgentReport:
         started = time.perf_counter()
-        await bus.publish(Topic.AGENT_START,
-                          {"agent": self.agent_id, "name": self.name, "symbol": ctx.symbol})
+        # The focus ranking scores the whole watchlist at once; broadcasting
+        # every analyst's start and report for sixty names is a burst of
+        # hundreds of events that says nothing a person reads.
+        quiet = str(ctx.cycle_id).endswith("-rank")
+        if not quiet:
+            await bus.publish(Topic.AGENT_START,
+                              {"agent": self.agent_id, "name": self.name, "symbol": ctx.symbol})
         try:
             report = self.analyse_rules(ctx)
         except Exception as exc:
@@ -108,7 +113,8 @@ class BaseAgent(abc.ABC):
                             self.agent_id, exc)
 
         report.latency_ms = int((time.perf_counter() - started) * 1000)
-        await bus.publish(Topic.AGENT_REPORT, report)
+        if not quiet:
+            await bus.publish(Topic.AGENT_REPORT, report)
         return report
 
     async def _run_llm(self, ctx: MarketContext, baseline: AgentReport) -> AgentReport | None:
