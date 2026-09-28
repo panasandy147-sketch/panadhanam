@@ -11,7 +11,8 @@
 #   * Nearest expiry first: 0DTE when the symbol lists one (SPY, QQQ, IWM
 #     daily; most single stocks only on their Friday weekly), otherwise that
 #     week's expiry — never more than 4 days out.
-#   * 0.35-0.50 delta, $0.50-$3.50 a share ($50-$350 a contract), spread 7%.
+#   * 0.35-0.50 delta, $0.50-$3.50 a share ($50-$350 a contract; up to
+#     $10.00 on SPY/QQQ/DIA), spread 7%.
 #   * Entries stop at 15:00 (14:30 for the sweep); everything is out by 15:45,
 #     before the closing gamma.
 #
@@ -37,6 +38,9 @@ contracts:
   max_spread_pct_of_mid: 7.0
   min_contract_price: 0.50      # below this rarely survives the day's theta
   max_contract_price: 3.50      # $350 a contract
+  # SPY/QQQ/DIA: up to $10.00 ($1,000), so an at- or near-the-money index
+  # contract reaches the 25% index cap instead of stopping at $350.
+  index_max_contract_price: 10.00
   budget_fallback_min_delta: 0.30
 
 strategies:
@@ -82,5 +86,5 @@ strategies:
 risk:
   stop_mode: "underlying"       # the structural level decides, not the premium
   disaster_stop_pct: 45.0       # out if the option loses 45% first
-  daily_loss_limit_pct: 10.0    # $500 on $5,000 — then halted for the day
+  daily_loss_limit_pct: 10.0    # $400 on $4,000 — flattened and halted for the day
   trail_on_ema: true

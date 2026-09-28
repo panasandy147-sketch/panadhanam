@@ -33,8 +33,10 @@ echo
 # goes stale the moment the shipped one moves.
 #
 # Only ever writes .env, and prints what it changed.
-# The per-trade budget is 20% of capital; a stale .env below the shipped
-# $5,000 ($1,000 a trade) would quietly cut it. Raises only, never lowers, prints what it did.
+# The per-trade budget is 20% of capital (25% on SPY/QQQ/DIA). A stale .env
+# figure would quietly change it, so a value this script wrote before is
+# brought back to the shipped $4,000; a figure you chose yourself is only
+# ever raised. Prints what it did.
 "$PY" run.py --ensure-capital || true
 "$PY" run.py --ensure-profile || true
 

@@ -6,10 +6,10 @@
 account:
   # Paper capital. Real money is not supported by this app at all: there is no
   # broker adapter, and nothing here can place an order anywhere.
-  # $5,000 of paper capital, which is $1,000 a trade at the 20% deployment
-  # rule below (raised from $4,000 / $800 on request). That reaches every
-  # pattern band on the large-cap universe, the three-line strikes (~$973)
-  # included.
+  # $4,000 of paper capital: $800 a trade at the standard 20% cap, and
+  # $1,000 (25%) on the high-notional index ETFs — SPY, QQQ, DIA — whose
+  # near-the-money contracts cost $900-$1,000 on their own. See
+  # risk.index_max_capital_deployed_pct and risk/gatekeeper.py.
   #
   # Raising CAPITAL rather than the deployment percentage is deliberate: 40%
   # of $2,500 is the same $1,000 and doubles what one stop-out costs, from 4%
@@ -17,7 +17,7 @@ account:
   # three. Paper capital is a free parameter; risk ratios are not.
   #
   # PANAOPTIONS_CAPITAL in .env overrides this per machine.
-  starting_capital: 5000.0
+  starting_capital: 4000.0
   currency: "$"
 
 session:
@@ -112,7 +112,10 @@ contracts:
   max_delta: 0.60
   # Delayed quotes on single-stock options 2-6 weeks out routinely show
   # 5-10% spreads; at 5% nearly every name but SPY and QQQ was turned away.
-  max_spread_pct_of_mid: 10.0
+  # The Risk Gatekeeper refuses anything wider than risk.max_spread_pct_of_mid
+  # (7%) whatever this says; keeping the two equal stops the picker choosing
+  # a contract the gate would then turn away.
+  max_spread_pct_of_mid: 7.0
   # When the setup's delta band is over budget, buy the highest-delta contract
   # that fits instead of skipping the trade — but never below this delta.
   # 0 switches the fallback off.
@@ -137,6 +140,8 @@ contracts:
   # --------------------------------------------------------------------
   min_contract_price: 0.10      # $10 a contract — below this it is a lottery ticket
   max_contract_price: 20.00     # $2,000 a contract — a ceiling, not a target
+  # Raised ceiling for risk.index_symbols (profiles with a low ceiling use it).
+  index_max_contract_price: 20.00
   contract_multiplier: 100
 
 strategies:
@@ -302,6 +307,14 @@ risk:
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.
   max_capital_deployed_pct: 20.0
+  # The dynamic index exception: these tickers may deploy up to 25% ($1,000
+  # on $4,000) so a valid at- or near-the-money contract is not refused on
+  # notional alone. "DJI" is read as DIA, the Dow ETF.
+  index_symbols: ["SPY", "QQQ", "DIA"]
+  index_max_capital_deployed_pct: 25.0
+  # The gatekeeper's liquidity filter: refuse any contract whose bid-ask
+  # spread is more than this share of the mid.
+  max_spread_pct_of_mid: 7.0
 
   # The ceiling on ALL open positions together, and the reason the line above
   # is not the whole rule: three trades at 20% each satisfy the per-trade cap
@@ -371,6 +384,50 @@ journal:
   # answer it and the weekly one does.
   auto_daily_review: true
   auto_weekly_review: true
+
+# --------------------------------------------------------------------------
+# The committee that votes on every fired setup before the Risk Gatekeeper.
+#   Technical    5m/15m chart; relative volume >= min_rvol is a hard gate
+#   Derivatives  the contract, put/call ratio, IV percentile, unusual flow
+#   Macro        headlines + ES/NQ futures; a catalyst against = hard veto
+#   CMIO         weighted score x strategy weight >= approve_threshold
+# Each agent scores by rules; with Ollama running, the local model's opinion
+# is blended in at llm_weight. Ollama down or slow = rules only, never a stall.
+# --------------------------------------------------------------------------
+agents:
+  enabled: true
+  use_llm: true                 # uses journal.ollama_model / ollama_host
+  llm_weight: 0.4
+  llm_timeout_seconds: 20
+  approve_threshold: 0.55
+  weights:
+    technical: 0.35
+    derivatives: 0.35
+    macro: 0.30
+  technical:
+    min_rvol: 1.5
+  derivatives:
+    preferred_max_dte: 1        # 0DTE/1DTE score a bonus
+    max_pcr_against: 1.5
+    iv_percentile_ceiling: 80
+  macro:
+    lookback_hours: 18
+    futures: ["ES=F", "NQ=F"]
+    futures_veto_pct: 1.5
+
+# Per-strategy multipliers on the committee score (0.25-1.5). The Friday
+# reflection writes its adjustments to config/learned.yaml, which is merged
+# over this file and never committed — so `git pull` cannot conflict with it.
+strategy_weights:
+  orb_vwap: 1.0
+  vwap_ema_pullback: 1.0
+  liquidity_sweep: 1.0
+  candlestick_at_level: 1.0
+
+reflection:
+  enabled: true                 # run after Friday's close, once a week
+  min_trades: 5                 # fewer closed trades = no adjustment
+  max_step: 0.15                # no weight moves more than this in one week
 
 ml:
   enabled: false                 # needs the extra packages; see docs

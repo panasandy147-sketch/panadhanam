@@ -22,6 +22,7 @@ from datetime import datetime
 
 from panaoptions.logging import get_logger
 from panaoptions.models import OptionContract, Setup, Signal
+from panaoptions.risk.gatekeeper import cap_pct, index_symbols
 
 log = get_logger("risk")
 
@@ -101,15 +102,17 @@ class RiskManager:
         return None, reason
 
     # ------------------------------------------------------------------ #
-    def budget_room(self) -> float:
+    def budget_room(self, symbol: str | None = None) -> float:
         """What one new trade may spend on premium right now.
 
         The tighter of the per-trade cap and the room left under the total
         ceiling — exactly what `size` will enforce, so the contract picker can
-        choose something `size` will then accept.
+        choose something `size` will then accept. With a symbol, the index
+        ETFs get their higher cap (see risk/gatekeeper.py).
         """
-        deployed_pct = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
-        total_pct = float(self.cfg.get("risk.max_total_deployed_pct", deployed_pct))
+        standard = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
+        deployed_pct = cap_pct(self.cfg, symbol) if symbol else standard
+        total_pct = float(self.cfg.get("risk.max_total_deployed_pct", standard))
         per_trade = self.capital * deployed_pct / 100.0
         room = self.capital * total_pct / 100.0 - self.state.deployed
         return max(0.0, min(per_trade, room))
@@ -135,7 +138,7 @@ class RiskManager:
         multiplier = self.cfg.multiplier
         cost_per_contract = entry * multiplier
 
-        deployed_pct = float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
+        deployed_pct = cap_pct(self.cfg, setup.symbol)
         budget = self.capital * deployed_pct / 100.0
 
         # Per-trade first. When nothing is open this is the binding rule, and
@@ -151,8 +154,9 @@ class RiskManager:
         # Then the total. The per-trade cap is not the whole rule once more
         # than one position can be open: three trades at 20% each satisfy it
         # every single time and deploy 60% of the account.
-        total_pct = float(self.cfg.get("risk.max_total_deployed_pct",
-                                       deployed_pct))
+        total_pct = float(self.cfg.get(
+            "risk.max_total_deployed_pct",
+            self.cfg.get("risk.max_capital_deployed_pct", 20.0)))
         room = self.capital * total_pct / 100.0 - self.state.deployed
         if room < cost_per_contract:
             return self._reject(
@@ -233,6 +237,11 @@ class RiskManager:
             "capital": capital,
             "max_deployed_per_trade": round(capital * deployed_pct / 100, 2),
             "max_deployed_pct": deployed_pct,
+            "index_symbols": sorted(index_symbols(self.cfg)),
+            "index_max_deployed_pct": float(self.cfg.get(
+                "risk.index_max_capital_deployed_pct", deployed_pct)),
+            "index_max_deployed_per_trade": round(capital * float(self.cfg.get(
+                "risk.index_max_capital_deployed_pct", deployed_pct)) / 100, 2),
             # The number that actually matters, spelled out.
             "risk_per_trade_pct": round(deployed_pct * stop_pct / 100, 2),
             "risk_per_trade": round(capital * deployed_pct * stop_pct / 10000, 2),

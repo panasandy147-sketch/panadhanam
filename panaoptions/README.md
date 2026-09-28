@@ -15,12 +15,67 @@ package, by design.
 ```
 Pre-Market News & Catalyst Screener      RVOL > 1.5, gap >= 1.0%
             |
-Multi-Timeframe Candle & Volume Engine   5m signal, 15m trend confirmation
+Alpha Engine (alpha.py)                  strategies + 16 candlestick evaluators
+                                         -> {symbol, direction, trigger_price,
+                                             invalidation_level, confidence_score}
             |
-Options Contract Filter                  delta / IV / DTE / spread / price
+Committee (agents/)                      Technical · Derivatives & Flow · Macro
+                                         -> CMIO weighted vote (Ollama-assisted)
             |
-Risk Management & Paper Execution        $500 rules, circuit breaker, ledger
+Risk Gatekeeper (risk/gatekeeper.py)     20% cap ($800), 25% on SPY/QQQ/DIA
+                                         ($1,000), spread <= 7%, delta band,
+                                         $400 (10%) daily circuit breaker
+            |
+Paper Execution & Ledger                 stops on the UNDERLYING level,
+                                         45% premium disaster backstop
+            |
+Journal -> Friday reflection             Ollama tunes strategy weights
+                                         -> config/learned.yaml
 ```
+
+## Alpha, committee, gatekeeper
+
+**Alpha never sees money.** Every strategy ends as a five-key signal
+dictionary (`panaoptions/alpha.py`). No account balance, contract, chain or
+broker is read on that path — `tests/test_architecture.py` runs the
+strategies against a config that fails the test if anything asks about
+capital, and with the network disabled. Which contract a pattern wants
+(delta band, expiry) lives in `engine/contract_prefs.py`, read by the
+contract picker, not the strategy.
+
+**Three agents vote, the CMIO decides** (`panaoptions/agents/`):
+
+| Agent | Reads | Hard veto |
+|---|---|---|
+| Technical | 5m trigger vs 15m trend, relative volume | RVOL below 1.5x (bar or session) |
+| Derivatives & Flow | the chosen contract, put/call ratio, IV percentile, unusual flow | no contract qualified |
+| Macro & Sentiment | the symbol's headlines, ES/NQ futures | high-impact catalyst against the trade; futures ≥1.5% against |
+| CMIO | weighted score × learned strategy weight ≥ 0.55 | any veto above |
+
+Each agent scores by rules first. With Ollama running, the same evidence goes
+to the local model (`journal.ollama_model`) and its `{score, veto, reason}`
+is blended in at 40%; it can lower or raise a score but never lift a rules
+veto (only the Macro agent may add one, and only when there are headlines).
+Ollama down or slower than 20 s = the rules score stands.
+
+**The Risk Gatekeeper** (`risk/gatekeeper.py`) then checks the contract,
+deterministically: circuit breaker, signal shape, call-vs-put, spread ≤ 7% of
+mid, delta inside the band (down to the 0.30 fallback floor), the per-trade
+cap — 20% of $4,000 = $800, or 25% = $1,000 on SPY, QQQ and DIA — and the
+total ceiling. A committee approval cannot pass it.
+
+**The circuit breaker** counts closed AND open losses: at $400 (10%) the
+desk sells everything and stops for the day.
+
+**The Friday reflection** (`learning/reflect.py`). After Friday's close — or
+on the next start if the desk was off — the week's graded trades go to Ollama
+as JSON. Its answer is parsed defensively (code fences, stray prose, trailing
+commas, unknown names and non-numbers are handled; anything unusable changes
+nothing), bounded (±0.15 a week, 0.25–1.5 overall), recorded in
+`journal/reflections/<week>.json` and written to `config/learned.yaml`, which
+is git-ignored and merged over the settings on load. Run it by hand with
+`python run.py --reflect`. Delete `config/learned.yaml` to go back to the
+shipped weights.
 
 ---
 
@@ -855,8 +910,13 @@ panaoptions/
   panaoptions/
     clock.py              session windows, in New York time
     preflight.py          can every rule hold at once?
+    alpha.py              strategies -> pure five-key signals
+    agents/  technical.py derivatives.py macro.py cmio.py   the committee
+    risk/    gatekeeper.py              caps, spread, delta, circuit breaker
+    learning/ reflect.py                Friday Ollama weight tuning
     engine/  strategies.py levels.py   the four entry rules
-    engine/  patterns.py                the seven reversal patterns
+    engine/  patterns.py                the reversal patterns
+    engine/  contract_prefs.py          which contract each pattern asks for
     journal/ grade.py weekly.py        the learning loop
     web/     server.py static/    the dashboard (read-only)
     data/    feed.py premarket.py greeks.py

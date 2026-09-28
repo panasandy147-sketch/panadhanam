@@ -14,6 +14,9 @@ CONFIG_PATH = ROOT / "config" / "settings.yaml"
 PROFILE_DIR = ROOT / "config" / "profiles"
 DATA_DIR = ROOT / "data"
 ENV_PATH = ROOT / ".env"
+# What the Friday reflection learned: strategy weights, merged over the
+# settings and the profile. Git-ignored, so `git pull` never conflicts with it.
+LEARNED_PATH = ROOT / "config" / "learned.yaml"
 
 # Load .env before anything reads an environment variable. A value exported in
 # a shell lasts only for that shell; the file is what survives a restart.
@@ -79,7 +82,24 @@ class Config:
             self.data = yaml.safe_load(fh) or {}
         if self.profile:
             self._apply_profile(self.profile)
+        self._apply_learned()
         self._apply_env()
+
+    def _apply_learned(self) -> None:
+        """Merge config/learned.yaml — only the keys reflection may write."""
+        path = LEARNED_PATH
+        if not path.is_file():
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                learned = yaml.safe_load(fh) or {}
+        except (OSError, yaml.YAMLError):
+            return
+        weights = learned.get("strategy_weights") if isinstance(learned, dict) else None
+        if isinstance(weights, dict):
+            self.data = _merge(self.data, {"strategy_weights": {
+                str(k): float(v) for k, v in weights.items()
+                if isinstance(v, int | float)}})
 
     def _apply_profile(self, name: str) -> None:
         """Layer a profile over the defaults.

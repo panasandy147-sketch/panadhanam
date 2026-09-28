@@ -29,8 +29,9 @@ echo.
 REM A per-machine .env setting can hold an old value after an upgrade meant
 REM to change it. Ask preflight what it would suggest rather than hardcoding
 REM a figure here, which goes stale the moment the shipped one moves.
-REM The per-trade budget is 20%% of capital; raise a stale .env below the
-REM shipped figure. Raises only, never lowers.
+REM The per-trade budget is 20%% of capital (25%% on SPY/QQQ/DIA). A value
+REM this script wrote before is brought back to the shipped $4,000; a figure
+REM you chose yourself is only ever raised.
 "%PY%" run.py --ensure-capital
 "%PY%" run.py --ensure-profile
 

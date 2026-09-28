@@ -39,6 +39,12 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
     max_spread = float(cfg.get("contracts.max_spread_pct_of_mid", 5.0))
     min_price = float(cfg.get("contracts.min_contract_price", 0.60))
     max_price = float(cfg.get("contracts.max_contract_price", 1.00))
+    # The index ETFs' near-the-money contracts cost more per share than the
+    # single-stock ceiling allows; their own ceiling keeps the 25% cap usable.
+    from panaoptions.risk.gatekeeper import index_symbols
+    index_ceiling = cfg.get("contracts.index_max_contract_price")
+    if index_ceiling and symbol.upper() in index_symbols(cfg):
+        max_price = max(max_price, float(index_ceiling))
     multiplier = cfg.multiplier
 
     search = ContractSearch(symbol=symbol)

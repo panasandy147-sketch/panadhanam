@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 
 @pytest.fixture(autouse=True)
-def _desk_files_elsewhere(tmp_path, monkeypatch):
+def _desk_files_elsewhere(tmp_path, monkeypatch, request):
     """Never let a test write into the desk's own data folder.
 
     The ledger store and the watchlist copy DATA_DIR when they are imported,
@@ -17,6 +17,7 @@ def _desk_files_elsewhere(tmp_path, monkeypatch):
     real one — fake trades in someone's paper record, and a watchlist they
     never chose.
     """
+    from panaoptions import config as config_mod
     from panaoptions import watchlist
     from panaoptions.ledger import store
 
@@ -24,6 +25,18 @@ def _desk_files_elsewhere(tmp_path, monkeypatch):
     data.mkdir(exist_ok=True)
     monkeypatch.setattr(store, "DATA_DIR", data)
     monkeypatch.setattr(watchlist, "STORE", data / "watchlist.json")
+    # The connection is cached per process: without a fresh one, every test
+    # after the first reads and writes the FIRST test's database, and journal
+    # rows from one test turn up in the next one's weekly numbers.
+    # The browser suite runs one live server across its tests and keeps its
+    # own database for the whole session, so it is left alone.
+    if not request.module.__name__.endswith("test_browser_panels"):
+        monkeypatch.setattr(store, "_conn", None)
+    # What this machine's Friday reflection learned is not the shipped config.
+    monkeypatch.setattr(config_mod, "LEARNED_PATH", tmp_path / "learned.yaml")
+    # The committee votes by rules alone in tests: no test may depend on
+    # whether an Ollama happens to be running on the machine.
+    monkeypatch.setenv("PANAOPTIONS_AGENT_LLM", "off")
 
 
 @pytest.fixture

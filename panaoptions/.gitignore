@@ -10,3 +10,6 @@ __pycache__/
 .env
 # journal/ IS the learning history — it is committed on purpose, not ignored.
 journal/*.tmp
+
+# Written by the Friday reflection; per machine, never committed.
+config/learned.yaml

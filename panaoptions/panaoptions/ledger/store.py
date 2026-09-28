@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS open_book (
     payload TEXT NOT NULL
 );
 
+-- One at-the-money implied volatility per symbol per day, so the Derivatives
+-- & Flow agent can say whether today's premium is dear against its own past.
+CREATE TABLE IF NOT EXISTS iv_history (
+    symbol TEXT NOT NULL,
+    day TEXT NOT NULL,
+    iv REAL NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
 CREATE TABLE IF NOT EXISTS signals_seen (
     id TEXT PRIMARY KEY,
     ts TEXT,
@@ -77,13 +86,21 @@ def db_path() -> Path:
 
 
 def get_conn() -> sqlite3.Connection:
+    """The shared connection, opened on first use.
+
+    Built in a local and published only when ready: the web server's worker
+    threads and the desk loop both call this, and reading the global back
+    mid-setup could hand one of them a half-made (or reset) connection.
+    """
     global _conn
-    if _conn is None:
-        _conn = sqlite3.connect(str(db_path()), check_same_thread=False, timeout=15.0)
-        _conn.row_factory = sqlite3.Row
-        _conn.executescript(SCHEMA)
-        _conn.commit()
-    return _conn
+    conn = _conn
+    if conn is None:
+        conn = sqlite3.connect(str(db_path()), check_same_thread=False, timeout=15.0)
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        conn.commit()
+        _conn = conn
+    return conn
 
 
 def init() -> None:
@@ -220,3 +237,36 @@ def rejection_tally(since: str | None = None) -> dict[str, int]:
         key = (row["reason"] or "unknown").split(".")[0][:70]
         out[key] = out.get(key, 0) + 1
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
+def record_iv(symbol: str, day: str, iv: float) -> None:
+    """Keep today's at-the-money IV for `symbol` (the latest reading wins)."""
+    if not iv or iv <= 0:
+        return
+    try:
+        conn = get_conn()
+        conn.executescript(SCHEMA)
+        conn.execute("INSERT OR REPLACE INTO iv_history(symbol, day, iv) "
+                     "VALUES (?, ?, ?)", (symbol, day, float(iv)))
+        conn.commit()
+    except sqlite3.Error as exc:
+        log.debug("could not record IV for %s: %s", symbol, exc)
+
+
+def iv_percentile(symbol: str, iv: float, before: str,
+                  min_days: int = 10, days: int = 252) -> float | None:
+    """Where `iv` sits among this symbol's past daily readings, 0-100.
+
+    None until there are `min_days` of history — a percentile of three days
+    is a guess dressed as a number.
+    """
+    try:
+        rows = get_conn().execute(
+            "SELECT iv FROM iv_history WHERE symbol = ? AND day < ? "
+            "ORDER BY day DESC LIMIT ?", (symbol, before, days)).fetchall()
+    except sqlite3.Error:
+        return None
+    past = [float(r[0]) for r in rows]
+    if len(past) < min_days or not iv:
+        return None
+    return round(sum(1 for v in past if v <= iv) / len(past) * 100, 1)

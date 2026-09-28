@@ -25,6 +25,7 @@ log = get_logger("feed")
 
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
 OPTIONS = "https://query2.finance.yahoo.com/v7/finance/options/{sym}"
+NEWS = "https://query2.finance.yahoo.com/v1/finance/search"
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -148,6 +149,37 @@ class YahooFeed:
             "volume": meta.get("regularMarketVolume") or 0,
         }
 
+    async def news(self, symbol: str, count: int = 10) -> list[dict[str, Any]]:
+        """Recent headlines for `symbol`: title, publisher, published (UTC).
+
+        Read by the Macro & Sentiment agent. A failure returns [] and is NOT
+        recorded as a chart or options error — no headlines is not a broken
+        data feed, and must not turn the dashboard's data banner red.
+        """
+        if not self._client:
+            return []
+        try:
+            r = await self._client.get(NEWS, params={
+                "q": symbol, "newsCount": count, "quotesCount": 0})
+            if r.status_code != 200:
+                return []
+            return parse_news(r.json())
+        except Exception as exc:                     # noqa: BLE001
+            log.debug("news for %s failed: %s", symbol, exc)
+            return []
+
+    async def futures_change(self, symbol: str) -> float | None:
+        """An index future's move since the prior settle, in percent.
+
+        ES=F and NQ=F through the same chart endpoint as everything else.
+        """
+        q = await self.quote(symbol)
+        try:
+            last, prev = float(q["last_price"]), float(q["previous_close"])
+        except (TypeError, KeyError, ValueError):
+            return None
+        return round((last - prev) / prev * 100, 2) if prev else None
+
     async def expiries(self, symbol: str) -> list[int]:
         payload = await self._get(OPTIONS.format(sym=symbol))
         try:
@@ -204,6 +236,25 @@ class YahooFeed:
 # --------------------------------------------------------------------------- #
 # Parsing, kept as free functions so they can be tested without a network.
 # --------------------------------------------------------------------------- #
+def parse_news(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Yahoo's search response as [{title, publisher, published}], newest first."""
+    out: list[dict[str, Any]] = []
+    for item in (payload or {}).get("news") or []:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        stamp = item.get("providerPublishTime")
+        try:
+            published = datetime.fromtimestamp(int(stamp), tz=UTC) if stamp else None
+        except (TypeError, ValueError, OSError):
+            published = None
+        out.append({"title": title, "publisher": item.get("publisher") or "",
+                    "published": published})
+    out.sort(key=lambda n: n["published"] or datetime.min.replace(tzinfo=UTC),
+             reverse=True)
+    return out
+
+
 def parse_candles(payload: dict[str, Any] | None) -> list[Candle]:
     """OHLCV from a chart response.
 

@@ -349,8 +349,18 @@ def detect(df: pd.DataFrame, tolerance: float = 0.0015,
     Ordered by how much confirmation each one carries: a three-candle
     structure says more than a single wick, so it wins when both are present.
     """
+    return next((h for h in detect_all(df, tolerance)
+                 if allowed is None or h.name in allowed), None)
+
+
+def detect_all(df: pd.DataFrame, tolerance: float = 0.0015) -> list[Pattern]:
+    """Every pattern completing on the LAST bar, strongest first.
+
+    Pure: reads the candles and nothing else — no account, no contract, no
+    broker — which is what lets the alpha engine turn each hit into a signal.
+    """
     if len(df) < 2:
-        return None
+        return []
     # Every pattern completing on this bar, strongest first; the first one
     # the caller allows wins. A 0DTE desk trading only single- and two-candle
     # patterns must still see an engulfing that a three-line strike on the
@@ -462,7 +472,7 @@ def detect(df: pd.DataFrame, tolerance: float = 0.0015,
         hits.append(Pattern(
             "Shooting Star", False, float(bar["low"]), float(bar["high"]),
             note="A rally into the close met selling that rejected all of it."))
-    return next((h for h in hits if allowed is None or h.name in allowed), None)
+    return hits
 
 
 def detect_recent(df: pd.DataFrame, within: int = 2,

@@ -253,17 +253,22 @@ async def _probe_sources() -> int:
 
 
 def _ensure_capital() -> int:
-    """Raise a .env capital below the shipped figure up to it. Paper only.
+    """Bring a .env capital into line with the shipped figure. Paper only.
 
-    .env.example shipped PANAOPTIONS_CAPITAL=2000 and .env wins over
-    settings.yaml, so a desk configured for $4,000 ($800 a trade) ran on
-    $2,000 — a $400 budget that no setup's contract fitted. start.sh only
-    ever applied the FIRST suggested fix, so this one could wait for ever.
-    Never lowers a figure, and never touches anything else.
+    .env wins over settings.yaml, so a stale figure there silently changes
+    every budget. Two cases are corrected:
+
+      * a figure this project itself shipped or wrote before (2,000 in the
+        old .env.example, 5,000 from the $1,000-a-trade release) is set to
+        the current shipped figure — up or down — because nobody chose it;
+      * any other figure below the shipped one is raised to it.
+
+    A figure somebody typed that is above the shipped one is left alone.
     """
     from panaoptions import preflight
     from panaoptions.config import ENV_PATH, ROOT
     from panaoptions.envfile import write
+    from panaoptions.risk.gatekeeper import cap_pct
 
     cfg = get_config()
     shipped = preflight._shipped_capital(cfg)
@@ -273,16 +278,25 @@ def _ensure_capital() -> int:
     except ValueError:
         current = None
     pct = float(cfg.get("risk.max_capital_deployed_pct", 20.0))
-    if shipped and current is not None and current < shipped:
+    index_pct = cap_pct(cfg, "SPY")
+
+    def per_trade(capital: float) -> str:
+        return (f"${capital * pct / 100:,.0f} a trade, "
+                f"${capital * index_pct / 100:,.0f} on SPY/QQQ/DIA")
+
+    managed = {2000.0, 5000.0}
+    if shipped and current is not None and current != shipped and (
+            current in managed or current < shipped):
         if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
             ENV_PATH.write_text((ROOT / ".env.example").read_text(encoding="utf-8"),
                                 encoding="utf-8")
         write(ENV_PATH, {"PANAOPTIONS_CAPITAL": str(int(shipped))})
-        print(f"- Capital: .env had ${current:,.0f} (${current * pct / 100:,.0f} a "
-              f"trade) — raised to ${shipped:,.0f} (${shipped * pct / 100:,.0f} a trade)")
+        os.environ["PANAOPTIONS_CAPITAL"] = str(int(shipped))
+        print(f"- Capital: .env had ${current:,.0f} — set to the shipped "
+              f"${shipped:,.0f} ({per_trade(shipped)})")
     else:
         capital = current if current is not None else shipped
-        print(f"- Capital: ${capital:,.0f} — ${capital * pct / 100:,.0f} a trade")
+        print(f"- Capital: ${capital:,.0f} — {per_trade(capital)}")
     return 0
 
 
@@ -307,6 +321,28 @@ def _ensure_profile() -> int:
     os.environ["PANAOPTIONS_PROFILE"] = "zerodte"
     print("- Profile: zerodte (same-day options) — set in .env; "
           "PANAOPTIONS_PROFILE=default switches back to multi-day")
+    return 0
+
+
+def _reflect() -> int:
+    """The Friday reflection, on demand, for the last finished week."""
+    import asyncio
+    from datetime import timedelta
+
+    from panaoptions.journal import weekly
+    from panaoptions.learning.reflect import reflect
+
+    cfg = get_config()
+    start, end = weekly.current_week(cfg)
+    if not weekly.is_complete(end, cfg):
+        start, end = start - timedelta(days=7), end - timedelta(days=7)
+    done = asyncio.run(reflect(cfg, start, end))
+    print(f"Week {done.week}: {done.trades} closed trade(s)")
+    print(f"  {done.note}")
+    for key, weight in done.weights.items():
+        change = done.changes.get(key)
+        print(f"  {key:<22} {weight:.2f}" + (f"  ({change:+.2f})" if change else ""))
+    print(f"  record: {done.record}")
     return 0
 
 
@@ -727,6 +763,9 @@ def main() -> None:
     # LAST --set on the line and silently drops the rest.
     parser.add_argument("--ensure-profile", action="store_true",
                         help="put the desk on the zerodte profile unless one is set")
+    parser.add_argument("--reflect", action="store_true",
+                        help="run the Friday self-reflection on the last "
+                             "finished week now (Ollama tunes strategy weights)")
     parser.add_argument("--why", action="store_true",
                         help="why today's setups were or were not bought")
     parser.add_argument("--ensure-capital", action="store_true",
@@ -782,6 +821,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_check_llm()))
     if args.ensure_profile:
         raise SystemExit(_ensure_profile())
+    if args.reflect:
+        raise SystemExit(_reflect())
     if args.why:
         raise SystemExit(_why())
     if args.ensure_capital:

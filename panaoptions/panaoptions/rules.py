@@ -42,6 +42,7 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     loss_pct = g("risk.daily_loss_limit_pct", 10.0)
     loss_fixed = g("risk.daily_loss_limit")
     hold = g("risk.max_hold_minutes")
+    index_pct = float(g("risk.index_max_capital_deployed_pct", per_trade) or per_trade)
 
     def window(key: str) -> str:
         return f"{g(f'strategies.{key}.from', '—')} – {g(f'strategies.{key}.to', '—')} ET"
@@ -87,6 +88,52 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "session.force_exit_at"),
         ],
     })
+
+    # ------------------------------------------------------------------ #
+    weights = {**{"technical": 0.35, "derivatives": 0.35, "macro": 0.30},
+               **(g("agents.weights") or {})}
+    learned = g("strategy_weights") or {}
+    if bool(g("agents.enabled", True)):
+        sections.append({
+            "title": "Who approves it",
+            "intro": ("A triggered strategy is only a signal: symbol, direction, "
+                      "trigger, invalidation level on the stock, confidence. It "
+                      "knows nothing about money. Three agents vote on it, the "
+                      "CMIO combines the votes, and the Risk Gatekeeper checks "
+                      "the contract before any order exists. With Ollama running "
+                      "each agent also asks the local model and blends its view "
+                      "in; without it the rules score stands."),
+            "rules": [
+                _rule("Technical agent: 5m trigger vs the 15m trend; relative "
+                      "volume (trigger bar or session, whichever is higher) must "
+                      "be at least",
+                      f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below",
+                      "agents.technical.min_rvol"),
+                _rule("Derivatives & Flow agent: the contract, put/call ratio, IV "
+                      "percentile (penalised above), unusual flow; no contract = veto",
+                      f"IV ceiling {g('agents.derivatives.iv_percentile_ceiling', 80)}th "
+                      f"percentile, 0–{g('agents.derivatives.preferred_max_dte', 1)} DTE "
+                      "preferred", "agents.derivatives.*"),
+                _rule("Macro & Sentiment agent: a high-impact headline against the "
+                      "trade (downgrade, guidance cut, investigation under a call; "
+                      "buyout, upgrade under a put) or index futures moving hard "
+                      "against it is a hard veto",
+                      f"futures veto at {_pct(g('agents.macro.futures_veto_pct', 1.5))}",
+                      "agents.macro.*"),
+                _rule("CMIO: weighted score × strategy weight must reach, with no veto",
+                      f"{g('agents.approve_threshold', 0.55)} (weights "
+                      + ", ".join(f"{k} {v}" for k, v in weights.items()) + ")",
+                      "agents.approve_threshold / agents.weights"),
+                _rule("Strategy weights (tuned by the Friday reflection)",
+                      ", ".join(f"{k} {float(v):.2f}" for k, v in learned.items()) or "all 1.00",
+                      "strategy_weights (config/learned.yaml)"),
+                _rule("Ollama second opinion",
+                      f"{'on' if g('agents.use_llm', True) else 'off'} — blended at "
+                      f"{_pct(float(g('agents.llm_weight', 0.4)) * 100)}, "
+                      f"{g('agents.llm_timeout_seconds', 20)} s timeout",
+                      "agents.use_llm / llm_weight"),
+            ],
+        })
 
     # ------------------------------------------------------------------ #
     orb_mult = g("strategies.orb_vwap.volume_multiple", 1.5)
@@ -216,7 +263,7 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   f"{g('contracts.min_delta', 0.45)}–{g('contracts.max_delta', 0.60)}",
                   "contracts.min_delta / max_delta"),
             _rule("Bid/ask spread no wider than",
-                  f"{_pct(g('contracts.max_spread_pct_of_mid', 5.0))} of the mid price",
+                  f"{_pct(g('contracts.max_spread_pct_of_mid', 7.0))} of the mid price",
                   "contracts.max_spread_pct_of_mid"),
             _rule("Over budget: take the same delta with less time, then the "
                   "highest delta that fits — never below this delta",
@@ -225,7 +272,7 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Unusual options flow (volume ≥ "
                   f"{g('flow.min_volume_to_oi', 3.0)}x open interest, ≥ "
                   f"{g('flow.min_volume', 1000)} contracts) passes the screen "
-                  "and is shown as agreeing or opposing a setup — never a veto",
+                  "and scores for or against a setup in the Derivatives vote",
                   "on" if g("flow.pass_screen", True) else "off",
                   "flow.pass_screen / min_volume_to_oi"),
             _rule("Contract price between",
@@ -249,12 +296,20 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Premium per trade, at most",
                   f"{_pct(per_trade)} = {_money(capital * per_trade / 100, cur)}",
                   "risk.max_capital_deployed_pct"),
+            _rule("Index ETFs (" + ", ".join(g("risk.index_symbols") or ["SPY", "QQQ", "DIA"])
+                  + ") — high-notional contracts, so a higher cap",
+                  f"{_pct(index_pct)} = {_money(capital * index_pct / 100, cur)}",
+                  "risk.index_max_capital_deployed_pct"),
+            _rule("Risk Gatekeeper refuses a bid/ask spread wider than",
+                  f"{_pct(g('risk.max_spread_pct_of_mid', 7.0))} of the mid",
+                  "risk.max_spread_pct_of_mid"),
             _rule("All open trades together, at most",
                   f"{_pct(total)} = {_money(capital * total / 100, cur)}",
                   "risk.max_total_deployed_pct"),
             _rule("Open trades at once, at most", g("risk.max_open_trades", 1),
                   "risk.max_open_trades"),
-            _rule("Stop trading for the day after losing",
+            _rule("Circuit breaker: once the day's loss, closed plus open, "
+                  "reaches this, everything is sold and trading stops for the day",
                   _money(loss_fixed, cur) if loss_fixed
                   else f"{_pct(loss_pct)} = {_money(capital * float(loss_pct) / 100, cur)}",
                   "risk.daily_loss_limit_pct"),
@@ -319,6 +374,14 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Grade each trade as it closes",
                   "on" if g("journal.auto_grade", True) else "off",
                   "journal.auto_grade"),
+            _rule("Friday reflection: after the close, the week's graded "
+                  "trades go to Ollama, which returns strategy weight "
+                  "adjustments; they are bounded and written to "
+                  "config/learned.yaml (also `python run.py --reflect`)",
+                  (f"on — at least {g('reflection.min_trades', 5)} trades, at most "
+                   f"±{g('reflection.max_step', 0.15)} a week"
+                   if g("reflection.enabled", True) else "off"),
+                  "reflection.*"),
         ],
     })
 

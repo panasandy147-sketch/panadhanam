@@ -21,9 +21,9 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from panaoptions.engine import contract_prefs, patterns
 from panaoptions.engine import indicators as ta
 from panaoptions.engine import levels as levels_mod
-from panaoptions.engine import patterns
 from panaoptions.logging import get_logger
 from panaoptions.models import Candle, Direction, SessionLevels, Setup, SetupType
 
@@ -387,71 +387,24 @@ class CandlestickAtLevel(Strategy):
     name = SetupType.CANDLESTICK_AT_LEVEL
     window = ("09:45", "15:00")
 
-    # Per pattern: the delta band and the expiry window it asks for. A sharp
-    # reversal off a level and a four-candle structural turn are not the same
-    # bet, so they do not want the same contract. A wide-range candle that
-    # undoes three sessions is worth paying up for in delta; a doji island
-    # tends to move fast and does not need the time.
-    _DEFAULT_CONTRACT = {
-        "Hammer":                    ((0.50, 0.65), (14, 30)),
-        "Bullish Engulfing":         ((0.55, 0.70), (14, 30)),
-        "Morning Star":              ((0.45, 0.55), (14, 30)),
-        "Tweezer Bottom":            ((0.50, 0.65), (14, 30)),
-        "Shooting Star":             ((0.50, 0.60), (14, 30)),
-        "Bearish Engulfing":         ((0.55, 0.65), (14, 30)),
-        "Evening Star":              ((0.45, 0.55), (14, 30)),
-        "Tweezer Top":               ((0.50, 0.65), (14, 30)),
-        "Bullish Three-Line Strike": ((0.65, 0.75), (30, 45)),
-        "Bearish Three-Line Strike": ((0.65, 0.75), (30, 45)),
-        "Three White Soldiers":      ((0.50, 0.60), (30, 45)),
-        "Three Black Crows":         ((0.55, 0.65), (21, 35)),
-        "Bullish Abandoned Baby":    ((0.50, 0.60), (14, 30)),
-        "Bearish Abandoned Baby":    ((0.50, 0.60), (14, 30)),
-        "Piercing Line":             ((0.50, 0.60), (14, 30)),
-        "Dark Cloud Cover":          ((0.50, 0.60), (14, 30)),
-        "Liquidity Sweep Rejection": ((0.55, 0.65), (14, 30)),
-    }
-
+    # Which contract each pattern asks for is a derivatives question and lives
+    # in engine/contract_prefs.py. These stay as thin lookups so the setup can
+    # carry the request to the contract picker; the strategy itself never
+    # reads a price, a balance or a chain.
     @staticmethod
     def _key(pattern: str) -> str:
-        return pattern.lower().replace(" ", "_").replace("-", "_")
+        return contract_prefs.key(pattern)
 
     def delta_band(self, pattern: str) -> tuple[float, float]:
-        configured = self.cfg.get(
-            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.delta")
-        if isinstance(configured, list | tuple) and len(configured) == 2:
-            return float(configured[0]), float(configured[1])
-        return self._DEFAULT_CONTRACT.get(pattern, ((0.45, 0.60), (0, 0)))[0]
+        return contract_prefs.delta_band(self.cfg, pattern)
 
     def dte_window(self, pattern: str) -> tuple[int, int]:
-        """How much time this pattern's thesis needs to play out.
-
-        A four-candle reversal is a multi-session move and dies on theta at 7
-        days; the config-wide default would quietly give it the wrong contract.
-        """
-        configured = self.cfg.get(
-            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.dte")
-        if isinstance(configured, list | tuple) and len(configured) == 2:
-            return int(configured[0]), int(configured[1])
-        fallback = self._DEFAULT_CONTRACT.get(pattern, (None, (0, 0)))[1]
-        if fallback != (0, 0):
-            return fallback
-        return (int(self.cfg.get("strategies.candlestick_at_level.min_dte", 14)),
-                int(self.cfg.get("strategies.candlestick_at_level.max_dte", 30)))
+        return contract_prefs.dte_window(self.cfg, pattern)
 
     def claimed_accuracy(self, pattern: str) -> float:
-        """The win rate this pattern is published as having, or 0.
-
-        Recorded so the journal can hold it against what it actually does on
-        THIS desk's data. A number from somebody else's backtest on daily bars
-        is a hypothesis about a 15m intraday tape, not a result.
-        """
-        value = self.cfg.get(
-            f"strategies.candlestick_at_level.patterns.{self._key(pattern)}.claimed_accuracy")
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
+        """The win rate this pattern is published as having, or 0 — a claim
+        the journal holds against what it actually does on this desk."""
+        return contract_prefs.claimed_accuracy(self.cfg, pattern)
 
     def evaluate(self, symbol, df5, df15, levels) -> Setup:
         setup = _base(symbol, df5, self.name)

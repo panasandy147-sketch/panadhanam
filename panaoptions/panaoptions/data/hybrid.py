@@ -94,6 +94,15 @@ class HybridFeed:
                       include_prepost: bool = False):
         return await self.charts.candles(symbol, interval, include_prepost)
 
+    async def news(self, symbol: str, count: int = 10):
+        """Headlines come from the chart source when it serves them."""
+        source = getattr(self.charts, "news", None)
+        return await source(symbol, count) if source else []
+
+    async def futures_change(self, symbol: str):
+        source = getattr(self.charts, "futures_change", None)
+        return await source(symbol) if source else None
+
     # -- chains --------------------------------------------------------- #
     async def expiries(self, symbol: str):
         return await self.chains.expiries(symbol)

@@ -132,7 +132,10 @@ function renderAccount(s) {
       <div class="v">${money(c.capital)}</div></div>
     <div class="tile"><div class="k">Deployed per trade</div>
       <div class="v">${money(c.deployed_per_trade)}</div>
-      <div class="sub">${num(c.deployed_pct, 0)}% of the account</div></div>
+      <div class="sub">${num(c.deployed_pct, 0)}% of the account${
+        r.index_max_deployed_per_trade && r.index_max_deployed_per_trade > c.deployed_per_trade
+          ? ` · ${money(r.index_max_deployed_per_trade)} on ${esc((r.index_symbols || []).join("/"))}`
+          : ""}</div></div>
     <div class="tile"><div class="k">At risk per trade</div>
       <div class="v">${money(c.risk_per_trade)}</div>
       <div class="sub">${num(c.risk_per_trade_pct, 1)}% behind the stop</div></div>
@@ -844,6 +847,7 @@ function maybeNotify(events) {
    once, so the page moves together. */
 let lastDecisionSeq = null;
 const DECISIVE = new Set(["trade.open", "trade.exit", "setup.fired", "contract.none",
+  "vote.approved", "vote.refused", "reflection",
   "contract.fallback", "risk.refused", "screen.done", "restored", "halt", "graded"]);
 
 function followDecisions(events) {

@@ -19,8 +19,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from panaoptions import clock, watchlist
+from panaoptions import alpha, clock, watchlist
 from panaoptions.activity import ActivityLog
+from panaoptions.agents import CMIO
 from panaoptions.config import Config, get_config
 from panaoptions.data.premarket import screen
 from panaoptions.data.provider import make_feed
@@ -33,6 +34,7 @@ from panaoptions.ledger.paper import PaperLedger
 from panaoptions.logging import get_logger
 from panaoptions.models import Direction, ExitReason, PreMarketRead
 from panaoptions.notify.webhook import Notifier
+from panaoptions.risk.gatekeeper import RiskGatekeeper
 from panaoptions.risk.guardrails import RiskManager
 
 log = get_logger("app")
@@ -44,6 +46,12 @@ class OptionsDesk:
         self.feed = feed or make_feed(self.cfg)
         self.risk = RiskManager(self.cfg)
         self.ledger = PaperLedger(self.cfg, self.risk)
+        # Signals pass the committee and then the gatekeeper before any order.
+        self.gatekeeper = RiskGatekeeper(self.cfg, self.risk)
+        self.cmio = CMIO(self.cfg, self.gatekeeper)
+        # One committee vote per setup per bar: a setup that stays valid for
+        # several cycles is not re-argued (and Ollama not re-asked) each minute.
+        self._verdicts: dict[tuple, Any] = {}
         self.notifier = Notifier(self.cfg)
         # What the desk just did, so a working desk and a hung one look
         # different from the outside.
@@ -67,6 +75,7 @@ class OptionsDesk:
         self.cycle_seconds: int = 60
         self.last_cycle_seconds: float = 0.0
         self._predictor: Any = None
+        self._reflection_task: asyncio.Task | None = None
         # A watchlist saved from the dashboard wins over the config universe.
         # Applied at construction so a restart keeps scanning what was asked
         # for rather than quietly reverting to the shipped list.
@@ -132,6 +141,9 @@ class OptionsDesk:
         preflight.report(self.cfg)
 
         self._load_predictor()
+        # A desk stopped before Friday's close never saw the week end; catch
+        # the reflection up in the background rather than skip a week.
+        self._reflection_task = asyncio.create_task(self._catch_up_reflection())
         self.running = True
         log.info("panaoptions desk started — paper only, capital $%.2f, "
                  "entries %s-%s %s", self.risk.capital,
@@ -380,13 +392,25 @@ class OptionsDesk:
                     actions.append(f"{symbol}: model vetoed ({probability:.0%})")
                     continue
 
+            # The alpha engine's view: five numbers, no money in them.
+            signal_a = alpha.from_setup(setup)
+            if signal_a is None:
+                self.activity.add(
+                    "setup.pass",
+                    f"{symbol} {setup.strategy.value} — its invalidation level "
+                    f"is on the wrong side of the entry; not a usable signal",
+                    ts=now)
+                continue
+
             self.activity.add(
                 "setup.fired",
                 f"{symbol} {setup.strategy.value} {setup.direction.value} — "
-                f"{setup.pattern}", level="good", ts=now)
+                f"{setup.pattern} (trigger {signal_a.trigger_price:.2f}, "
+                f"invalid at {signal_a.invalidation_level:.2f}, confidence "
+                f"{signal_a.confidence_score:.2f})", level="good", ts=now)
             self._remember_candidate(symbol, setup, now)
 
-            search = await self._pick_contract(symbol, setup, now)
+            search, chain = await self._pick_contract(symbol, setup, now)
             if search.chosen is not None and search.budget_fallback:
                 self.activity.add("contract.fallback", f"{symbol} — {search.note}",
                                   level="warn", ts=now)
@@ -402,6 +426,26 @@ class OptionsDesk:
                 log.info("%s setup fired but no contract qualified. %s",
                          symbol, search.note)
                 continue
+
+            if bool(self.cfg.get("agents.enabled", True)):
+                verdict = await self._convene(symbol, signal_a, setup, candles,
+                                              chain, search, now)
+                if self.candidate and self.candidate.get("symbol") == symbol:
+                    self.candidate["verdict"] = verdict.to_dict()
+                    self.candidate.setdefault("reasoning", []).append(
+                        f"**Committee.** {verdict.summary()}")
+                if not verdict.approved:
+                    self._candidate_refused(symbol, verdict.reason)
+                    store.save_signal_seen(signal_id, now, symbol,
+                                           setup.direction.value, False,
+                                           verdict.reason,
+                                           {"verdict": verdict.to_dict()})
+                    actions.append(f"{symbol}: {verdict.reason}")
+                    self.activity.add("vote.refused", f"{symbol} — {verdict.summary()}",
+                                      level="warn", ts=now)
+                    continue
+                self.activity.add("vote.approved", f"{symbol} — {verdict.summary()}",
+                                  level="good", ts=now)
 
             signal, refusal = self.risk.size(setup, search.chosen, signal_id,
                                              now, probability)
@@ -641,7 +685,7 @@ class OptionsDesk:
         self._note_flow(symbol, setup, chain)
         search = contract_filter.choose(symbol, chain, setup.direction,
                                         self.cfg, setup=setup,
-                                        budget=self.risk.budget_room())
+                                        budget=self.gatekeeper.budget_for(symbol))
 
         # An empty chain has two very different causes and one useless
         # message. "No put contracts came back" reads as "the market has no
@@ -653,7 +697,32 @@ class OptionsDesk:
                 search.note = (
                     f"No contracts for {symbol} at {min_dte}-{max_dte} DTE — "
                     f"{reason}")
-        return search
+        return search, chain
+
+    async def _convene(self, symbol: str, signal_a, setup, candles, chain,
+                       search, now: datetime):
+        """The committee's verdict on this setup, once per setup per bar."""
+        key = (symbol, signal_a.source, signal_a.direction, setup.ts,
+               search.chosen.label if search.chosen else "")
+        cached = self._verdicts.get(key)
+        if cached is not None:
+            return self.cmio.gate(cached, signal_a, setup, search, self._unrealised())
+        screen_rvol = next((r.rvol for r in self.screened if r.symbol == symbol), 0.0)
+        verdict = await self.cmio.convene(
+            signal=signal_a, setup=setup, candles=candles, chain=chain,
+            search=search, feed=self.feed, now=now, screen_rvol=screen_rvol,
+            unrealised=self._unrealised())
+        if len(self._verdicts) > 500:
+            self._verdicts.clear()
+        self._verdicts[key] = verdict
+        return verdict
+
+    def _unrealised(self) -> float:
+        """Open profit or loss across the book, at the last marks."""
+        multiplier = self.cfg.multiplier
+        return round(sum((t.last_price - t.entry_price) * t.remaining * multiplier
+                         for t in self.ledger.open_trades.values()
+                         if t.last_price), 2)
 
     # ------------------------------------------------------------------ #
     async def _manage(self, now: datetime) -> list[str]:
@@ -687,7 +756,35 @@ class OptionsDesk:
                 store.save_trade(trade)
                 await self._grade(trade)
                 await self.notifier.exit(trade)
+        actions.extend(await self._circuit_breaker(now))
         return actions
+
+    async def _circuit_breaker(self, now: datetime) -> list[str]:
+        """Flatten everything once today's drawdown reaches the daily limit.
+
+        Realised AND open losses count: -$250 closed plus -$150 still open is
+        a $400 day on a $4,000 account whichever way it is booked. Once hit,
+        the RiskManager is halted for the session and every open position is
+        sold at its last mark.
+        """
+        if not self.ledger.open_trades:
+            return []
+        unrealised = self._unrealised()
+        limit = self.risk.daily_limit
+        if limit <= 0 or self.gatekeeper.drawdown(unrealised) < limit:
+            return []
+        self.gatekeeper.breaker_tripped(unrealised)
+        prices = {t.contract_label: t.last_price or t.entry_price
+                  for t in self.ledger.open_trades.values()}
+        closed = list(self.ledger.open_trades.values())
+        self.ledger.close_all(prices, ExitReason.CIRCUIT_BREAKER, now)
+        self.activity.add("halt", f"circuit breaker — {self.risk.state.halt_reason}; "
+                          f"flattened {len(closed)} position(s)", level="bad", ts=now)
+        for trade in closed:
+            store.save_trade(trade)
+            await self._grade(trade)
+            await self.notifier.exit(trade)
+        return [f"circuit breaker: flattened {len(closed)} position(s)"]
 
     async def _contract_price(self, trade) -> float | None:
         """Re-price the exact contract being held."""
@@ -823,10 +920,46 @@ class OptionsDesk:
                 weekly.save(review, self.cfg)
             else:
                 log.info("no graded trades in the week to %s", end)
+            await self._reflect(start, end)
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not write the weekly review: %s", exc)
             from panaoptions.journal import weekly
             self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
+
+    async def _catch_up_reflection(self) -> None:
+        """Reflect on the last finished week if nobody has yet."""
+        try:
+            from datetime import timedelta
+
+            from panaoptions.journal import store as journal_store
+            from panaoptions.journal import weekly
+
+            start, end = weekly.current_week(self.cfg)
+            if not weekly.is_complete(end, self.cfg):
+                start, end = start - timedelta(days=7), end - timedelta(days=7)
+            record = (journal_store.JOURNAL_DIR / "reflections"
+                      / f"{start.isoformat()}_to_{end.isoformat()}.json")
+            if not record.exists():
+                await self._reflect(start, end)
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not catch up the weekly reflection: %s", exc)
+
+    async def _reflect(self, start, end) -> None:
+        """Friday's self-reflection: Ollama tunes the strategy weights."""
+        if not bool(self.cfg.get("reflection.enabled", True)):
+            return
+        try:
+            from panaoptions.learning.reflect import reflect
+
+            done = await reflect(self.cfg, start, end)
+            self.activity.add(
+                "reflection",
+                f"week to {end}: {done.note}"
+                + (f" — {', '.join(f'{k} {v:+.2f}' for k, v in done.changes.items())}"
+                   if done.changes else ""),
+                level="good" if done.applied else "info")
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("weekly reflection failed: %s", exc)
 
     # ------------------------------------------------------------------ #
     def status(self) -> dict[str, Any]:

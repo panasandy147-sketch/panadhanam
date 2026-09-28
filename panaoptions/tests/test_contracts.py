@@ -194,9 +194,11 @@ def test_the_budget_matches_what_sizing_will_accept(cfg):
     assert guard.budget_room() == pytest.approx(per_trade)
 
 
-def test_start_raises_a_stale_env_capital_to_the_shipped_800_budget(cfg, monkeypatch, tmp_path):
-    """.env.example shipped 2000 and .env wins, so the desk ran on a $400
-    budget while settings.yaml said $800."""
+def test_start_aligns_a_stale_env_capital_with_the_shipped_figure(cfg, monkeypatch, tmp_path):
+    """.env wins over settings.yaml, so a figure an older release wrote there
+    (2,000 from the old example, 5,000 from the $1,000-a-trade release) would
+    silently override the shipped $4,000. A figure somebody chose above the
+    shipped one is left alone."""
     import run
     from panaoptions import config as config_mod
 
@@ -205,7 +207,12 @@ def test_start_raises_a_stale_env_capital_to_the_shipped_800_budget(cfg, monkeyp
     monkeypatch.setattr(config_mod, "ENV_PATH", env)
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "2000")
     assert run._ensure_capital() == 0
-    assert "PANAOPTIONS_CAPITAL=5000" in env.read_text(encoding="utf-8")
+    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")
+
+    env.write_text("PANAOPTIONS_CAPITAL=5000\n", encoding="utf-8")
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "5000")
+    run._ensure_capital()
+    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")   # ours, realigned
 
     env.write_text("PANAOPTIONS_CAPITAL=9000\n", encoding="utf-8")
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "9000")
@@ -241,7 +248,7 @@ def test_when_nothing_fits_it_says_exactly_why(cfg):
                               setup=_setup(), budget=800.0)
     assert search.chosen is None
     assert "$800 budget" in search.note
-    assert "spread over 10%" in search.note
+    assert "spread over 7%" in search.note
     assert "Cheapest was" in search.note
     assert "$10-$2000 budget" not in search.note
 
