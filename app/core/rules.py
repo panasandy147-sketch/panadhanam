@@ -141,7 +141,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             {"name": "News", "weight": weight("news_sentiment"),
              "reads": [
                  "Scores recent headlines for this symbol, newer ones counting more.",
-                 "A high-impact headline against the trade is a veto"
+                 f"News polarity beyond ±{g('consensus.news_veto_polarity', 0.60)} "
+                 "against the trade is an absolute veto — nothing overrides it"
                  + (" (on)." if g("consensus.veto_on_high_impact_news", True)
                     else " (currently off)."),
              ]},
@@ -284,13 +285,28 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "total ÷ max positions" if g("risk.split_exposure_across_positions", True)
                   else "no per-position cap",
                   "risk.split_exposure_across_positions"),
-            _rule("Option premium held at once, at most",
-                  _pct(g("risk.options_max_premium_pct", 25.0)),
-                  "risk.options_max_premium_pct"),
+            _rule("Option premium per trade, at most (capital deployment cap)",
+                  f"{_pct(g('risk.max_capital_deployed_pct', 20.0))} = "
+                  f"{money(capital * float(g('risk.max_capital_deployed_pct', 20.0)) / 100)}",
+                  "risk.max_capital_deployed_pct"),
+            _rule("Index flex: high-notional index ETFs ("
+                  + ", ".join(g("risk.index_symbols") or ["SPY", "QQQ", "DIA"])
+                  + ") may deploy up to",
+                  f"{_pct(g('risk.index_max_capital_deployed_pct', 25.0))} = "
+                  f"{money(capital * float(g('risk.index_max_capital_deployed_pct', 25.0)) / 100)}",
+                  "risk.index_max_capital_deployed_pct"),
+            _rule("Option bid-ask spread, at most",
+                  f"{_pct(g('risk.max_spread_pct_of_mid', 7.0))} of the mid",
+                  "risk.max_spread_pct_of_mid"),
+            _rule("Option stop: on the UNDERLYING — 5m swing low/high over the "
+                  f"last {g('risk.swing_lookback_bars', 6)} bars ± "
+                  f"{g('risk.structural_stop_ticks', 2)} ticks, else "
+                  f"{g('risk.atr_stop_multiplier', 1.5)}x ATR; never the premium",
+                  "underlying", "risk.swing_lookback_bars / atr_stop_multiplier"),
             _rule("Open positions at once, at most", g("risk.max_open_positions", 3),
                   "risk.max_open_positions"),
-            _rule("One position per stock; after a close, wait before trading "
-                  "the same stock again",
+            _rule("Anti-stacking: one position per stock; a stock that closes a "
+                  "trade goes on the cooldown blacklist for",
                   f"{'on' if g('risk.one_position_per_symbol', True) else 'off'}, "
                   f"{g('risk.reentry_cooldown_minutes', 0)} min",
                   "risk.one_position_per_symbol / reentry_cooldown_minutes"),

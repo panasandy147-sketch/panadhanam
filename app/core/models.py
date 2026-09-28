@@ -83,6 +83,10 @@ class OptionLeg(BaseModel):
     strike: float
     option_type: Literal["CE", "PE"]
     ltp: float = 0.0
+    # Two-sided quote, when the feed serves one. 0 = unknown; the risk desk
+    # refuses a leg whose spread is over risk.max_spread_pct_of_mid.
+    bid: float = 0.0
+    ask: float = 0.0
     oi: float = 0.0
     oi_change: float = 0.0
     volume: float = 0.0
@@ -220,6 +224,11 @@ class TradeSignal(BaseModel):
     # outcome tracker mark the premium to market via delta.
     entry_spot: float | None = None
     entry_delta: float | None = None
+    # The stop on the UNDERLYING's structure (5m swing ± 2 ticks, or 1.5x
+    # ATR). For an option this is what exits the trade; `stop_loss` is the
+    # premium the delta mark gives at that level, kept for R and sizing.
+    underlying_stop: float | None = None
+    underlying_stop_note: str = ""
 
     risk_per_unit: float = 0.0
     total_risk: float = 0.0

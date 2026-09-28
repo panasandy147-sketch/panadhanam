@@ -190,6 +190,46 @@ _TEMPLATE_RISK = {"RISK_PER_TRADE_PCT": 1.0, "MAX_DAILY_LOSS_PCT": 3.0,
                   "TOTAL_CAPITAL": 10000.0}
 
 
+def _ensure_capital() -> int:
+    """Apply the shipped account size to .env once per change of it. Paper only.
+
+    .env's TOTAL_CAPITAL wins over settings.yaml, and .env.example shipped
+    100000 — so a shipped change to the account size would never reach a
+    machine that already had a .env. This applies the shipped figure once and
+    records that it did (CAPITAL_PROFILE); a capital changed afterwards on the
+    dashboard, which also writes TOTAL_CAPITAL, is left alone on every later
+    start.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from app.core.envfile import read_values, set_values
+
+    root = Path(__file__).resolve().parent
+    env = root / ".env"
+    with (root / "config" / "settings.yaml").open(encoding="utf-8") as fh:
+        shipped = float(((yaml.safe_load(fh) or {}).get("risk") or {})
+                        .get("total_capital") or 0)
+    if shipped <= 0:
+        return 0
+    marker = str(int(shipped))
+    values = read_values(env) if env.exists() else {}
+    if values.get("CAPITAL_PROFILE") == marker:
+        current = values.get("TOTAL_CAPITAL") or marker
+        print(f"- Capital: {current}")
+        return 0
+    updates = {"TOTAL_CAPITAL": marker, "CAPITAL_PROFILE": marker}
+    if "MAX_DAILY_LOSS_PCT" in values:
+        updates["MAX_DAILY_LOSS_PCT"] = "10"
+    set_values(env, updates, template=root / ".env.example")
+    was = values.get("TOTAL_CAPITAL")
+    print(f"- Capital: {'.env had ' + was + ' — ' if was else ''}set to the shipped "
+          f"{marker} (1% risk a trade, option premium capped at 20%, 25% on "
+          f"SPY/QQQ/DIA, circuit breaker at -10%)")
+    return 0
+
+
 def _retire_template_risk(env_path) -> list[str]:
     """Comment out template-default risk lines so settings.yaml decides.
 
@@ -283,11 +323,20 @@ def main() -> None:
                         dest="set_env",
                         help="write settings into .env; repeatable "
                              "(e.g. --set TOTAL_CAPITAL=10000 --set LLM_PROVIDER=ollama)")
+    parser.add_argument("--ensure-capital", action="store_true",
+                        help="apply the shipped account size to .env once")
+    parser.add_argument("--feedback", action="store_true",
+                        help="run the Friday Ollama feedback on the last finished week")
     parser.add_argument("--ensure-paper-orders", action="store_true",
                         help="turn simulated order placement on for a paper "
                              "account (never touches a real-money broker)")
     args = parser.parse_args()
 
+    if args.ensure_capital:
+        raise SystemExit(_ensure_capital())
+    if args.feedback:
+        from scripts import ollama_feedback
+        raise SystemExit(ollama_feedback.main([]))
     if args.ensure_paper_orders:
         raise SystemExit(_ensure_paper_orders())
     if args.set_env:

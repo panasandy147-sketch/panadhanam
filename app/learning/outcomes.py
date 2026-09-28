@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from app.agents import risk_manager as guard
 from app.brokers.base import BrokerAdapter
 from app.core.bus import Topic, bus
 from app.core.config import Config, get_config
@@ -39,9 +40,10 @@ class OutcomeTracker:
         still_open: list[tuple[dict[str, Any], float]] = []
 
         for row in open_rows:
-            price = await self._current_price(row)
-            if price is None:
+            marks = await self._marks(row)
+            if marks is None:
                 continue
+            price, spot = marks
 
             entry = row["entry"]
             stop = row["stop_loss"]
@@ -49,7 +51,16 @@ class OutcomeTracker:
             qty = row["quantity"] or 0
             is_long = row["side"] == "BUY"
 
-            hit_stop = price <= stop if is_long else price >= stop
+            # An option's stop is its UNDERLYING's structural level: the call
+            # is out when the stock closes through it, whatever the premium
+            # is doing. Rows from before the level was recorded keep the old
+            # premium comparison.
+            ustop = self._underlying_stop(row)
+            if ustop is not None and spot is not None:
+                is_call = row["instrument_type"] == "CE"
+                hit_stop = guard.underlying_stop_hit(spot, ustop, is_call)
+            else:
+                hit_stop = price <= stop if is_long else price >= stop
             hit_target = price >= target if is_long else price <= target
             timed_out = self._past_squareoff()
             time_stop = self._time_stop_hit(row, price)
@@ -234,7 +245,29 @@ class OutcomeTracker:
             return SetupType.NEWS_MOMENTUM
         return SetupType.OTHER
 
-    async def _current_price(self, row: dict[str, Any]) -> float | None:
+    @staticmethod
+    def _underlying_stop(row: dict[str, Any]) -> float | None:
+        """The recorded underlying stop for an OPTION row, or None."""
+        if row.get("instrument_type") not in {"CE", "PE"}:
+            return None
+        try:
+            import json
+            value = json.loads(row.get("payload") or "{}").get("underlying_stop")
+            return float(value) if value else None
+        except (TypeError, ValueError):
+            return None
+
+    async def _marks(self, row: dict[str, Any]) -> tuple[float, float | None] | None:
+        """(position mark, underlying spot) — or None when it cannot be marked."""
+        quote = await self.broker.get_quote(row["symbol"])
+        if not quote:
+            return None
+        price = await self._current_price(row, quote)
+        if price is None:
+            return None
+        return price, quote.last_price
+
+    async def _current_price(self, row: dict[str, Any], quote: Any = None) -> float | None:
         """Mark to market.
 
         An option is marked by moving its premium with the underlying, scaled by
@@ -243,7 +276,7 @@ class OutcomeTracker:
         R-multiples the learning loop grades on stay comparable. In live mode the
         broker's own position P&L supersedes this.
         """
-        quote = await self.broker.get_quote(row["symbol"])
+        quote = quote or await self.broker.get_quote(row["symbol"])
         if not quote:
             return None
 

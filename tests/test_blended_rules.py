@@ -22,7 +22,9 @@ ET = ZoneInfo("America/New_York")
 
 def test_the_shipped_numbers(cfg):
     assert cfg.get("risk.risk_per_trade_pct") == 1.0
-    assert cfg.get("risk.max_daily_loss_pct") == 4.0
+    assert cfg.get("risk.max_daily_loss_pct") == 10.0       # $400 on $4,000
+    assert cfg.get("risk.total_capital") == 4000
+    assert cfg.get("risk.reentry_cooldown_minutes") == 60
     assert cfg.get("risk.max_portfolio_heat_pct") == 4.0
     assert cfg.get("risk.reject_if_iv_rank_above") == 80.0
     assert (cfg.get("derivatives.min_days_to_expiry"),
@@ -84,8 +86,8 @@ async def test_circuit_breaker_flattens_halts_and_disarms(cfg, monkeypatch):
     from app.learning.outcomes import OutcomeTracker
 
     rm = RiskManager(cfg)
-    rm.set_capital(100_000)
-    rm.state.realised_pnl = -3_800.0
+    rm.set_capital(4_000)                              # limit 10% = $400
+    rm.state.realised_pnl = -380.0
 
     class _Day:
         disarmed = ""
@@ -105,7 +107,7 @@ async def test_circuit_breaker_flattens_halts_and_disarms(cfg, monkeypatch):
         return {"signal_id": row["id"]}
 
     monkeypatch.setattr(tracker, "_close", _close)
-    rm.set_unrealised(-300.0)                          # -4,100 in total
+    rm.set_unrealised(-30.0)                           # -410 in total
     out = await tracker._maybe_trip_breaker([({"id": "A"}, 99.0), ({"id": "B"}, 50.0)])
     assert closed == ["circuit_breaker", "circuit_breaker"] and len(out) == 2
     assert rm.state.halted and "circuit breaker" in rm.state.halt_reason
@@ -117,8 +119,8 @@ async def test_circuit_breaker_waits_until_the_limit(cfg):
     from app.learning.outcomes import OutcomeTracker
 
     rm = RiskManager(cfg)
-    rm.set_capital(100_000)
-    rm.state.realised_pnl = -3_000.0
+    rm.set_capital(4_000)
+    rm.state.realised_pnl = -300.0
     tracker = OutcomeTracker(broker=None, cfg=cfg, risk_manager=rm)
     assert await tracker._maybe_trip_breaker([({"id": "A"}, 99.0)]) == []
     assert not rm.state.halted

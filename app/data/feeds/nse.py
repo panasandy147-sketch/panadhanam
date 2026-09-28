@@ -282,6 +282,8 @@ class NSEFeed(BrokerAdapter):
                     strike=float(strike),
                     option_type=opt_type,
                     ltp=float(leg.get("lastPrice") or 0.0),
+                    bid=float(leg.get("bidprice") or 0.0),
+                    ask=float(leg.get("askPrice") or 0.0),
                     oi=float(leg.get("openInterest") or 0.0),
                     # NSE gives the OI change directly — this is what makes a
                     # genuine long-buildup / short-covering read possible.

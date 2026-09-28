@@ -36,29 +36,31 @@ risk:
   # even one share" and you get almost no fills to learn from. 10,000 is a
   # sensible practice size. That is the sizing maths being honest, not a fault
   # — and small capital does not make live trading safer, staying in paper does.
-  # 100,000 paper: 1% risk is 1,000 a trade, enough to size a real position
-  # on any name in the watchlist. Editing Capital on the dashboard saves the
-  # new figure to .env, so it survives a restart.
-  total_capital: 100000
+  # $4,000 paper: 1% risk is $40 a trade; option premium per trade is capped
+  # at 20% ($800), or 25% ($1,000) on SPY/QQQ/DIA; the day stops at -10%
+  # ($400). start.sh applies this figure once to a .env left at an earlier
+  # shipped value; editing Capital on the dashboard afterwards still sticks.
+  total_capital: 4000
   # ACTIVE PAPER PROFILE: many trades to learn from (loose entry gates, five
   # positions, 60 names, top 5 per band), each one small, with a hard ceiling
   # on what can be lost at once and in a day.
   risk_per_trade_pct: 1.0        # 1% of capital risked per trade, while learning
   max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
-  # Daily circuit breaker: when realised + open P&L reaches -4%, every open
-  # position is closed at market, the desk halts and the day is disarmed —
-  # locked until the next session. Not just "no new trades".
-  max_daily_loss_pct: 4.0
+  # Daily hard-loss circuit breaker: when realised + open P&L reaches -10%
+  # ($400 on $4,000), every open position is closed at market, the desk halts
+  # and the day is disarmed — locked until the next session.
+  max_daily_loss_pct: 10.0
   circuit_breaker: true
   max_open_positions: 5
   # Portfolio heat: the total that would be lost if EVERY open position hit
   # its stop together (a headline moving correlated names at once). Five at 1%
   # would be 5%; the cap holds it at 4% — the fifth trade takes what is left.
   max_portfolio_heat_pct: 4.0
-  # One position per symbol, and after a close wait this long before the same
-  # symbol is traded again — a stopped-out idea is not re-entered at once.
+  # Anti-stacking: one position per symbol, and a symbol that has just closed
+  # a trade goes on a cooldown blacklist for this long — no sequential
+  # re-entries on the same ticker in a choppy session (the XOM / AVGO runs).
   one_position_per_symbol: true
-  reentry_cooldown_minutes: 30
+  reentry_cooldown_minutes: 60
   # The stop sits at least this many ATRs (primary timeframe) from entry. A
   # structural level inside a normal bar's range is hit by noise alone.
   min_stop_atr: 1.0
@@ -98,8 +100,20 @@ risk:
   # Trailing
   trail_after_r: 1.0             # start trailing once trade is +1R
   trail_step_r: 0.5
-  # Options-specific
-  options_max_premium_pct: 25.0  # max % of capital in option premium at once
+  # Options-specific. Premium per trade is capped at max_capital_deployed_pct
+  # of capital (20% = $800), flexed for the high-notional index ETFs to
+  # index_max_capital_deployed_pct (25% = $1,000) so a valid at- or near-the-
+  # money SPY/QQQ contract is not refused on notional alone. "DJI" = DIA.
+  max_capital_deployed_pct: 20.0
+  index_max_capital_deployed_pct: 25.0
+  index_symbols: ["SPY", "QQQ", "DIA"]
+  # Refuse an option whose bid-ask spread is over this share of the mid.
+  # A leg with no two-sided quote is let through unless reject_unquoted_spread.
+  max_spread_pct_of_mid: 7.0
+  reject_unquoted_spread: false
+  # Option stops sit on the UNDERLYING: the 5m swing low/high over this many
+  # bars plus structural_stop_ticks, else atr_stop_multiplier x ATR.
+  swing_lookback_bars: 6
   # Options only: refuse when IV RANK (today's ATM IV within this symbol's own
   # past-year range) is above this — buying right before IV falls crushes the
   # premium even if the stock moves. Needs iv_rank_min_samples days of IV
@@ -118,7 +132,11 @@ consensus:
   # than cancelling out. Most setups used to stop right here.
   min_confirmations: 1           # analysts voting ±0.25 or stronger
   min_composite_score: 0.25      # weighted score threshold (-1..+1)
-  veto_on_high_impact_news: true # a -0.7 news score kills a long, and vice versa
+  # News veto override: news polarity stronger than ±news_veto_polarity that
+  # contradicts the trade (-0.65 under a BUY, +0.65 under a SELL) is an
+  # ABSOLUTE veto — no conflict policy or model synthesis overrides it.
+  veto_on_high_impact_news: true
+  news_veto_polarity: 0.60
   require_macro_alignment: false # set true to demand macro bias agreement too
   # technicals_unless_derivatives_oppose: the chart wins against news or
   # macro, but never trades against the options & futures read — a breakout
@@ -192,6 +210,16 @@ decisions:
 # AGENT WEIGHTS — the learning loop nudges these over time (see learning:).
 # Edit freely; values are normalised at runtime.
 # --------------------------------------------------------------------------
+# The Friday self-reflection (scripts/ollama_feedback.py): after Friday's
+# close the week's graded trades go to Ollama, which returns multipliers for
+# the four voting analysts below. They are bounded and written to
+# config/strategy_weights.json (git-ignored), which the CMIO applies on top
+# of these weights. Delete that file to go back to these numbers.
+feedback:
+  enabled: true
+  min_trades: 5          # fewer closed trades in the week = no adjustment
+  max_step: 0.15         # no multiplier moves more than this in one week
+
 weights:
   candlestick: 1.0
   derivatives: 1.0

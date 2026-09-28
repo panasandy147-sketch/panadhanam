@@ -478,6 +478,9 @@ class TradingEngine:
 
             review = await weekly.build(start, end, cfg=self.cfg)
             self._weekly_written_for = end.isoformat()
+            # Friday's self-reflection runs whether or not a review is saved;
+            # with too few trades it records that and changes nothing.
+            await self._friday_feedback(start, end)
             if not review.trades:
                 log.info("no trades in the week to %s — no review written", end)
                 return
@@ -489,6 +492,36 @@ class TradingEngine:
             # Do not retry every two minutes for the rest of the weekend.
             self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
 
+    async def _friday_feedback(self, start, end) -> None:
+        """scripts/ollama_feedback.py: Ollama tunes the analysts' vote weights."""
+        if not bool(self.cfg.get("feedback.enabled", True)):
+            return
+        try:
+            from scripts import ollama_feedback
+
+            done = await ollama_feedback.run(self.cfg, start, end)
+            await bus.publish("feedback.weekly", {
+                "week": done.week, "applied": done.applied, "note": done.note,
+                "changes": done.changes, "weights": done.weights})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("Friday Ollama feedback failed: %s", exc)
+
+    async def _catch_up_feedback(self) -> None:
+        """A desk stopped before Friday's close still reflects on that week."""
+        try:
+            from scripts import ollama_feedback
+
+            start, end = ollama_feedback.last_finished_week(self.cfg)
+            week = f"{start.isoformat()}_to_{end.isoformat()}"
+            if not ollama_feedback.record_path(week).exists():
+                await self._friday_feedback(start, end)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not catch up the Friday feedback: %s", exc)
+
     async def start(self) -> None:
         if self.running:
             return
@@ -496,6 +529,7 @@ class TradingEngine:
         db.init_db()
         self.risk.restore_open(db.open_signals())
         self.feedback.apply_learned_weights()
+        self._feedback_task = asyncio.create_task(self._catch_up_feedback())
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:

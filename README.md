@@ -196,11 +196,17 @@ blindly trusted.
 
 | Control | Default | Where |
 |---|---|---|
-| Risk per trade | 1% of capital (hard ceiling 2%) | `risk.risk_per_trade_pct` |
+| Account | $4,000 paper (applied once by `start.sh`; dashboard edits stick) | `risk.total_capital` |
+| Risk per trade | 1% of capital (hard ceiling 2%; one contract may use the ceiling) | `risk.risk_per_trade_pct` |
 | Position size | `floor(risk_budget / stop_points)`, lot-rounded **down** | `risk.py` |
-| Minimum R:R | 1:2, rejected below | `risk.min_risk_reward` |
-| Daily loss limit | 3% → desk halts, manual resume only | `risk.max_daily_loss_pct` |
-| Max open positions | 3 | `risk.max_open_positions` |
+| Minimum R:R | 1:1.5, rejected below | `risk.min_risk_reward` |
+| Daily circuit breaker | 10% ($400), realised + open → flat, halted, day disarmed | `risk.max_daily_loss_pct` |
+| Anti-stacking cooldown | a symbol that closes a trade is blacklisted for 60 min | `risk.reentry_cooldown_minutes` |
+| Option premium per trade | 20% ($800); **25% ($1,000) on SPY/QQQ/DIA** | `risk.max_capital_deployed_pct` / `index_max_capital_deployed_pct` |
+| Option spread | refused above 7% of mid | `risk.max_spread_pct_of_mid` |
+| Option stop | on the **underlying**: 5m swing low/high ± 2 ticks, else 1.5× ATR — never the premium | `risk.swing_lookback_bars`, `atr_stop_multiplier` |
+| News veto | polarity beyond ±0.60 against the trade = absolute veto | `consensus.news_veto_polarity` |
+| Max open positions | 5 | `risk.max_open_positions` |
 | Stop-loss sanity | rejected if too tight (noise) or too wide (ill-defined) | `risk.min/max_stop_distance_pct` |
 | Exposure cap | 50% of capital × leverage | `risk.max_exposure_pct` |
 | No late entries | no new positions after 15:00 | `system.no_new_entry_after` |
@@ -324,6 +330,17 @@ The system grades its own calls and re-weights the agents that make them.
    literally sees how its last calls on that symbol turned out.
 
 Watch it on the dashboard's **Agent Scorecard**, or `GET /api/learning/scorecard`.
+
+**The Friday Ollama review** (`scripts/ollama_feedback.py`). After Friday's
+close — or on the next start, if the desk was off — the week's graded trades
+(GOOD_WIN / GOOD_LOSS / BAD_WIN / BAD_LOSS, discipline score, R, and which
+analysts voted for or against each) go to the local Ollama model as JSON. Its
+answer is parsed defensively, bounded to ±0.15 a week within 0.25–1.5, and
+written to `config/strategy_weights.json` (git-ignored); the CMIO multiplies
+those into the vote weights above. Every run is recorded in
+`journal/reflections/<week>.json`. Run it by hand with
+`python run.py --feedback` (or `python -m scripts.ollama_feedback --dry-run`).
+Delete `config/strategy_weights.json` to go back to the shipped weights.
 
 Tune in `settings.yaml` under `learning:` — set `enabled: false` to freeze weights.
 

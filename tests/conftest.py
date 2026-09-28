@@ -18,6 +18,11 @@ import app.journal.store as journal_store  # noqa: E402
 
 journal_store.JOURNAL_DIR = Path(_tmp) / "journal"
 
+# What this machine's Friday Ollama review learned is not the shipped config.
+import app.agents.consensus as consensus_mod  # noqa: E402
+
+consensus_mod.STRATEGY_WEIGHTS_PATH = Path(_tmp) / "strategy_weights.json"
+
 
 @pytest.fixture(autouse=True)
 def pinned_simulator_clock(monkeypatch):

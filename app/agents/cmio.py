@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.agents import consensus as consensus_mod
 from app.agents.base import BaseAgent
 from app.core.llm import structured_complete
 from app.core.logging import get_logger
@@ -49,17 +50,31 @@ class CMIOAgent(BaseAgent):
             try:
                 enhanced = await self._llm_synthesise(ctx, reports, baseline)
                 if enhanced:
-                    return enhanced
+                    return self._enforce_news_veto(enhanced, reports)
             except Exception as exc:
                 log.warning("CMIO LLM synthesis failed (%s) — using weighted vote", exc)
         return baseline
+
+    def _enforce_news_veto(self, decision: dict[str, Any],
+                           reports: list[AgentReport]) -> dict[str, Any]:
+        """The news veto is absolute: a model's synthesis cannot undo it."""
+        bias = decision.get("bias")
+        direction = 1 if bias == Bias.BULLISH else -1 if bias == Bias.BEARISH else 0
+        veto = consensus_mod.news_veto(reports, direction, self.cfg)
+        if veto and decision.get("proceed"):
+            decision = {**decision, "proceed": False,
+                        "conflicts": list(decision.get("conflicts") or []) + [veto],
+                        "rationale": f"{decision.get('rationale', '')} {veto}.".strip()}
+        return decision
 
     # ------------------------------------------------------------------ #
     # Deterministic synthesis: a confidence-weighted vote with explicit vetoes
     # ------------------------------------------------------------------ #
     def _weighted_vote(self, ctx: MarketContext,
                        reports: list[AgentReport]) -> dict[str, Any]:
-        weights = self.cfg.get("weights", {}) or {}
+        # Configured (and EWMA-learned) weights, times the Friday Ollama
+        # review's multipliers from config/strategy_weights.json.
+        weights = consensus_mod.effective_weights(self.cfg)
         consensus = self.cfg.get("consensus", {}) or {}
 
         active = [r for r in reports if r.data_available]
@@ -106,17 +121,13 @@ class CMIOAgent(BaseAgent):
                 f"{len(bears)} bearish ({', '.join(r.agent_id for r in bears)})")
             composite = self._resolve_conflict(composite, bulls, bears, consensus, conflicts)
 
-        # --- news veto ---
-        if consensus.get("veto_on_high_impact_news", True):
-            news = next((r for r in active if r.agent_id == "news_sentiment"), None)
-            if news and news.extra.get("has_high_impact"):
-                threshold = float(self.cfg.get("news.high_impact_threshold", 0.7))
-                if composite > 0 and news.score <= -threshold:
-                    conflicts.append("High-impact bearish news vetoes a long")
-                    composite = 0.0
-                elif composite < 0 and news.score >= threshold:
-                    conflicts.append("High-impact bullish news vetoes a short")
-                    composite = 0.0
+        # --- news veto: absolute ---
+        # News polarity beyond ±consensus.news_veto_polarity (0.60) against
+        # the proposed direction kills the trade outright.
+        news_vetoed = consensus_mod.news_veto(active, composite, self.cfg)
+        if news_vetoed:
+            conflicts.append(news_vetoed)
+            composite = 0.0
 
         # --- fundamental veto ---
         fundamental = next((r for r in reports if r.agent_id == "fundamental"), None)
@@ -152,9 +163,11 @@ class CMIOAgent(BaseAgent):
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
                    and abs(composite) >= min_score
-                   and led and not against)
+                   and led and not against and not news_vetoed)
 
         reasons = []
+        if news_vetoed:
+            reasons.append(news_vetoed)
         if bias != Bias.NEUTRAL and against:
             reasons.append(against)
         if bias != Bias.NEUTRAL and not led:

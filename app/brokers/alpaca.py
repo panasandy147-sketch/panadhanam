@@ -234,6 +234,7 @@ class AlpacaBroker(BrokerAdapter):
                     strike=float(c["strike_price"]),
                     option_type="CE" if c["type"] == "call" else "PE",
                     ltp=float(trade.get("p") or mid or 0.0),
+                    bid=float(quote.get("bp") or 0.0), ask=float(quote.get("ap") or 0.0),
                     oi=float(c.get("open_interest") or 0),
                     oi_change=0.0,          # Alpaca does not expose an OI delta
                     volume=float(snap.get("dailyBar", {}).get("v") or 0),

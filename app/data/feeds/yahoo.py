@@ -252,6 +252,7 @@ class YahooFeed(BrokerAdapter):
                     strike=float(row.get("strike", 0)),
                     option_type=opt_type,
                     ltp=float(last or 0.0),
+                    bid=float(bid or 0.0), ask=float(ask or 0.0),
                     oi=float(row.get("openInterest") or 0),
                     oi_change=0.0,        # Yahoo exposes no OI delta
                     volume=float(row.get("volume") or 0),

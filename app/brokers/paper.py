@@ -274,9 +274,14 @@ class PaperBroker(BrokerAdapter):
                 oi = max(0.0, rng.gauss(1.0, 0.25)) * 900_000 * math.exp(-(i ** 2) / 22)
                 if strike % (step * 5) == 0:
                     oi *= 1.7
+                price = max(g["price"], 0.05)
+                # A liquid simulated market: 1.5% wide near the money, wider
+                # on the wings, so the spread rule has something real to test.
+                half = price * (0.0075 + 0.002 * abs(i))
                 legs.append(OptionLeg(
                     strike=strike, option_type=opt,
-                    ltp=max(g["price"], 0.05),
+                    ltp=price, bid=round(max(price - half, 0.01), 2),
+                    ask=round(price + half, 2),
                     oi=round(oi),
                     oi_change=round(oi * rng.uniform(-0.18, 0.22)),
                     volume=round(oi * rng.uniform(0.05, 0.4)),

@@ -63,8 +63,8 @@ def test_a_stopped_out_symbol_waits_out_the_cooldown(rm, monkeypatch):
 
     monkeypatch.setattr(db, "open_signals", lambda: [])
     monkeypatch.setattr(db, "last_exit", lambda s: (datetime.now() - timedelta(minutes=10)).isoformat())
-    assert any("waiting 30 min" in r for r in rm.symbol_checks("NFLX"))
-    monkeypatch.setattr(db, "last_exit", lambda s: (datetime.now() - timedelta(minutes=45)).isoformat())
+    assert any("cooldown blacklist" in r for r in rm.symbol_checks("NFLX"))
+    monkeypatch.setattr(db, "last_exit", lambda s: (datetime.now() - timedelta(minutes=61)).isoformat())
     assert rm.symbol_checks("NFLX") == []
 
 

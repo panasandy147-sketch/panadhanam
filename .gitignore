@@ -26,3 +26,7 @@ node_modules/
 # The trade journal IS the point — it must be committed, not ignored.
 # Only scratch exports are excluded.
 journal/*.tmp
+
+# Written by scripts/ollama_feedback.py each Friday; per machine, never committed.
+config/strategy_weights.json
+config/strategy_weights.tmp

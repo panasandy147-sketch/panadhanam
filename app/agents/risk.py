@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.agents import risk_manager as guard
 from app.core import clock
 from app.core.config import Config, get_config
 from app.core.logging import get_logger
@@ -53,11 +54,15 @@ class RiskManager:
         self.cfg = cfg or get_config()
         self.spec = self.cfg.agent("risk")
         self.name = self.spec.get("name", "Risk Management Officer")
-        self.state = RiskState(
-            capital=float(self.cfg.get("risk.total_capital", 100_000)),
-            daily_loss_limit=float(self.cfg.get("risk.total_capital", 100_000))
-            * float(self.cfg.get("risk.max_daily_loss_pct", 3.0)) / 100.0,
-        )
+        capital = float(self.cfg.get("risk.total_capital", 100_000))
+        self.state = RiskState(capital=capital,
+                               daily_loss_limit=guard.daily_loss_limit(self.cfg, capital))
+        # Anti-stacking: a symbol that just closed a trade is blacklisted for
+        # risk.reentry_cooldown_minutes, seeded from the database so a restart
+        # does not clear it.
+        self.cooldown = guard.CooldownBlacklist(
+            float(self.cfg.get("risk.reentry_cooldown_minutes", 60) or 0),
+            loader=self._last_exit)
         # Set each cycle by the engine from the news blackout rules; while it
         # holds, no new entry is allowed anywhere.
         self.blackout_reason: str = ""
@@ -98,18 +103,18 @@ class RiskManager:
         if bool(self.cfg.get("risk.one_position_per_symbol", True)):
             if any(r["symbol"] == symbol for r in db.open_signals()):
                 reasons.append(f"Already holding {symbol} — one position per symbol")
-        cooldown = float(self.cfg.get("risk.reentry_cooldown_minutes", 0) or 0)
-        if cooldown > 0:
-            last = db.last_exit(symbol)
-            if last:
-                try:
-                    waited = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 60
-                except ValueError:
-                    waited = cooldown
-                if 0 <= waited < cooldown:
-                    reasons.append(f"{symbol} closed {waited:.0f} min ago — waiting "
-                                   f"{cooldown:g} min before trading it again")
+        # The configured minutes are read each time, so a live config change
+        # (or a test) takes effect without rebuilding the blacklist.
+        self.cooldown.minutes = float(self.cfg.get("risk.reentry_cooldown_minutes", 60) or 0)
+        blocked = self.cooldown.reason(symbol)
+        if blocked:
+            reasons.append(blocked)
         return reasons
+
+    @staticmethod
+    def _last_exit(symbol: str) -> str | None:
+        from app.storage import db
+        return db.last_exit(symbol)
 
     def desk_checks(self) -> list[str]:
         """Reasons the desk is closed for new business, regardless of the setup."""
@@ -186,7 +191,8 @@ class RiskManager:
         if instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}:
             side = Side.BUY
 
-        stop_loss, target, sl_note = self._levels(ctx, bias, entry, instrument, source_report)
+        stop_loss, target, sl_note, ustop = self._levels(ctx, bias, entry, instrument,
+                                                         source_report)
 
         # Record the underlying's spot and the leg's delta at entry so the outcome
         # tracker can mark an option position to market later.
@@ -200,6 +206,8 @@ class RiskManager:
             id=signal_id, instrument=instrument, side=side,
             entry=round(entry, 2), stop_loss=round(stop_loss, 2), target=round(target, 2),
             entry_spot=entry_spot, entry_delta=entry_delta,
+            underlying_stop=round(ustop.level, 4) if ustop else None,
+            underlying_stop_note=ustop.note if ustop else "",
             bias=bias, composite_score=round(composite_score, 3),
             confirmations=confirmations, rationale=rationale,
             counter_argument=counter_argument, reports=reports, regime=ctx.regime,
@@ -215,6 +223,14 @@ class RiskManager:
                 f"{ctx.symbol} is an index — there is no cash instrument to buy. "
                 f"Trade it through an option or future; no option leg was "
                 f"available this cycle (the derivatives analyst had no chain).")
+
+        # ---- liquidity: the option's bid-ask spread ----
+        leg = ((source_report.extra.get("suggested_leg") or {}) if source_report else {})
+        if instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}:
+            wide = guard.spread_rejection(self.cfg, leg.get("bid"), leg.get("ask"),
+                                          instrument.tradingsymbol)
+            if wide:
+                reasons.append(wide)
 
         # ---- stop-loss sanity ----
         stop_points = abs(entry - stop_loss)
@@ -267,12 +283,28 @@ class RiskManager:
             unit_size = max(self.cfg.market.contract_multiplier, 1)
 
         quantity, lots = 0, 0
+        min_size_note = ""
         if stop_points > 0:
             raw_qty = risk_amount / stop_points
             if unit_size > 1:
                 lot_size = unit_size
                 lots = int(math.floor(raw_qty / lot_size))
                 quantity = lots * lot_size
+                # One contract is the smallest position there is. When it risks
+                # more than the per-trade budget but still no more than the
+                # hard ceiling (risk.max_risk_per_trade_pct), take exactly one:
+                # on a $4,000 account a 1% budget is $40, and a single SPY
+                # contract with a structural stop routinely risks $50-$80.
+                ceiling = self.state.capital * float(
+                    self.cfg.get("risk.max_risk_per_trade_pct", 2.0)) / 100.0
+                if lots < 1 and stop_points * lot_size <= ceiling:
+                    lots, quantity = 1, lot_size
+                    cur = self.cfg.market.currency_symbol
+                    min_size_note = (
+                        f"one {'lot' if self.cfg.market.lot_based else 'contract'} risks "
+                        f"{cur}{stop_points * lot_size:,.2f} — over the "
+                        f"{cur}{risk_amount:,.0f} budget, within the "
+                        f"{cur}{ceiling:,.0f} hard ceiling; taking the minimum size")
                 if lots < 1:
                     unit_word = "lot" if self.cfg.market.lot_based else "contract"
                     cur = self.cfg.market.currency_symbol
@@ -316,10 +348,16 @@ class RiskManager:
         if bool(self.cfg.get("risk.split_exposure_across_positions", True)) and slots > 1:
             caps.append(("per-position share of exposure", max_exposure / slots))
         if is_option:
-            caps.append(("option premium cap", self.state.capital * float(
-                self.cfg.get("risk.options_max_premium_pct", 25.0)) / 100.0))
+            # 20% of capital per trade, flexed to 25% on SPY/QQQ/DIA, whose
+            # near-the-money contracts cost $900-$1,000 on their own.
+            cap_pct = guard.deployment_cap_pct(self.cfg, ctx.symbol)
+            caps.append((f"{cap_pct:g}% capital deployment cap"
+                         + (" (index flex)" if ctx.symbol.upper() in guard.index_symbols(self.cfg)
+                            and cap_pct > float(self.cfg.get("risk.max_capital_deployed_pct", 20.0))
+                            else ""),
+                         guard.deployment_cap(self.cfg, self.state.capital, ctx.symbol)))
 
-        cap_note = ""
+        cap_note = min_size_note
         for label, budget in caps:
             if entry <= 0:
                 break
@@ -489,7 +527,7 @@ class RiskManager:
 
     def _levels(self, ctx: MarketContext, bias: Bias, entry: float,
                 instrument: Instrument, source: AgentReport | None
-                ) -> tuple[float, float, str]:
+                ) -> tuple[float, float, str, guard.UnderlyingStop]:
         """Stop and target.
 
         Preference order for the stop:
@@ -505,19 +543,37 @@ class RiskManager:
         atr = float(primary.get("atr", 0.0))
         is_option = instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}
 
-        # --- options: work in premium space ---
-        if is_option:
-            # A 35% premium stop with a 2:1 target is the standard intraday convention.
-            stop = entry * 0.65
-            target = entry * (1 + 0.35 * min_rr)
-            return stop, target, f"option premium stop at -35% ({stop:.2f})"
-
-        # --- cash/underlying ---
         structural = None
         for report in (ctx.__dict__.get("_reports") or []):
             if report.agent_id == "candlestick" and report.invalidation_level:
                 structural = report.invalidation_level
                 break
+
+        # --- options: the stop lives on the UNDERLYING ---------------------
+        # Never a percentage of the premium: an IV wobble or a wide quote says
+        # nothing about whether the idea was wrong. The stop is the stock's
+        # 5m structure (swing ± 2 ticks, or 1.5x ATR), and the premium stop
+        # recorded here is simply what the option marks at when the stock
+        # gets there — so R, sizing and the exit all describe the same event.
+        if is_option:
+            spot = ctx.quote.last_price if ctx.quote else 0.0
+            leg = (source.extra.get("suggested_leg") or {}) if source else {}
+            bullish = bias == Bias.BULLISH
+            meta = self.cfg.instrument_meta(ctx.symbol)
+            ustop = guard.underlying_stop(
+                self.cfg, spot=spot, bullish=bullish, atr=atr,
+                candles_5m=(ctx.candles or {}).get("5m"),
+                tick=float(meta.get("tick_size", 0.01) or 0.01),
+                named_level=structural)
+            is_call = instrument.instrument_type == InstrumentType.CALL
+            stop = guard.premium_at_stop(entry, leg.get("delta"), spot, ustop.level, is_call)
+            if stop >= entry:
+                stop = entry * 0.5
+            target = entry + (entry - stop) * min_rr
+            return stop, target, (f"underlying stop: {ustop.note} (option marks "
+                                  f"{stop:.2f} there), target at {min_rr}R"), ustop
+
+        # --- cash/underlying ---
         if structural is None and source and source.invalidation_level:
             structural = source.invalidation_level
 
@@ -555,7 +611,8 @@ class RiskManager:
         stop_points = abs(entry - stop)
         target = (entry + stop_points * min_rr if bias == Bias.BULLISH
                   else entry - stop_points * min_rr)
-        return stop, target, f"{note}, target at {min_rr}R"
+        return stop, target, f"{note}, target at {min_rr}R", guard.UnderlyingStop(
+            round(stop, 4), "structure" if structural else "atr", note)
 
     @staticmethod
     def _structural_is_sane(level: float, entry: float, bias: Bias, atr: float) -> bool:
@@ -646,7 +703,9 @@ class RiskManager:
             log.info("restored %d open position(s) from the database", restored)
         return restored
 
-    def register_close(self, signal: TradeSignal, pnl: float) -> None:
+    def register_close(self, signal: TradeSignal, pnl: float,
+                       closed_at: datetime | None = None) -> None:
+        self.cooldown.add(signal.instrument.symbol, closed_at)
         self.state.open_positions = max(0, self.state.open_positions - 1)
         self.state.realised_pnl += pnl
         self.state.exposure = max(0.0, self.state.exposure - signal.notional)
@@ -655,7 +714,7 @@ class RiskManager:
             self.state.wins_today += 1
         else:
             self.state.losses_today += 1
-        if self.state.daily_pnl <= -self.state.daily_loss_limit:
+        if guard.breaker_tripped(self.state.daily_pnl, self.state.daily_loss_limit):
             self.state.halted = True
             self.state.halt_reason = (
                 f"Daily loss limit breached ({self.state.daily_pnl:,.0f})")
@@ -684,8 +743,7 @@ class RiskManager:
 
         previous = self.state.capital
         self.state.capital = float(capital)
-        self.state.daily_loss_limit = (
-            float(capital) * float(self.cfg.get("risk.max_daily_loss_pct", 3.0)) / 100.0)
+        self.state.daily_loss_limit = guard.daily_loss_limit(self.cfg, float(capital))
         # Keep the live config in step so a restart-free reload agrees.
         self.cfg.settings.setdefault("risk", {})["total_capital"] = float(capital)
 
@@ -713,6 +771,12 @@ class RiskManager:
             "currency": self.cfg.market.currency_symbol,
             "currency_code": self.cfg.market.currency_code,
             "market": self.cfg.active_market,
+            "cooldown_minutes": self.cooldown.minutes,
+            "cooldown": self.cooldown.active(),
+            "deployment_cap": guard.deployment_cap(self.cfg, self.state.capital, "_"),
+            "index_deployment_cap": guard.deployment_cap(self.cfg, self.state.capital, "SPY"),
+            "index_symbols": sorted(guard.index_symbols(self.cfg)),
+            "max_spread_pct": float(self.cfg.get("risk.max_spread_pct_of_mid", 7.0)),
         }
 
     # ------------------------------------------------------------------ #
