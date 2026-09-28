@@ -166,7 +166,7 @@ def _breakdown(closed: list[dict[str, Any]], key) -> dict[str, dict[str, Any]]:
 
 def save_day(cfg: Any, day: date | None = None) -> dict[str, str]:
     """Write the day's record and its audit to journal/daily/ for the weekly
-    review: <date>-record.json (machine) and <date>-record.md (you)."""
+    review: <date>-<market>-record.json (machine) and .md (you)."""
     import json
 
     from app.core import audit
@@ -174,14 +174,17 @@ def save_day(cfg: Any, day: date | None = None) -> dict[str, str]:
 
     rec = build(cfg, period="day", day=day)
     day = date.fromisoformat(rec["date"])
+    market = str(rec.get("market") or "US")
     folder = store.JOURNAL_DIR / "daily"
     folder.mkdir(parents=True, exist_ok=True)
-    events = audit.entries(day)
-    js = folder / f"{day.isoformat()}-record.json"
+    events = audit.entries(day, market=market)
+    stem = f"{day.isoformat()}-{market.lower()}-record"
+    js = folder / f"{stem}.json"
     js.write_text(json.dumps({"record": rec, "audit": events}, indent=2, default=str),
                   encoding="utf-8")
-    md = folder / f"{day.isoformat()}-record.md"
-    md.write_text(day_markdown(rec) + "\n" + audit.day_markdown(day), encoding="utf-8")
+    md = folder / f"{stem}.md"
+    md.write_text(day_markdown(rec) + "\n" + audit.day_markdown(day, market),
+                  encoding="utf-8")
     return {"json": str(js), "markdown": str(md)}
 
 

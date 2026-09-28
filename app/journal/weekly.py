@@ -421,13 +421,10 @@ _AGENT_NAMES = {
 }
 
 
-def _audit_days(start: date, end: date) -> list[str]:
-    """The days of this week that have an audit file."""
-    folder = store.JOURNAL_DIR / "audit"
-    if not folder.is_dir():
-        return []
-    return sorted(p.stem for p in folder.glob("*.jsonl")
-                  if start.isoformat() <= p.stem <= end.isoformat())
+def _audit_days(start: date, end: date) -> list[tuple[str, str]]:
+    """(market, day) pairs of this week that have an audit file."""
+    from app.core import audit
+    return audit.days(start, end)
 
 
 def to_markdown(review: WeekReview) -> str:
@@ -450,8 +447,8 @@ def to_markdown(review: WeekReview) -> str:
         out += ["## Audit log", "",
                 "Every buy and sell with the case for it and how it ended, as "
                 "written at the time:", ""]
-        out += [f"- {d}: `journal/audit/{d}.md` · day record "
-                f"`journal/daily/{d}-record.md`" for d in days]
+        out += [f"- {m} {d}: `journal/audit/{m.lower()}/{d}.md` · day record "
+                f"`journal/daily/{d}-{m.lower()}-record.md`" for m, d in days]
         out.append("")
 
     if not review.trades:

@@ -62,6 +62,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "under the position and capital limits. Everything is in New "
                   "York time."),
         "rules": [
+            _rule("Market (the US / India / Auto toggle in the header)",
+                  f"{getattr(cfg, 'market_name', 'United States')} — "
+                  f"{g('session.market_open', '09:30')}–{g('session.market_close', '16:00')} "
+                  f"{g('session.timezone', 'America/New_York')}, account in "
+                  f"{g('account.currency', '$')}",
+                  "the header toggle (PANAOPTIONS_MARKET in .env)"),
             _rule("Desk profile",
                   {"zerodte": "zerodte — same-day options, 5-minute triggers",
                    "scalp": "scalp — 1-minute, SPY/QQQ/IWM 0DTE"}.get(

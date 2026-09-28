@@ -4,10 +4,16 @@ Intraday **US options** paper trading on a small account. A separate app in the
 same repository as `panadhanam`, sharing no code with it: different
 instruments, different risk model, different session rules.
 
-**US only, by design.** The session clock, the 15-minute opening range, the
-pre-market window and the option chains are all built around 09:30–16:00 ET.
-It is not a market toggle — for Indian equities and F&O use `panadhanam`,
-which follows both markets.
+**US and India.** The header toggle picks the market — **US**, **India**
+or **Auto** (follow whichever session is open; they never overlap). India
+trades NSE options — NIFTY, BANKNIFTY, FINNIFTY and liquid stocks — on
+09:15–15:30 IST, in exchange lots (NIFTY 75, BANKNIFTY 30 …), with charts
+from Yahoo and option chains from NSE's own site, on a ₹3,50,000 paper
+account (`PANAOPTIONS_CAPITAL_IN` overrides). Everything India-specific is in
+`config/markets/in.yaml`. Each market keeps its own books: India's ledger,
+journal, reviews, audit log and learned weights live in `data/in/` and
+`journal/in/`. The switch is refused while a position is open. NSE often
+refuses requests from outside India or through a VPN; the dashboard says so.
 
 **Nothing here can place a real order.** There is no broker adapter in this
 package, by design.

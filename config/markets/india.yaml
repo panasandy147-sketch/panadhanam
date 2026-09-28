@@ -16,6 +16,15 @@ market:
   accent: "#ff9933"
   accent_dark: "#e8873a"
 
+# This market's own account. A single capital number for both markets sized
+# India trades on "4,000" — rupees — the moment the desk followed the session
+# from the US. ₹3,50,000 is about $4,000, so the two desks are the same size.
+# TOTAL_CAPITAL_IN in .env (or Capital → edit while on India) overrides it.
+risk:
+  total_capital: 350000
+  # The high-notional index options that get the 25% premium flex.
+  index_symbols: ["NIFTY 50", "NIFTY BANK", "FINNIFTY", "NIFTY", "BANKNIFTY"]
+
 currency:
   symbol: "₹"
   code: "INR"

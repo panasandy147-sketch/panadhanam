@@ -291,8 +291,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "The other caps can only make a position smaller, never "
                   "larger."),
         "rules": [
-            _rule("Account size", money(capital),
-                  "risk.total_capital (TOTAL_CAPITAL in .env, or Capital → edit)"),
+            _rule("Account size — each market has its own (US in dollars, India "
+                  "in rupees)", money(capital),
+                  f"TOTAL_CAPITAL_{getattr(cfg, 'active_market', 'US')} in .env, "
+                  "or Capital → edit; India's default is in config/markets/india.yaml"),
             _rule("Quantity = capital × risk % ÷ (entry − stop), then trimmed "
                   "by the caps below", "by the stop, not fixed",
                   "sizing formula (uses risk.risk_per_trade_pct)"),

@@ -132,8 +132,20 @@ class Config:
     def _apply_env_overrides(self) -> None:
         """Env wins over YAML — so secrets and per-machine tuning stay out of git."""
         risk = self.settings.setdefault("risk", {})
+        # Capital is per market: TOTAL_CAPITAL_<CODE> wins; then a capital the
+        # market profile sets itself (India, in rupees); the generic
+        # TOTAL_CAPITAL only fills in for a market that sets none.
+        code = str(getattr(self, "active_market", "") or "").upper()
+        own = _env_float(f"TOTAL_CAPITAL_{code}", None) if code else None
+        profile = self.profiles.get(code) if getattr(self, "profiles", None) else None
+        profile_sets = bool(profile and (profile.data.get("risk") or {}).get("total_capital"))
+        if own is not None:
+            risk["total_capital"] = own
+        elif not profile_sets:
+            generic = _env_float("TOTAL_CAPITAL", None)
+            if generic is not None:
+                risk["total_capital"] = generic
         for env_key, cfg_key in (
-            ("TOTAL_CAPITAL", "total_capital"),
             ("RISK_PER_TRADE_PCT", "risk_per_trade_pct"),
             ("MAX_DAILY_LOSS_PCT", "max_daily_loss_pct"),
             ("MIN_RISK_REWARD", "min_risk_reward"),

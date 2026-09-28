@@ -166,16 +166,19 @@ async def paper_record(period: str = "day", days: int = 30,
 
 
 @router.get("/audit")
-async def audit_log(day: str | None = None) -> dict[str, Any]:
-    """Every BUY and SELL of one market day, with the reasons (today by default)."""
+async def audit_log(day: str | None = None, market: str | None = None) -> dict[str, Any]:
+    """Every BUY and SELL of one market day, with the reasons — today on the
+    active market by default; market=IN or US for the other, market=ALL for both."""
     from datetime import date as _date
 
     from app.core import audit, clock
 
     cfg = get_config()
+    code = (market or cfg.active_market).upper()
     d = (_date.fromisoformat(day) if day
          else clock.market_now(str(cfg.get("system.timezone", "Asia/Kolkata"))).date())
-    return {"day": d.isoformat(), "events": audit.entries(d)}
+    return {"day": d.isoformat(), "market": code,
+            "events": audit.entries(d, market=None if code == "ALL" else code)}
 
 
 @router.get("/focus")
@@ -340,8 +343,11 @@ async def set_capital(request: Request, body: CapitalRequest) -> dict[str, Any]:
 
         from app.core.envfile import set_values
         root = Path(__file__).resolve().parents[2]
-        set_values(root / ".env", {"TOTAL_CAPITAL": f"{float(body.capital):g}"},
+        # Per market: rupees for India, dollars for the US.
+        key = f"TOTAL_CAPITAL_{get_config().active_market}"
+        set_values(root / ".env", {key: f"{float(body.capital):g}"},
                    template=root / ".env.example")
+        result["saved_as"] = key
         result["saved"] = True
     except OSError as exc:
         result["saved"] = False

@@ -56,7 +56,7 @@ def detect(trade: PaperTrade, cfg) -> list[Mistake]:
         # trade never resolved on its own terms.
         found.append(Mistake.HELD_TO_THE_BELL)
 
-    deployed = trade.entry_price * trade.quantity * cfg.multiplier
+    deployed = trade.entry_price * trade.quantity * (trade.multiplier or cfg.multiplier)
     limit = cfg.capital * float(cfg.get("risk.max_capital_deployed_pct", 20)) / 100
     if deployed > limit * 1.01:
         found.append(Mistake.OVERSIZED)
@@ -116,7 +116,7 @@ def verdict(pnl: float, mistakes: list[Mistake]) -> Verdict:
 
 def build_entry(trade: PaperTrade, cfg) -> JournalEntry:
     mistakes = detect(trade, cfg)
-    cost = trade.entry_price * trade.quantity * cfg.multiplier
+    cost = trade.entry_price * trade.quantity * (trade.multiplier or cfg.multiplier)
     exits = [f for f in trade.fills if f.quantity < 0]
     hold = ((trade.closed_at - trade.opened_at).total_seconds() / 60
             if trade.closed_at else 0.0)

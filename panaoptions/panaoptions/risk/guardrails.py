@@ -135,7 +135,7 @@ class RiskManager:
         if entry <= 0:
             return self._reject(f"{contract.label} has no two-sided market.")
 
-        multiplier = self.cfg.multiplier
+        multiplier = contract.multiplier or self.cfg.multiplier
         cost_per_contract = entry * multiplier
 
         deployed_pct = cap_pct(self.cfg, setup.symbol)

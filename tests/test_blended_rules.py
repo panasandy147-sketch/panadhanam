@@ -23,7 +23,12 @@ ET = ZoneInfo("America/New_York")
 def test_the_shipped_numbers(cfg):
     assert cfg.get("risk.risk_per_trade_pct") == 1.0
     assert cfg.get("risk.max_daily_loss_pct") == 10.0       # $400 on $4,000
-    assert cfg.get("risk.total_capital") == 4000
+    cfg.switch_market("US")
+    try:
+        assert cfg.get("risk.total_capital") == 4000        # the US account, dollars
+    finally:
+        cfg.switch_market("IN")
+    assert cfg.get("risk.total_capital") == 350000          # India's own, rupees
     assert cfg.get("risk.reentry_cooldown_minutes") == 60
     assert cfg.get("risk.max_portfolio_heat_pct") == 4.0
     assert cfg.get("risk.reject_if_iv_rank_above") == 80.0

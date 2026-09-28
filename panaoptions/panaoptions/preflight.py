@@ -394,9 +394,20 @@ def check(cfg) -> list[Finding]:
     return findings
 
 
+def _in_currency(findings: list[Finding], cfg) -> list[Finding]:
+    """The checks are worded in dollars; on another market, say its currency."""
+    cur = str(getattr(cfg, "currency", "$") or "$")
+    if cur == "$":
+        return findings
+    for f in findings:
+        f.problem = f.problem.replace("$", cur)
+        f.fix = f.fix.replace("$", cur)
+    return findings
+
+
 def report(cfg, log_it: bool = True) -> list[Finding]:
     """Run the checks and say what was found. Returns the findings."""
-    findings = check(cfg)
+    findings = _in_currency(check(cfg), cfg)
     blockers = [f for f in findings if f.level == "blocker"]
 
     if log_it:

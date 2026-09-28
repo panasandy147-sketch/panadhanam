@@ -20,7 +20,7 @@ from panaoptions.logging import get_logger
 
 log = get_logger("provider")
 
-PROVIDERS = ("auto", "yahoo", "cboe", "tradier")
+PROVIDERS = ("auto", "yahoo", "cboe", "tradier", "nse")
 
 # What each one is, in one line, for --check and the dashboard.
 NOTES = {
@@ -31,6 +31,8 @@ NOTES = {
     "cboe": ("charts from Yahoo, option chains from CBOE's public delayed "
              "feed — no account, greeks included, about 15 minutes late"),
     "tradier": "greeks come from the exchange",
+    "nse": ("India: charts from Yahoo (^NSEI, .NS), option chains from NSE's "
+            "own site — delta estimated from implied volatility"),
 }
 
 
@@ -68,6 +70,10 @@ def make_feed(cfg) -> Any:
     different data source than intended is the worst of both.
     """
     name = str(cfg.get("data.provider", "auto")).strip().lower()
+
+    if name == "nse" or getattr(cfg, "market", "US") == "IN":
+        from panaoptions.data.nse import make_india_feed
+        return make_india_feed(cfg)
 
     if name == "auto":
         from panaoptions.data.auto import AutoChains, YahooChains

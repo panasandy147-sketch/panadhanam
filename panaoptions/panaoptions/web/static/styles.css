@@ -322,3 +322,11 @@ button.ghost:hover { color: var(--text); }
 /* The page styles every <section> as a panel; inside the pop-up they are
    just headed blocks. */
 #rules-dialog section.rules-sec { border: 0; background: none; padding: 0; margin: 0; }
+
+/* US / India / Auto */
+.market-toggle { display: inline-flex; border: 1px solid var(--line, #444); border-radius: 6px; overflow: hidden; }
+.market-toggle button { background: transparent; color: inherit; border: 0; padding: 4px 10px;
+  font: inherit; font-size: 12px; cursor: pointer; }
+.market-toggle button + button { border-left: 1px solid var(--line, #444); }
+.market-toggle button.on { background: var(--accent); color: var(--bg, #000); font-weight: 600; }
+.market-toggle button:disabled { opacity: .5; cursor: progress; }

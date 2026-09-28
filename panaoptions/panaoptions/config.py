@@ -17,6 +17,42 @@ ENV_PATH = ROOT / ".env"
 # What the Friday reflection learned: strategy weights, merged over the
 # settings and the profile. Git-ignored, so `git pull` never conflicts with it.
 LEARNED_PATH = ROOT / "config" / "learned.yaml"
+MARKET_DIR = ROOT / "config" / "markets"
+MARKETS = ("US", "IN")
+
+
+def market_choice_path() -> Path:
+    """Where the dashboard's US / India / Auto toggle is remembered."""
+    return DATA_DIR / "market.json"
+
+
+def saved_market_mode() -> str:
+    """"US", "IN" or "AUTO": the env var wins, then the saved toggle."""
+    import json
+
+    env = (os.getenv("PANAOPTIONS_MARKET") or "").strip().upper()
+    if env in (*MARKETS, "AUTO"):
+        return env
+    try:
+        mode = str(json.loads(market_choice_path().read_text(encoding="utf-8"))
+                   .get("mode", "US")).upper()
+    except (OSError, ValueError, AttributeError):
+        mode = "US"
+    return mode if mode in (*MARKETS, "AUTO") else "US"
+
+
+def save_market_mode(mode: str) -> None:
+    import json
+
+    path = market_choice_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mode": mode.upper()}), encoding="utf-8")
+
+
+def learned_path(market: str = "US") -> Path:
+    """Each market learns its own strategy weights."""
+    return LEARNED_PATH if market == "US" else \
+        LEARNED_PATH.with_name(f"learned-{market.lower()}.yaml")
 
 # Load .env before anything reads an environment variable. A value exported in
 # a shell lasts only for that shell; the file is what survives a restart.
@@ -69,10 +105,14 @@ def available_profiles() -> list[str]:
 
 class Config:
     def __init__(self, path: Path | None = None,
-                 profile: str | None = None) -> None:
+                 profile: str | None = None, market: str | None = None) -> None:
         self.path = path or CONFIG_PATH
         envfile.load(ENV_PATH)
         self.profile = profile or os.getenv("PANAOPTIONS_PROFILE") or ""
+        # Which market's session, symbols, contracts and account are in force.
+        # "AUTO" in the saved toggle starts on the US and follows the clock.
+        mode = (market or saved_market_mode()).upper()
+        self.market = mode if mode in MARKETS else "US"
         self.data: dict[str, Any] = {}
         self.reload()
 
@@ -82,12 +122,28 @@ class Config:
             self.data = yaml.safe_load(fh) or {}
         if self.profile:
             self._apply_profile(self.profile)
+        # After the profile: a market's session and windows are in its own
+        # clock, and must not be left at the profile's New York times.
+        if self.market != "US":
+            self._apply_market(self.market)
         self._apply_learned()
         self._apply_env()
 
+    def _apply_market(self, code: str) -> None:
+        path = MARKET_DIR / f"{code.lower()}.yaml"
+        if not path.is_file():
+            raise FileNotFoundError(f"no market overlay for {code!r} at {path}")
+        with open(path, encoding="utf-8") as fh:
+            overlay = yaml.safe_load(fh) or {}
+        # A market's universe and lot table replace the US ones outright.
+        for key in ("universe",):
+            if key in overlay:
+                self.data[key] = overlay.pop(key)
+        self.data = _merge(self.data, overlay)
+
     def _apply_learned(self) -> None:
         """Merge config/learned.yaml — only the keys reflection may write."""
-        path = LEARNED_PATH
+        path = learned_path(getattr(self, "market", "US"))
         if not path.is_file():
             return
         try:
@@ -123,7 +179,11 @@ class Config:
     def _apply_env(self) -> None:
         """Per-machine overrides. Secrets and account size stay out of git."""
         account = self.data.setdefault("account", {})
-        capital = _env_float("PANAOPTIONS_CAPITAL")
+        # PANAOPTIONS_CAPITAL is the US account (in dollars); India has its
+        # own, PANAOPTIONS_CAPITAL_IN, in rupees.
+        market = getattr(self, "market", "US")
+        capital = _env_float("PANAOPTIONS_CAPITAL" if market == "US"
+                             else f"PANAOPTIONS_CAPITAL_{market}")
         if capital is not None:
             account["starting_capital"] = capital
 
@@ -132,7 +192,7 @@ class Config:
         # kind of setting that belongs beside the machine rather than in a
         # file everyone shares.
         provider = (os.getenv("PANAOPTIONS_PROVIDER") or "").strip().lower()
-        if provider:
+        if provider and market == "US":
             self.data.setdefault("data", {})["provider"] = provider
 
         notify = self.data.setdefault("notify", {})
@@ -169,7 +229,23 @@ class Config:
 
     @property
     def multiplier(self) -> int:
+        """The default contract size. India trades exchange lots, which differ
+        by symbol — see lot_size()."""
         return int(self.get("contracts.contract_multiplier", 100))
+
+    def lot_size(self, symbol: str) -> int:
+        """Units one contract controls: an NSE lot in India, 100 in the US."""
+        lots = self.get("data.lot_sizes") or {}
+        return int(lots.get(symbol.upper(), 0) or self.multiplier)
+
+    @property
+    def currency(self) -> str:
+        return str(self.get("account.currency", "$"))
+
+    @property
+    def market_name(self) -> str:
+        return str(self.get("market.name", "United States" if self.market == "US"
+                            else self.market))
 
     @property
     def profile_label(self) -> str:
@@ -215,5 +291,5 @@ def get_config(profile: str | None = None) -> Config:
     if _config is None:
         _config = Config(profile=profile)
     elif profile is not None and profile != _config.profile:
-        _config = Config(profile=profile)
+        _config = Config(profile=profile, market=_config.market)
     return _config

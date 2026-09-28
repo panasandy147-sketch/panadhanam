@@ -576,12 +576,15 @@ def _check_config() -> int:
           f"{cfg.get('session.force_exit_at')}")
     print(f"  Screen            gap >= |{cfg.get('premarket.min_gap_pct')}|%, "
           f"RVOL >= {cfg.get('premarket.min_rvol')}")
-    print(f"  Capital           ${cfg.capital:,.2f}")
-    print(f"  Deployed per trade ${budget:,.2f} "
+    cur = cfg.currency
+    print(f"  Market            {cfg.market_name}")
+    print(f"  Capital           {cur}{cfg.capital:,.2f}")
+    print(f"  Deployed per trade {cur}{budget:,.2f} "
           f"({cfg.get('risk.max_capital_deployed_pct')}%)")
-    print(f"  At risk per trade  ${budget * float(cfg.get('risk.stop_loss_pct', 20)) / 100:,.2f} "
+    print(f"  At risk per trade  {cur}{budget * float(cfg.get('risk.stop_loss_pct', 20)) / 100:,.2f} "
           f"(that budget behind a {cfg.get('risk.stop_loss_pct')}% stop)")
-    print(f"  Contract price cap ${float(cfg.get('contracts.max_contract_price', 0)) * multiplier:,.0f}")
+    print(f"  Contract price cap {cur}{float(cfg.get('contracts.max_contract_price', 0)):,.2f} a share"
+          + (" (x the NSE lot)" if cfg.market == "IN" else f" (x{multiplier})"))
     print(f"  Delta band         {cfg.get('contracts.min_delta')}-{cfg.get('contracts.max_delta')}")
     print(f"  Universe           {', '.join(cfg.symbols)}\n")
 
@@ -796,6 +799,9 @@ def main() -> None:
     # fighting over a port is a confusing way to find that out.
     parser.add_argument("--port", type=int, default=8100)
     args = parser.parse_args()
+    # Every command reads and writes the chosen market's own books.
+    from panaoptions import markets
+    markets.activate(get_config().market)
 
     if args.profiles:
         raise SystemExit(_list_profiles())

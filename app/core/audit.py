@@ -1,7 +1,9 @@
 """The audit log: every paper BUY and SELL, with everything behind it.
 
-One append-only JSON-lines file per market day, journal/audit/YYYY-MM-DD.jsonl,
-plus a readable journal/audit/YYYY-MM-DD.md rewritten after each event. It is
+One append-only JSON-lines file per market and market day,
+journal/audit/<us|in>/YYYY-MM-DD.jsonl, plus a readable .md beside it
+rewritten after each event. India and the US never share a file: their
+sessions, currency and instruments differ, and so does the review. It is
 written at the moment of the fill and the moment of the exit, so it records
 what the desk knew THEN — not a reconstruction after the result is known.
 
@@ -30,9 +32,23 @@ from app.core.logging import get_logger
 log = get_logger("audit")
 
 
-def audit_dir() -> Path:
+def audit_root() -> Path:
     from app.journal import store
     return store.JOURNAL_DIR / "audit"
+
+
+def audit_dir(market: str = "US") -> Path:
+    return audit_root() / str(market or "US").lower()
+
+
+def _folders(market: str | None) -> list[Path]:
+    """One market's folder, or every market's (and the pre-split root)."""
+    root = audit_root()
+    if market:
+        return [audit_dir(market)]
+    if not root.is_dir():
+        return []
+    return [root] + sorted(p for p in root.iterdir() if p.is_dir())
 
 
 def _market_day(cfg: Any) -> date:
@@ -50,12 +66,14 @@ def _write(cfg: Any, record: dict[str, Any]) -> dict[str, Any]:
               "market_time": clock.market_now(str(cfg.get("system.timezone", "Asia/Kolkata")))
               .strftime("%Y-%m-%d %H:%M:%S %Z"),
               "market": getattr(cfg, "active_market", ""), **record}
+    market = str(record.get("market") or "US")
     try:
-        folder = audit_dir()
+        folder = audit_dir(market)
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / f"{day.isoformat()}.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, default=str) + "\n")
-        (folder / f"{day.isoformat()}.md").write_text(day_markdown(day), encoding="utf-8")
+        (folder / f"{day.isoformat()}.md").write_text(day_markdown(day, market),
+                                                      encoding="utf-8")
     except OSError as exc:
         log.warning("could not write the audit log: %s", exc)
     return record
@@ -135,26 +153,39 @@ def record_sell(cfg: Any, row: dict[str, Any], *, exit_price: float, pnl: float,
 
 # --------------------------------------------------------------------------- #
 def entries(day: date | None = None, since: date | None = None,
-            until: date | None = None) -> list[dict[str, Any]]:
-    """Audit events for one day, or for a date range, in order."""
-    folder = audit_dir()
-    if not folder.is_dir():
-        return []
-    days = [day] if day else sorted(
-        date.fromisoformat(p.stem) for p in folder.glob("*.jsonl")
-        if (since is None or p.stem >= since.isoformat())
-        and (until is None or p.stem <= until.isoformat()))
+            until: date | None = None, market: str | None = None) -> list[dict[str, Any]]:
+    """Audit events for one day or a date range, in time order — for one
+    market, or for every market when `market` is None."""
     out: list[dict[str, Any]] = []
-    for d in days:
-        path = folder / f"{d.isoformat()}.jsonl"
-        if not path.exists():
+    for folder in _folders(market):
+        if not folder.is_dir():
             continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                out.append(json.loads(line))
-            except ValueError:
+        for path in sorted(folder.glob("*.jsonl")):
+            stem = path.stem
+            if day and stem != day.isoformat():
                 continue
-    return out
+            if since and stem < since.isoformat():
+                continue
+            if until and stem > until.isoformat():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    return sorted(out, key=lambda e: str(e.get("ts") or ""))
+
+
+def days(since: date, until: date, market: str | None = None) -> list[tuple[str, str]]:
+    """(market, day) pairs that have an audit file in the range."""
+    out = set()
+    for folder in _folders(market):
+        if folder.is_dir():
+            for p in folder.glob("*.jsonl"):
+                if since.isoformat() <= p.stem <= until.isoformat():
+                    code = folder.name.upper() if folder != audit_root() else "US"
+                    out.add((code, p.stem))
+    return sorted(out, key=lambda x: (x[1], x[0]))
 
 
 def by_signal(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -166,10 +197,10 @@ def by_signal(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def day_markdown(day: date) -> str:
+def day_markdown(day: date, market: str = "US") -> str:
     """The day's audit, readable: one block per trade, entry then exit."""
-    trades = by_signal(entries(day))
-    lines = [f"# Audit — {day.isoformat()}", "",
+    trades = by_signal(entries(day, market=market))
+    lines = [f"# Audit — {market.upper()} — {day.isoformat()}", "",
              f"{len(trades)} trade(s). Every entry is written at the fill, every "
              f"exit at the close — what the desk knew then.", ""]
     for sid, t in trades.items():

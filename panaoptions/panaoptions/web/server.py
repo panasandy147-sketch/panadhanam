@@ -260,6 +260,38 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
                 "note": "Scanning starts on the next cycle. Open positions "
                         "keep their own exit rules."}
 
+    @app.get("/api/market")
+    async def market() -> dict[str, Any]:
+        """Which market the desk is on, and the toggle's setting."""
+        from panaoptions import markets
+
+        return {"active": cfg.market, "mode": desk.market_mode,
+                "name": cfg.market_name, "currency": cfg.currency,
+                "timezone": cfg.timezone, "open_now": markets.which_now(),
+                "markets": [{"code": m, "name": markets.NAMES[m],
+                             "in_hours": markets.in_hours(m)} for m in markets.MARKETS]}
+
+    @app.post("/api/market")
+    async def set_market(body: dict[str, Any]) -> dict[str, Any]:
+        """The US / India / Auto toggle. Remembered across restarts."""
+        from panaoptions import markets
+        from panaoptions.config import save_market_mode
+
+        mode = str(body.get("mode", "")).upper()
+        if mode not in (*markets.MARKETS, "AUTO"):
+            raise HTTPException(status_code=400,
+                                detail="mode must be US, IN or AUTO")
+        target = mode if mode != "AUTO" else (markets.which_now() or cfg.market)
+        result = {"switched": False, "market": cfg.market}
+        if target != cfg.market:
+            result = await desk.switch_market(target)
+            if not result.get("switched"):
+                raise HTTPException(status_code=409, detail=result.get("reason", ""))
+        desk.market_mode = mode
+        save_market_mode(mode)
+        return {**result, "mode": mode, "active": cfg.market,
+                "currency": cfg.currency, "name": cfg.market_name}
+
     @app.post("/api/watchlist/reset")
     async def reset_watchlist() -> dict[str, Any]:
         symbols = desk.reset_universe()
@@ -378,6 +410,16 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
         d = _date.fromisoformat(day) if day else clock.now(cfg.timezone).date()
         return {"day": d.isoformat(), "events": audit.entries(d)}
+
+    @app.get("/api/audit/days")
+    async def audit_days() -> dict[str, Any]:
+        """The days with an audit, for the active market."""
+        from panaoptions import audit
+
+        folder = audit.audit_dir()
+        days = sorted((p.stem for p in folder.glob("*.jsonl")), reverse=True) \
+            if folder.is_dir() else []
+        return {"market": cfg.market, "days": days}
 
     @app.get("/api/strategies")
     async def strategies() -> dict[str, Any]:

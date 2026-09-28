@@ -879,6 +879,7 @@ async function refresh() {
   try {
     const s = await getJSON("/api/status");
     CURRENCY = s.config?.currency || "$";
+    renderMarket(s.market);
 
     $("b-phase").textContent = s.phase || "—";
     $("b-clock").textContent = s.market_time || "—";
@@ -1005,3 +1006,46 @@ setInterval(refresh, 5000);
 setInterval(refreshActivity, 5000);
 // The candidate and its chart are what you actually watch, so they lead.
 setInterval(refreshCandidate, 5000);
+
+
+/* ====================================================================== */
+/* US / India / Auto                                                      */
+/* ====================================================================== */
+function renderMarket(m) {
+  if (!m) return;
+  document.querySelectorAll("#market-toggle button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.mode === m.mode);
+    b.title = b.dataset.mode === "AUTO"
+      ? `Follow whichever session is open (now on ${m.active})`
+      : b.title;
+  });
+  const h1 = document.querySelector("header h1");
+  if (h1) h1.textContent = `panaoptions · ${m.active === "IN" ? "India" : "US"}`;
+}
+
+async function setMarket(mode) {
+  const buttons = [...document.querySelectorAll("#market-toggle button")];
+  buttons.forEach((b) => (b.disabled = true));
+  try {
+    const res = await fetch("/api/market", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }) });
+    const body = await res.json();
+    if (!res.ok) {
+      alert(`Could not switch: ${body.detail || res.status}`);
+    } else {
+      CURRENCY = body.currency || CURRENCY;
+      renderMarket({ mode: body.mode, active: body.active });
+      if (typeof refresh === "function") refresh();
+    }
+  } catch (e) {
+    alert(`Could not switch: ${e}`);
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+document.getElementById("market-toggle")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-mode]");
+  if (btn) setMarket(btn.dataset.mode);
+});

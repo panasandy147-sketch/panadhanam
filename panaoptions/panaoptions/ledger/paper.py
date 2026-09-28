@@ -51,6 +51,8 @@ class PaperLedger:
             pattern=signal.pattern,
             claimed_accuracy=signal.claimed_accuracy,
             invalidation_note=signal.invalidation_note,
+            multiplier=signal.contract.multiplier or self.cfg.multiplier,
+            market=getattr(self.cfg, "market", "US"),
             remaining=signal.quantity, max_price_seen=fill_price,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
@@ -220,14 +222,14 @@ class PaperLedger:
         committed, and a position marking up should not unlock room to take
         another one on the strength of a gain that has not been realised.
         """
-        return round(sum(t.entry_price * t.remaining * self.cfg.multiplier
+        return round(sum(t.entry_price * t.remaining * (t.multiplier or self.cfg.multiplier)
                          for t in self.open_trades.values()), 2)
 
     def _reduce(self, trade: PaperTrade, quantity: int, price: float,
                 ts: datetime, reason: str) -> Fill:
         fill_price = round(price - self.slippage, 4)
         pnl = round((fill_price - trade.entry_price) * quantity
-                    * self.cfg.multiplier, 2)
+                    * (trade.multiplier or self.cfg.multiplier), 2)
         trade.remaining -= quantity
         trade.realised_pnl = round(trade.realised_pnl + pnl, 2)
         # Scaling out releases capital, so the ceiling must see it go back.

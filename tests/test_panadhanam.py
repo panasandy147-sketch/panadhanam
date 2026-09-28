@@ -202,8 +202,15 @@ def test_a_model_synthesis_cannot_undo_the_news_veto(cfg):
 @pytest.mark.parametrize("symbol, cap", [
     ("SPY", 1000.0), ("QQQ", 1000.0), ("DIA", 1000.0),
     ("AAPL", 800.0), ("XOM", 800.0), ("AVGO", 800.0)])
-def test_deployment_cap_flexes_to_25pct_for_index_etfs(cfg, symbol, cap):
-    assert guard.deployment_cap(cfg, 4000, symbol) == cap
+def test_deployment_cap_flexes_to_25pct_for_index_etfs(us, symbol, cap):
+    assert guard.deployment_cap(us, 4000, symbol) == cap
+
+
+def test_india_flexes_on_its_own_indices(cfg):
+    cfg.switch_market("IN")
+    assert guard.deployment_cap(cfg, 350000, "NIFTY 50") == 87500.0     # 25%
+    assert guard.deployment_cap(cfg, 350000, "RELIANCE") == 70000.0     # 20%
+    assert guard.deployment_cap(cfg, 350000, "SPY") == 70000.0
 
 
 def test_dji_is_read_as_dia(cfg):

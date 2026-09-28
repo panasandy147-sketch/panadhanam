@@ -20,8 +20,16 @@ account:
   starting_capital: 4000.0
   currency: "$"
 
+market:
+  code: "US"
+  name: "United States"
+  exchange: "NYSE / NASDAQ / CBOE"
+
 session:
   timezone: "America/New_York"
+  # The regular session; the opening range and the volume profile use it.
+  market_open: "09:30"
+  market_close: "16:00"
   # Entries only inside this window. 09:30-09:35 is skipped deliberately:
   # opening spreads are wide and the first prints are noise.
   entry_open: "09:35"

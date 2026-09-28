@@ -197,7 +197,8 @@ blindly trusted.
 
 | Control | Default | Where |
 |---|---|---|
-| Account | $4,000 paper (applied once by `start.sh`; dashboard edits stick) | `risk.total_capital` |
+| Account | Per market: US $4,000, India ₹3,50,000 — so following the session into India never sizes on "4,000 rupees" | `TOTAL_CAPITAL_US` / `TOTAL_CAPITAL_IN` in .env, or Capital → edit on that market; India's default in `config/markets/india.yaml` |
+| Audit log | every buy and sell with its reasons, per market | `journal/audit/us/`, `journal/audit/in/`; day records `journal/daily/<date>-<market>-record.md` |
 | Risk per trade | 1% of capital (hard ceiling 2%; one contract may use the ceiling) | `risk.risk_per_trade_pct` |
 | Position size | `floor(risk_budget / stop_points)`, lot-rounded **down** | `risk.py` |
 | Minimum R:R | 1:1.5, rejected below | `risk.min_risk_reward` |

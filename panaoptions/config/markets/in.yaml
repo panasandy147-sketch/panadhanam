@@ -1,0 +1,109 @@
+# ==========================================================================
+# market: IN — the same desk on NSE index and stock options.
+#
+# Merged over settings.yaml (and the profile) when the India toggle is on.
+# Only what differs from the US is here; everything else — the strategies,
+# the committee, the gatekeeper's rules — is the same code.
+#
+#   Session   09:15-15:30 IST. The first 15 minutes form the opening range,
+#             entries from 09:30, everything out by 15:15 (before the
+#             exchange's own intraday square-off).
+#   Contracts NSE lots, not 100 shares: NIFTY 75, BANKNIFTY 30, FINNIFTY 65,
+#             stock options their exchange lot. Premium x lot = the cost.
+#             NIFTY has a weekly expiry; BANKNIFTY, FINNIFTY and stock options
+#             expire monthly — so the expiry window runs to 35 days and the
+#             nearest listed expiry is taken first.
+#   Data      Charts from Yahoo (^NSEI, ^NSEBANK, RELIANCE.NS …); option chains
+#             from NSE's own site. NSE serves greeks-free chains, so delta is
+#             computed from the implied volatility, as it is for Yahoo.
+#   Account   ₹3,50,000 of paper capital (about $4,000). PANAOPTIONS_CAPITAL_IN
+#             in .env overrides it.
+#
+# Lot sizes change twice a year (NSE circulars). Update lot_sizes below when
+# they do; the chain does not carry them.
+# ==========================================================================
+
+market:
+  code: "IN"
+  name: "India (NSE)"
+  exchange: "NSE"
+
+account:
+  starting_capital: 350000.0
+  currency: "₹"
+
+session:
+  timezone: "Asia/Kolkata"
+  market_open: "09:15"
+  market_close: "15:30"
+  entry_open: "09:30"
+  entry_close: "10:30"
+  tighten_stops_at: "10:30"
+  force_exit_at: "15:15"
+
+data:
+  provider: "nse"
+  # How each desk symbol is named on Yahoo, for charts. Anything not listed
+  # gets yahoo_suffix (".NS").
+  yahoo_symbols:
+    NIFTY: "^NSEI"
+    BANKNIFTY: "^NSEBANK"
+    FINNIFTY: "NIFTY_FIN_SERVICE.NS"
+  yahoo_suffix: ".NS"
+  index_symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  lot_sizes:
+    NIFTY: 75
+    BANKNIFTY: 30
+    FINNIFTY: 65
+    RELIANCE: 500
+    HDFCBANK: 550
+    ICICIBANK: 700
+    INFY: 400
+    TCS: 175
+    SBIN: 750
+    AXISBANK: 625
+
+universe:
+  symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK", "ICICIBANK",
+            "INFY", "TCS", "SBIN", "AXISBANK"]
+
+premarket:
+  # The pre-open auction ends 09:08; screen from 09:10 on the gap it set.
+  screen_from: "09:10"
+
+contracts:
+  min_dte: 0
+  max_dte: 35
+  prefer_nearest_expiry: true
+  min_delta: 0.35
+  max_delta: 0.55
+  max_spread_pct_of_mid: 7.0
+  min_contract_price: 5.0          # ₹5 a share
+  max_contract_price: 400.0        # ₹400 a share — a ceiling, not a target
+  index_max_contract_price: 600.0
+  budget_fallback_min_delta: 0.30
+
+strategies:
+  orb_vwap:             { from: "09:30", to: "14:45" }
+  vwap_ema_pullback:    { from: "09:45", to: "14:45" }
+  liquidity_sweep:      { from: "09:30", to: "14:30" }
+  candlestick_at_level: { from: "09:30", to: "14:45" }
+  va_rejection:         { from: "09:30", to: "14:45" }
+  lvn_acceleration:     { from: "09:30", to: "14:45" }
+  poc_bounce:           { from: "09:45", to: "14:45" }
+
+volume_profile:
+  rth_open: "09:15"
+  rth_close: "15:30"
+
+risk:
+  # 20% of capital per trade (₹70,000), 25% on the indices (₹87,500).
+  index_symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  index_max_capital_deployed_pct: 25.0
+  daily_loss_limit_pct: 10.0       # ₹35,000
+
+agents:
+  macro:
+    # US index futures say little about an NSE session. No free feed serves
+    # GIFT Nifty, so the futures read is off and headlines carry the agent.
+    futures: []

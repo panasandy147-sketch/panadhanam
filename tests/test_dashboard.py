@@ -325,4 +325,6 @@ def test_a_capital_set_on_the_dashboard_is_saved(client, monkeypatch):
     client.engine.risk = RiskManager()
     body = client.post("/api/risk/capital", json={"capital": 250000}).json()
     assert body["saved"] is True
-    assert saved == {"TOTAL_CAPITAL": "250000"}
+    # Saved per market: rupees for India, dollars for the US.
+    from app.core.config import get_config
+    assert saved == {f"TOTAL_CAPITAL_{get_config().active_market}": "250000"}

@@ -25,7 +25,8 @@ from panaoptions.models import Candle, SessionLevels
 
 log = get_logger("levels")
 
-# The regular US session. The opening range is the first `_OR_BARS` 5m candles.
+# The regular US session by default; India passes its own (see compute()).
+# The opening range is the first `_OR_BARS` 5m candles.
 _SESSION_OPEN = time(9, 30)
 _SESSION_CLOSE = time(16, 0)
 _OR_BARS = 3
@@ -40,8 +41,20 @@ def _local(candles: list[Candle], tz: str) -> pd.DataFrame:
 
 
 def compute(candles: list[Candle], tz: str = "America/New_York",
-            session_date=None) -> SessionLevels:
-    """The day's reference levels from a pre/post-inclusive tape."""
+            session_date=None, market_open: str | time = _SESSION_OPEN,
+            market_close: str | time = _SESSION_CLOSE) -> SessionLevels:
+    """The day's reference levels from a pre/post-inclusive tape.
+
+    `market_open` / `market_close` are the regular session in `tz` — 09:30 to
+    16:00 in New York, 09:15 to 15:30 in Mumbai. The opening range is the
+    first three 5-minute bars after the open.
+    """
+    if isinstance(market_open, str):
+        hour, _, minute = market_open.partition(":")
+        market_open = time(int(hour), int(minute or 0))
+    if isinstance(market_close, str):
+        hour, _, minute = market_close.partition(":")
+        market_close = time(int(hour), int(minute or 0))
     levels = SessionLevels()
     df = _local(candles, tz)
     if df.empty:
@@ -53,8 +66,8 @@ def compute(candles: list[Candle], tz: str = "America/New_York",
         return levels
 
     times = today.index.time
-    regular = today[(times >= _SESSION_OPEN) & (times < _SESSION_CLOSE)]
-    premarket = today[times < _SESSION_OPEN]
+    regular = today[(times >= market_open) & (times < market_close)]
+    premarket = today[times < market_open]
 
     if not premarket.empty:
         levels.premarket_high = float(premarket["high"].max())

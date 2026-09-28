@@ -166,6 +166,12 @@ class MarketProfile:
         if news_profile.get("sources"):
             out.setdefault("news", {})["sources"] = news_profile["sources"]
 
+        # A market may carry its own account: capital and risk details that
+        # only make sense in its currency (see config/markets/india.yaml).
+        risk_profile = self.data.get("risk", {}) or {}
+        if risk_profile:
+            out.setdefault("risk", {}).update(risk_profile)
+
         out["currency"] = self.data.get("currency", {})
         out["market"] = self.data.get("market", {})
         return out

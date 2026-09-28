@@ -37,6 +37,13 @@ def _desk_files_elsewhere(tmp_path, monkeypatch, request):
     # The committee votes by rules alone in tests: no test may depend on
     # whether an Ollama happens to be running on the machine.
     monkeypatch.setenv("PANAOPTIONS_AGENT_LLM", "off")
+    # Every test starts on the US, whatever this machine's toggle says.
+    from panaoptions import markets
+    monkeypatch.delenv("PANAOPTIONS_MARKET", raising=False)
+    monkeypatch.delenv("PANAOPTIONS_CAPITAL_IN", raising=False)
+    monkeypatch.setattr(markets, "_active", "US")
+    monkeypatch.setattr(markets, "_home", {})
+    monkeypatch.setattr(config_mod, "DATA_DIR", data)
 
 
 @pytest.fixture

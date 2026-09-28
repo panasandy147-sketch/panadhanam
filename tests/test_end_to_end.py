@@ -528,8 +528,12 @@ async def test_every_buy_and_sell_is_in_the_audit_log_with_its_reasons(engine, c
     assert sell["status"] == "CLOSED_TARGET" and sell["pnl"] > 0
     assert sell["why_sold"].startswith("Target")
     assert sell["held_minutes"] is not None
-    text = audit.day_markdown(today)
+    text = audit.day_markdown(today, "IN")
     assert row["id"] in text and "How it ended" in text and "Why:" in text
+    # India and the US keep separate files.
+    assert (audit.audit_dir("IN") / f"{today.isoformat()}.jsonl").exists()
+    assert not any(e.get("signal_id") == row["id"]
+                   for e in audit.entries(today, market="US"))
 
 
 @pytest.mark.asyncio
@@ -562,3 +566,21 @@ async def test_the_paper_record_panel_is_today_only_and_saved_at_the_close(
     assert data["record"]["closed"] == today["closed"]
     assert any(e["signal_id"] == row["id"] for e in data["audit"])
     assert (store.JOURNAL_DIR / "daily").is_dir()
+
+
+def test_capital_is_per_market(cfg, monkeypatch):
+    """Following the session into India must not size trades on "4,000"."""
+    monkeypatch.delenv("TOTAL_CAPITAL_IN", raising=False)
+    monkeypatch.delenv("TOTAL_CAPITAL_US", raising=False)
+    monkeypatch.setenv("TOTAL_CAPITAL", "4000")
+    try:
+        cfg.switch_market("IN")
+        assert cfg.get("risk.total_capital") == 350000       # rupees, India's own
+        assert "NIFTY BANK" in cfg.get("risk.index_symbols")
+        cfg.switch_market("US")
+        assert cfg.get("risk.total_capital") == 4000
+        monkeypatch.setenv("TOTAL_CAPITAL_IN", "500000")
+        cfg.switch_market("IN")
+        assert cfg.get("risk.total_capital") == 500000       # the per-market override
+    finally:
+        cfg.switch_market("IN")

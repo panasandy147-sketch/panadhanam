@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from panaoptions import alpha, clock, watchlist
+from panaoptions import alpha, clock, markets, watchlist
 from panaoptions.activity import ActivityLog
 from panaoptions.agents import CMIO
 from panaoptions.config import Config, get_config
@@ -43,6 +43,13 @@ log = get_logger("app")
 class OptionsDesk:
     def __init__(self, cfg: Config | None = None, feed: Any | None = None) -> None:
         self.cfg = cfg or get_config()
+        # Each market keeps its own ledger, journal and audit log.
+        markets.activate(self.cfg.market)
+        from panaoptions.config import saved_market_mode
+        # US, IN, or AUTO (follow whichever session is open).
+        self.market_mode: str = saved_market_mode() if feed is None else self.cfg.market
+        self._feed_factory = make_feed
+        self._lock = asyncio.Lock()
         self.feed = feed or make_feed(self.cfg)
         self.risk = RiskManager(self.cfg)
         self.ledger = PaperLedger(self.cfg, self.risk)
@@ -128,6 +135,11 @@ class OptionsDesk:
     # ------------------------------------------------------------------ #
     async def start(self, cycle_seconds: int = 60) -> None:
         self.cycle_seconds = cycle_seconds
+        # On Auto, start on whichever market's day it is.
+        if self.market_mode == "AUTO":
+            target = markets.which_now()
+            if target and target != self.cfg.market:
+                self._rebuild(target, self._feed_factory)
         store.init()
         self._restore_open_book()
         if not await self.feed.connect():
@@ -154,6 +166,7 @@ class OptionsDesk:
             while self.running:
                 started = time.monotonic()
                 try:
+                    await self.follow_the_clock()
                     await self.cycle()
                 except asyncio.CancelledError:
                     raise
@@ -186,6 +199,73 @@ class OptionsDesk:
     async def stop(self) -> None:
         self.running = False
 
+    # ------------------------------------------------------------------ #
+    # Markets: the US, India, or Auto
+    # ------------------------------------------------------------------ #
+    def _rebuild(self, code: str, factory: Any) -> None:
+        """Re-point everything market-bound at `code`. The caller has made
+        sure nothing is open and no cycle is running."""
+        markets.activate(code)
+        self.cfg.market = code
+        self.cfg.reload()
+        saved = watchlist.load()
+        if saved:
+            self.cfg.data.setdefault("universe", {})["symbols"] = list(saved)
+        self.feed = factory(self.cfg)
+        self.risk = RiskManager(self.cfg)
+        self.ledger = PaperLedger(self.cfg, self.risk)
+        self.gatekeeper = RiskGatekeeper(self.cfg, self.risk)
+        self.cmio = CMIO(self.cfg, self.gatekeeper)
+        self.notifier = Notifier(self.cfg)
+        self._verdicts = {}
+        self.screened, self._screened_on, self._screened_at = [], "", None
+        self._levels, self._levels_on = {}, ""
+        self.candidate, self.scanning = None, ""
+
+    async def switch_market(self, code: str, feed_factory: Any | None = None
+                            ) -> dict[str, Any]:
+        """Trade `code` from the next cycle. Refused while a position is open."""
+        code = code.upper()
+        if code not in markets.MARKETS:
+            return {"switched": False, "market": self.cfg.market,
+                    "reason": f"unknown market {code!r}"}
+        if code == self.cfg.market:
+            return {"switched": False, "market": code, "reason": "already active"}
+        if self.ledger.open_trades:
+            return {"switched": False, "market": self.cfg.market,
+                    "reason": (f"{len(self.ledger.open_trades)} position(s) open on "
+                               f"{self.cfg.market} — they close by their own rules "
+                               f"first; the new market's feed could not price them")}
+        async with self._lock:
+            old = self.feed
+            previous = self.cfg.market
+            self._rebuild(code, feed_factory or self._feed_factory)
+            store.init()
+            self._restore_open_book()
+            connected = await self.feed.connect() if self.running else None
+            try:
+                await old.close()
+            except Exception:                           # noqa: BLE001
+                pass
+        self.activity.add("market", f"switched {previous} → {code} "
+                          f"({markets.NAMES.get(code, code)}), capital "
+                          f"{self.cfg.currency}{self.cfg.capital:,.0f}", level="good")
+        log.info("market switched %s → %s", previous, code)
+        return {"switched": True, "market": code, "feed_connected": connected}
+
+    async def follow_the_clock(self) -> str | None:
+        """On Auto, move to whichever market's working day it is — never
+        while a position is open, and never away from a session in progress."""
+        if self.market_mode != "AUTO":
+            return None
+        target = markets.which_now()
+        if not target or target == self.cfg.market:
+            return None
+        if markets.in_hours(self.cfg.market):
+            return None
+        result = await self.switch_market(target)
+        return target if result.get("switched") else None
+
     def _load_predictor(self) -> None:
         if not bool(self.cfg.get("ml.enabled", False)):
             return
@@ -214,6 +294,10 @@ class OptionsDesk:
                               f"picked up after the restart: {labels}")
 
     async def cycle(self) -> dict[str, Any]:
+        async with self._lock:
+            return await self._locked_cycle()
+
+    async def _locked_cycle(self) -> dict[str, Any]:
         try:
             return await self._cycle()
         finally:
@@ -674,7 +758,10 @@ class OptionsDesk:
         bars = await self.feed.candles(
             symbol, self.cfg.get("technical.timeframe", "5m"),
             include_prepost=True)
-        computed = levels_mod.compute(bars, self.cfg.timezone, now.date())
+        computed = levels_mod.compute(
+            bars, self.cfg.timezone, now.date(),
+            str(self.cfg.get("session.market_open", "09:30")),
+            str(self.cfg.get("session.market_close", "16:00")))
         self._levels[symbol] = computed
         return computed
 
@@ -724,8 +811,8 @@ class OptionsDesk:
 
     def _unrealised(self) -> float:
         """Open profit or loss across the book, at the last marks."""
-        multiplier = self.cfg.multiplier
-        return round(sum((t.last_price - t.entry_price) * t.remaining * multiplier
+        return round(sum((t.last_price - t.entry_price) * t.remaining
+                         * (t.multiplier or self.cfg.multiplier)
                          for t in self.ledger.open_trades.values()
                          if t.last_price), 2)
 
@@ -986,6 +1073,10 @@ class OptionsDesk:
                       "last_took": self.last_cycle_seconds,
                       "symbols": len(self.cfg.symbols)},
             "ml_enabled": self._predictor is not None,
+            "market": {"active": self.cfg.market, "mode": self.market_mode,
+                       "name": self.cfg.market_name, "currency": self.cfg.currency,
+                       "timezone": self.cfg.timezone,
+                       "open_now": markets.which_now()},
             "notifications": self.notifier.enabled,
             "paper_only": True,
         }

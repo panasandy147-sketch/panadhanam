@@ -139,6 +139,9 @@ class OptionContract(BaseModel):
     implied_volatility: float = 0.0
     open_interest: int = 0
     volume: int = 0
+    # Units one contract controls: 100 in the US, the NSE lot in India
+    # (NIFTY 75, BANKNIFTY 30 ...). 0 means "the market default".
+    multiplier: int = 0
 
     @property
     def mid(self) -> float:
@@ -156,8 +159,8 @@ class OptionContract(BaseModel):
         return round(self.spread / mid * 100, 2) if mid else 999.0
 
     def cost(self, multiplier: int = 100) -> float:
-        """What one contract actually costs, in dollars."""
-        return round(self.mid * multiplier, 2)
+        """What one contract actually costs: premium x its own lot size."""
+        return round(self.mid * (self.multiplier or multiplier), 2)
 
     @property
     def label(self) -> str:
@@ -207,11 +210,12 @@ class Signal(BaseModel):
     ml_probability: float | None = None
 
     def cost(self, multiplier: int = 100) -> float:
-        return round(self.entry_price * self.quantity * multiplier, 2)
+        m = self.contract.multiplier or multiplier
+        return round(self.entry_price * self.quantity * m, 2)
 
     def risk_at_stop(self, multiplier: int = 100) -> float:
-        return round((self.entry_price - self.stop_price)
-                     * self.quantity * multiplier, 2)
+        m = self.contract.multiplier or multiplier
+        return round((self.entry_price - self.stop_price) * self.quantity * m, 2)
 
     def alert_line(self) -> str:
         arrow = "CALL" if self.direction is Direction.LONG else "PUT"
@@ -260,6 +264,9 @@ class PaperTrade(BaseModel):
     pattern: str = ""
     claimed_accuracy: float = 0.0
     invalidation_note: str = ""
+    # Units per contract (the NSE lot in India); 0 = the market default.
+    multiplier: int = 0
+    market: str = "US"
 
     remaining: int = 0
     fills: list[Fill] = Field(default_factory=list)
