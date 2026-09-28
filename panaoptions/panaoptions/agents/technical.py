@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from panaoptions.agents import consensus
 from panaoptions.agents.base import AgentVote, ask, blend, clamp
 from panaoptions.alpha import AlphaSignal
 from panaoptions.engine import indicators as ta
@@ -44,9 +45,15 @@ def trend_15m(candles: list[Candle]) -> int:
 
 
 async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
-               cfg: Any, screen_rvol: float = 0.0) -> AgentVote:
-    """Score the signal on chart evidence alone."""
-    min_rvol = float(cfg.get("agents.technical.min_rvol", 1.5))
+               cfg: Any, screen_rvol: float = 0.0,
+               flow: consensus.FlowRead = consensus.NONE) -> AgentVote:
+    """Score the signal on chart evidence.
+
+    The one thing it takes from the options side is the Derivatives
+    Confluence Override: extreme flow (>= 10x OI) on the trade's own side
+    relaxes the RVOL gate from 1.5x to 1.3x (agents/consensus.py).
+    """
+    min_rvol, override = consensus.rvol_floor(cfg, signal, flow)
     bar_rvol = float(setup.indicators.rvol or 0.0)
     rvol = max(bar_rvol, float(screen_rvol or 0.0))
     want = 1 if signal.long else -1
@@ -63,6 +70,9 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
             f"{bar_rvol:.2f}x, session {float(screen_rvol or 0):.2f}x)")
     else:
         result.reasons.append(f"RVOL {rvol:.2f}x ≥ {min_rvol:g}x")
+    if override:
+        result.reasons.append(override)
+        result.data["rvol_override"] = override
 
     if trend == want:
         result.score += 0.10

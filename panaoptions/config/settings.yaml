@@ -406,8 +406,17 @@ agents:
     macro: 0.30
   technical:
     min_rvol: 1.5
+    # Derivatives Confluence Override: with extreme flow (>= extreme_flow_ratio
+    # x OI) on the trade's own side, the RVOL gate relaxes to this.
+    flow_confluence_min_rvol: 1.3
   derivatives:
     preferred_max_dte: 1        # 0DTE/1DTE score a bonus
+    # Extreme options flow: a contract at >= this many times its open
+    # interest. AGAINST the trade it is a strict veto (no calls into heavy
+    # institutional put buying); WITH it, it relaxes the RVOL gate above.
+    # Either way the Derivatives vote counts this many times more meanwhile.
+    extreme_flow_ratio: 10.0
+    extreme_flow_weight_multiplier: 2.0
     max_pcr_against: 1.5
     iv_percentile_ceiling: 80
   macro:

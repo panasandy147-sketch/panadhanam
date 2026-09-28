@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from panaoptions.agents import consensus
 from panaoptions.agents.base import AgentVote, ask, blend, clamp
 from panaoptions.alpha import AlphaSignal
 from panaoptions.engine import flow as flow_mod
@@ -48,9 +49,21 @@ def atm_iv(chain: list[OptionContract], spot: float) -> float:
 
 async def vote(signal: AlphaSignal, chain: list[OptionContract],
                search: ContractSearch, cfg: Any, spot: float,
-               today: str) -> AgentVote:
-    """Score the options side of the trade."""
+               today: str, flow: consensus.FlowRead | None = None) -> AgentVote:
+    """Score the options side of the trade.
+
+    Extreme flow (>= 10x OI) against the trade is a strict veto — the
+    Derivatives Flow Conflict Veto — whatever else the chain says.
+    """
+    flow = flow if flow is not None else consensus.read(chain, cfg)
     result = AgentVote(agent=NAME, score=0.60)
+    conflict = consensus.conflict_veto(signal, flow)
+    if conflict:
+        result.veto = True
+        result.score = 0.0
+        result.reasons.append(conflict)
+        result.data = {"extreme_flow": flow.line()}
+        return result
     chosen = search.chosen
     if chosen is None:
         result.veto = True
@@ -95,6 +108,9 @@ async def vote(signal: AlphaSignal, chain: list[OptionContract],
         else:
             result.reasons.append(f"IV at the {iv_pct:.0f}th percentile")
 
+    if flow.extreme and flow.bias == (1 if signal.long else -1):
+        result.score += 0.10
+        result.reasons.append(f"extreme flow behind the trade: {flow.line()}")
     seen = flow_mod.scan(chain, cfg)
     if seen.found:
         if seen.bias == want:
@@ -108,7 +124,7 @@ async def vote(signal: AlphaSignal, chain: list[OptionContract],
     result.data = {"pcr": pcr, "atm_iv": round(iv, 4), "iv_percentile": iv_pct,
                    "flow": seen.headline() if seen.found else "",
                    "contract": chosen.label, "delta": abs(chosen.delta),
-                   "dte": chosen.dte}
+                   "dte": chosen.dte, "extreme_flow": flow.line()}
     opinion = await ask(cfg, NAME,
                         "Judge whether the option chain supports buying this "
                         "contract: positioning, implied volatility, flow.",

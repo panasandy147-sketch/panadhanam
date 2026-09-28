@@ -109,6 +109,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                       "be at least",
                       f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below",
                       "agents.technical.min_rvol"),
+                _rule("Extreme options flow (a contract at "
+                      f"{g('agents.derivatives.extreme_flow_ratio', 10.0):g}x+ its open "
+                      "interest): AGAINST the trade = strict veto (no calls into "
+                      "heavy put buying); WITH the trade = the RVOL gate relaxes to "
+                      f"{g('agents.technical.flow_confluence_min_rvol', 1.3)}x. The "
+                      "Derivatives vote counts "
+                      f"{g('agents.derivatives.extreme_flow_weight_multiplier', 2.0):g}x "
+                      "meanwhile",
+                      "veto / override", "agents.derivatives.extreme_flow_ratio"),
                 _rule("Derivatives & Flow agent: the contract, put/call ratio, IV "
                       "percentile (penalised above), unusual flow; no contract = veto",
                       f"IV ceiling {g('agents.derivatives.iv_percentile_ceiling', 80)}th "

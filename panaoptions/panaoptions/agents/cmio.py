@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from panaoptions.agents import derivatives, macro, technical
+from panaoptions.agents import consensus, derivatives, macro, technical
 from panaoptions.agents.base import AgentVote, clamp
 from panaoptions.alpha import AlphaSignal
 from panaoptions.logging import get_logger
@@ -74,9 +74,16 @@ class Verdict:
                          if self.gate else None)}
 
 
-def combine(votes: list[AgentVote], signal: AlphaSignal, cfg: Any) -> Verdict:
-    """The weighted committee score, the strategy weight, and the call."""
+def combine(votes: list[AgentVote], signal: AlphaSignal, cfg: Any,
+            flow: consensus.FlowRead = consensus.NONE) -> Verdict:
+    """The weighted committee score, the strategy weight, and the call.
+
+    While extreme options flow is on the tape the Derivatives vote counts
+    `extreme_flow_weight_multiplier` times as much (agents/consensus.py).
+    """
     weights = {**DEFAULT_WEIGHTS, **(cfg.get("agents.weights") or {})}
+    boost = consensus.derivative_weight_multiplier(cfg, flow)
+    weights["derivatives"] = float(weights.get("derivatives", 0.35)) * boost
     total = sum(float(weights.get(v.agent.lower(), 0.0)) for v in votes) or 1.0
     committee = sum(float(weights.get(v.agent.lower(), 0.0)) * v.score
                     for v in votes) / total
@@ -109,13 +116,14 @@ class CMIO:
                       screen_rvol: float = 0.0,
                       unrealised: float = 0.0) -> Verdict:
         """Ask the three specialists at once, combine, then gate the contract."""
+        flow = consensus.read(chain, self.cfg)
         votes = list(await asyncio.gather(
-            technical.vote(signal, setup, candles, self.cfg, screen_rvol),
+            technical.vote(signal, setup, candles, self.cfg, screen_rvol, flow),
             derivatives.vote(signal, chain, search, self.cfg,
                              spot=setup.indicators.close,
-                             today=now.date().isoformat()),
+                             today=now.date().isoformat(), flow=flow),
             macro.vote(signal, feed, self.cfg, now)))
-        verdict = combine(votes, signal, self.cfg)
+        verdict = combine(votes, signal, self.cfg, flow)
         self.gate(verdict, signal, setup, search, unrealised)
         log.info("%s %s — %s", signal.symbol, signal.direction, verdict.summary())
         return verdict
