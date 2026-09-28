@@ -149,7 +149,9 @@ function renderAccount(s) {
       <div class="v" style="font-size:15px">${esc(s.session?.entry_open)}–${esc(s.session?.entry_close)}</div>
       <div class="sub">${esc(s.profile || "default")} · ${
         esc(s.session?.timeframe)} bars · ${esc(s.session?.dte)} DTE</div>
-      <div class="sub">${esc(s.feed?.provider || "yahoo")} chains${
+      <div class="sub">${s.feed?.estimated
+        ? `<span class="neg" title="NSE refused; option prices are Black-Scholes estimates from Yahoo spot and India VIX, not market quotes">ESTIMATED option prices (NSE refused)</span>`
+        : `${esc(s.feed?.provider || "yahoo")} chains`}${
         s.feed?.greeks ? " · real greeks" : " · delta estimated"}${
         s.feed?.delayed ? " · delayed" : ""}${
         s.feed?.configured === "auto" && s.feed?.provider !== "auto"

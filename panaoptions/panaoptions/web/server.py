@@ -64,7 +64,8 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         who = describe_provider(cfg)
         # What is LIVE, which after an auto fallback is not what is
         # configured. The dashboard must name the one serving data.
-        live = getattr(desk.feed, "chains_name", "") or who["provider"]
+        live = (getattr(getattr(desk.feed, "chains", None), "chosen", "")
+                or getattr(desk.feed, "chains_name", "") or who["provider"])
         out["feed"] = {
             "provider": live,
             "configured": who["provider"],
@@ -74,6 +75,9 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
             "ready": who["ready"],
             "options_available": getattr(desk.feed, "options_available", None),
             "options_error": getattr(desk.feed, "options_error", ""),
+            # India with NSE refusing: prices are a model, not quotes.
+            "estimated": bool(getattr(getattr(desk.feed, "chains", None),
+                                      "estimated_now", False)),
         }
         out["session"] = {
             "timeframe": cfg.get("technical.timeframe"),

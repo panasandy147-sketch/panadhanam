@@ -12,8 +12,17 @@ from Yahoo and option chains from NSE's own site, on a ₹3,50,000 paper
 account (`PANAOPTIONS_CAPITAL_IN` overrides). Everything India-specific is in
 `config/markets/in.yaml`. Each market keeps its own books: India's ledger,
 journal, reviews, audit log and learned weights live in `data/in/` and
-`journal/in/`. The switch is refused while a position is open. NSE often
-refuses requests from outside India or through a VPN; the dashboard says so.
+`journal/in/`. The switch is refused while a position is open.
+
+**When NSE refuses** (a VPN, an overseas connection, a bad spell), India keeps
+trading on **estimated prices**: Black-Scholes on NSE's strike grid and
+expiry calendar (NIFTY weekly, the rest monthly, Tuesdays), from Yahoo's spot
+and India VIX (indices) or the stock's own 20-day volatility, with a quoted
+spread. The dashboard shows "ESTIMATED option prices (NSE refused)", every
+such trade is flagged `estimated` in the ledger and the audit log, and NSE is
+retried every 15 minutes. Estimates are close, not exact: no real open
+interest or volume exists, so the options-flow reads stay silent. Turn it off
+with `data.estimated.enabled: false` in `config/markets/in.yaml`.
 
 **Nothing here can place a real order.** There is no broker adapter in this
 package, by design.

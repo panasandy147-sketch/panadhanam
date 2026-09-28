@@ -105,3 +105,22 @@ def premium_estimate(spot: float, implied_vol: float, days_to_expiry: float,
     d2 = d1 - vol_t
     price = spot * _norm_cdf(d1) - strike * _norm_cdf(d2)
     return round(max(price, 0.0), 4)
+
+
+def price(spot: float, strike: float, days_to_expiry: float, implied_vol: float,
+          is_call: bool, risk_free_rate: float = 0.065) -> float:
+    """Black-Scholes premium per share. Intrinsic value when the model is
+    undefined (no time or no volatility)."""
+    intrinsic = max(spot - strike, 0.0) if is_call else max(strike - spot, 0.0)
+    if spot <= 0 or strike <= 0 or implied_vol <= 0 or days_to_expiry <= 0:
+        return intrinsic
+    t = days_to_expiry / 365.0
+    vol_t = implied_vol * math.sqrt(t)
+    d1 = (math.log(spot / strike) + (risk_free_rate + implied_vol ** 2 / 2) * t) / vol_t
+    d2 = d1 - vol_t
+    discount = math.exp(-risk_free_rate * t)
+    if is_call:
+        value = spot * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
+    else:
+        value = strike * discount * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
+    return max(value, intrinsic * discount, 0.0)

@@ -62,6 +62,7 @@ def record_buy(cfg: Any, trade: Any, signal: Any, setup: Any,
         "right": c.right.value, "strike": c.strike, "expiry": c.expiry, "dte": c.dte,
         "delta": c.delta, "iv": c.implied_volatility, "bid": c.bid, "ask": c.ask,
         "spread_pct": c.spread_pct_of_mid, "quantity": trade.quantity,
+        "estimated_prices": bool(getattr(c, "estimated", False)),
         "entry": trade.entry_price, "cost": signal.cost(cfg.multiplier),
         "disaster_stop": trade.stop_price, "target_1": trade.target_1,
         "target_2": trade.target_2, "strategy": setup.strategy.value,
@@ -96,6 +97,7 @@ def record_sell(cfg: Any, trade: Any) -> dict[str, Any]:
         "exits": [{"ts": f.ts, "quantity": f.quantity, "price": f.price,
                    "reason": f.reason} for f in exits],
         "exit_reason": trade.exit_reason.value if trade.exit_reason else "",
+        "estimated_prices": bool(getattr(trade, "estimated", False)),
         "pnl": round(trade.realised_pnl, 2), "held_minutes": held,
         "invalidation_note": trade.invalidation_note,
     })
@@ -141,6 +143,8 @@ def day_markdown(day: date) -> str:
                      f"({head.get('pattern')}) · {tid}")
         if b:
             lines += [
+                ("> **Estimated prices** — NSE refused; bought and marked on a "
+                 "model price, not a market quote." if b.get("estimated_prices") else ""),
                 f"**BUY** {b.get('quantity')} @ {b.get('entry')} (${b.get('cost')}) at "
                 f"{b.get('market_time')} · {b.get('delta')} delta, {b.get('dte')} DTE, "
                 f"spread {b.get('spread_pct')}%",

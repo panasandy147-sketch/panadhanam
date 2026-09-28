@@ -63,6 +63,22 @@ data:
     SBIN: 750
     AXISBANK: 625
 
+  # When NSE refuses (VPN, overseas IP, a bad spell): price options with
+  # Black-Scholes from Yahoo's spot and India VIX (indices) or the stock's own
+  # 20-day realised volatility, on NSE's strike grid and expiry calendar.
+  # Marked "estimated" on the dashboard, in every trade and in the audit log.
+  # NSE is retried every 15 minutes. enabled: false turns the fallback off.
+  estimated:
+    enabled: true
+    vix_symbol: "^INDIAVIX"
+    weekly_symbols: ["NIFTY"]      # weekly expiry; the rest expire monthly
+    expiry_weekday: 1              # Tuesday (Mon=0). Holidays are not modelled.
+    index_iv_multiplier: { NIFTY: 1.0, BANKNIFTY: 1.25, FINNIFTY: 1.05 }
+    stock_iv_premium: 1.10         # implied usually trades above realised
+    strike_steps: { NIFTY: 50, BANKNIFTY: 100, FINNIFTY: 50 }
+    index_spread_pct: 1.5
+    stock_spread_pct: 3.0
+
 universe:
   symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK", "ICICIBANK",
             "INFY", "TCS", "SBIN", "AXISBANK"]

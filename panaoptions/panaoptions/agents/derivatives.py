@@ -94,7 +94,9 @@ async def vote(signal: AlphaSignal, chain: list[OptionContract],
 
     iv = atm_iv(chain, spot)
     iv_pct = None
-    if iv > 0:
+    # A model price's IV is our own input, not the market's: never record it
+    # or rank against it.
+    if iv > 0 and not getattr(chosen, "estimated", False):
         iv_pct = store.iv_percentile(signal.symbol, iv, before=today)
         store.record_iv(signal.symbol, today, iv)
     ceiling = float(cfg.get("agents.derivatives.iv_percentile_ceiling", 80))

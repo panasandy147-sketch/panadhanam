@@ -241,3 +241,104 @@ def test_the_toggle_api_switches_and_remembers(cfg, monkeypatch, tmp_path):
         assert client.post("/api/market", json={"mode": "MARS"}).status_code == 400
         back = client.post("/api/market", json={"mode": "US"}).json()
         assert back["active"] == "US"
+
+
+# --------------------------------------------------------------------------- #
+# The estimated-price fallback (NSE refusing)
+# --------------------------------------------------------------------------- #
+def test_the_nse_expiry_calendar_weekly_and_monthly():
+    from panaoptions.data.nse import expiries
+
+    today = date(2026, 9, 28)                                   # a Monday
+    nifty = expiries("NIFTY", today, {"NIFTY"})
+    assert nifty[:3] == [date(2026, 9, 29), date(2026, 10, 6), date(2026, 10, 13)]
+    assert all(d.weekday() == 1 for d in nifty)                 # Tuesdays
+    bank = expiries("BANKNIFTY", today, {"NIFTY"})
+    assert bank == [date(2026, 9, 29), date(2026, 10, 27)]      # last Tuesdays
+
+
+def test_an_estimated_chain_is_priced_quoted_and_flagged():
+    from panaoptions.data.nse import estimate_chain
+
+    now = datetime(2026, 9, 28, 10, 0, tzinfo=IST)
+    chain = estimate_chain("NIFTY", 24010, 0.14, 75, now, weekly={"NIFTY"},
+                           steps={"NIFTY": 50}, max_dte=10)
+    assert chain and all(c.estimated and c.multiplier == 75 for c in chain)
+    assert {c.strike % 50 for c in chain} == {0}                # NSE's strike grid
+    atm = next(c for c in chain if c.strike == 24000 and c.dte == 1
+               and c.right is OptionRight.CALL)
+    assert 40 < atm.mid < 150                                   # 1 day, 14% vol
+    assert 0.45 < atm.delta < 0.60
+    assert 0 < atm.spread_pct_of_mid <= 2.0
+    far = next(c for c in chain if c.strike == 24000 and c.dte == 8
+               and c.right is OptionRight.CALL)
+    assert far.mid > atm.mid                                    # more time, more premium
+
+
+class _RefusingNse:
+    options_error = ""
+
+    async def open(self):
+        return None
+
+    async def close(self):
+        return None
+
+    async def probe(self):
+        self.options_error = "nseindia.com answered HTTP 403"
+        return False
+
+    async def chain_for_window(self, *a):
+        self.options_error = "NSE option chain for NIFTY: HTTP 403"
+        return []
+
+
+class _Charts:
+    async def quote(self, symbol):
+        prices = {"^INDIAVIX": 13.5, "NIFTY": 24010.0, "RELIANCE": 2950.0}
+        return {"symbol": symbol, "last_price": prices.get(symbol, 100.0)}
+
+    async def candles(self, symbol, interval="1d", include_prepost=False):
+        base = datetime(2026, 8, 1, tzinfo=UTC)
+        return [Candle(ts=base + timedelta(days=i), open=2900, high=2960, low=2890,
+                       close=2900 * (1.01 if i % 2 else 0.99), volume=1e6)
+                for i in range(25)]
+
+
+def test_when_nse_refuses_the_desk_prices_on_estimates_and_says_so(india):
+    from panaoptions.data.nse import EstimatedChains, IndiaChains
+
+    chains = IndiaChains(_RefusingNse(), EstimatedChains(_Charts(), india))
+    assert asyncio.run(chains.probe()) is True
+    assert chains.estimated_now and "estimated" in chains.chosen
+    got = asyncio.run(chains.chain_for_window("NIFTY", 0.0, 0, 10))  # spot looked up
+    assert got and all(c.estimated for c in got)
+    vix_iv = got[0].implied_volatility
+    assert vix_iv == pytest.approx(0.135, abs=0.001)            # India VIX 13.5
+    stock = asyncio.run(chains.chain_for_window("RELIANCE", 2950.0, 0, 35))
+    assert stock and all(c.multiplier == 500 for c in stock)
+    assert 0.12 <= stock[0].implied_volatility <= 0.90         # realised vol, clamped
+
+
+def test_estimated_trades_are_flagged_in_the_trade_and_the_audit(india):
+    from panaoptions import audit
+    from panaoptions.data.nse import estimate_chain
+    from panaoptions.ledger.paper import PaperLedger
+    from panaoptions.risk.guardrails import RiskManager
+
+    markets.activate("IN")
+    now = datetime(2026, 9, 28, 10, 0, tzinfo=IST)
+    call = next(c for c in estimate_chain("NIFTY", 24000, 0.14, 75, now,
+                                          weekly={"NIFTY"}, max_dte=10)
+                if c.strike == 24000 and c.dte == 1 and c.right is OptionRight.CALL)
+    setup = Setup(symbol="NIFTY", ts=now, direction=Direction.LONG,
+                  strategy=SetupType.ORB_VWAP, pattern="x", confirmations=["a"],
+                  indicators=Indicators(close=24000, atr=40), trend_aligned=True,
+                  underlying_support=23950)
+    risk = RiskManager(india)
+    signal, refusal = risk.size(setup, call, "SIG-EST", now)
+    assert signal is not None, refusal
+    trade = PaperLedger(india, risk).open(signal, now)
+    assert trade.estimated is True
+    record = audit.record_buy(india, trade, signal, setup)
+    assert record["estimated_prices"] is True

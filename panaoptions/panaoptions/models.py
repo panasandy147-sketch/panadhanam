@@ -142,6 +142,8 @@ class OptionContract(BaseModel):
     # Units one contract controls: 100 in the US, the NSE lot in India
     # (NIFTY 75, BANKNIFTY 30 ...). 0 means "the market default".
     multiplier: int = 0
+    # True when the price is a model estimate (India, NSE refusing), not a quote.
+    estimated: bool = False
 
     @property
     def mid(self) -> float:
@@ -267,6 +269,8 @@ class PaperTrade(BaseModel):
     # Units per contract (the NSE lot in India); 0 = the market default.
     multiplier: int = 0
     market: str = "US"
+    # Bought and marked on model prices, not market quotes.
+    estimated: bool = False
 
     remaining: int = 0
     fills: list[Fill] = Field(default_factory=list)

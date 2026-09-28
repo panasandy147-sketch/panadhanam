@@ -53,6 +53,7 @@ class PaperLedger:
             invalidation_note=signal.invalidation_note,
             multiplier=signal.contract.multiplier or self.cfg.multiplier,
             market=getattr(self.cfg, "market", "US"),
+            estimated=bool(getattr(signal.contract, "estimated", False)),
             remaining=signal.quantity, max_price_seen=fill_price,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
