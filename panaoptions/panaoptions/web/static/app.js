@@ -987,7 +987,9 @@ function refreshWatchlist() {
   getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
 }
 refreshWatchlist();
-setInterval(refreshWatchlist, 60000);
+/* Often enough that the pre-open ranking, the hourly refresh and an Auto
+   market switch show up within seconds. */
+setInterval(refreshWatchlist, 15000);
 
 /* ---- Rules & strategies ------------------------------------------------ */
 /* A pop-up, not a page: it is read beside the desk, not instead of it. The
@@ -1098,6 +1100,9 @@ async function setMarket(mode) {
       CURRENCY = body.currency || CURRENCY;
       renderMarket({ mode: body.mode, active: body.active });
       if (typeof refresh === "function") refresh();
+      /* Each market has its own watchlist: show the new one now, not at the
+         next poll. */
+      refreshWatchlist();
     }
   } catch (e) {
     alert(`Could not switch: ${e}`);

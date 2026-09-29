@@ -201,6 +201,27 @@ def test_the_auto_top_10_button_ranks_and_shows_why(page, desk, monkeypatch):
     _wait_text(page, "#watch-meta", "from settings.yaml")
 
 
+def test_switching_to_india_shows_the_india_watchlist_at_once(page, desk, monkeypatch):
+    """The watchlist box followed the toggle only at its next poll, so right
+    after switching it still showed the US names and the US ranking time."""
+    from tests.test_auto_watchlist import FakeDiscovery
+
+    monkeypatch.delenv("PANAOPTIONS_AUTO_WATCHLIST", raising=False)
+    d, feed = desk["desk"], desk["feed"]
+    d.discovery = FakeDiscovery({})
+    d._feed_factory = lambda cfg: feed            # never the real NSE/Yahoo feed
+    d.ledger.open_trades.clear()                  # a switch waits for flat
+    page.reload()
+    try:
+        page.click("#market-toggle button[data-mode='IN']")
+        _wait_text(page, "#watch-meta", "09:00", timeout=5000)
+        assert "NIFTY" in page.input_value("#watch-input")
+        assert "SPY" not in page.input_value("#watch-input")
+    finally:
+        page.click("#market-toggle button[data-mode='US']")
+        _wait_text(page, "#watch-meta", "08:45", timeout=5000)
+
+
 def test_todays_review_builds(page):
     if page.is_checked("#d-coach"):
         page.uncheck("#d-coach")
