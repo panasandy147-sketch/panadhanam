@@ -240,16 +240,17 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
     # dashboard has no endpoint which can trade.
     @app.get("/api/watchlist")
     async def get_watchlist() -> dict[str, Any]:
-        from panaoptions import watchlist as wl
+        """The list in force, where it came from (auto, custom or config),
+        and — on auto — the ranking behind it and when it refreshes next."""
+        return desk.watchlist_status()
 
-        saved = wl.load()
-        return {
-            "symbols": cfg.symbols,
-            "source": "custom" if saved else "config",
-            "config_symbols": list(
-                (cfg.get("universe", {}) or {}).get("symbols", [])),
-            "max": wl.MAX_SYMBOLS,
-        }
+    @app.post("/api/watchlist/auto")
+    async def auto_watchlist(body: dict[str, Any]) -> dict[str, Any]:
+        """Turn the auto top-N list on (ranks now) or off (back to config)."""
+        try:
+            return await desk.set_auto_watchlist(bool(body.get("enabled", True)))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
 
     @app.post("/api/watchlist")
     async def set_watchlist(body: dict[str, Any]) -> dict[str, Any]:
@@ -298,8 +299,8 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
 
     @app.post("/api/watchlist/reset")
     async def reset_watchlist() -> dict[str, Any]:
-        symbols = desk.reset_universe()
-        return {"symbols": symbols, "source": "config"}
+        desk.reset_universe()
+        return desk.watchlist_status()
 
     @app.get("/api/why")
     async def why_not() -> dict[str, Any]:

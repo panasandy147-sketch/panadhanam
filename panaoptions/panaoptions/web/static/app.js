@@ -37,12 +37,66 @@ async function postJSON(url, body) {
 /* The watchlist: what the desk looks at. Never what it buys. */
 function renderWatchlist(d) {
   const symbols = d.symbols || [];
+  const auto = d.auto || {};
+  const where = d.source === "auto"
+    ? ` · auto top ${auto.size || symbols.length}` +
+      (auto.refreshed_at ? ` · ranked ${String(auto.refreshed_at).slice(11, 16)}` : "") +
+      (auto.next_refresh ? ` · next ${auto.next_refresh}` : ` · first ranking ${auto.start || ""}`)
+    : d.source === "custom" ? " · yours" : " · from settings.yaml";
   $("watch-meta").textContent =
-    `${symbols.length} symbol${symbols.length === 1 ? "" : "s"}` +
-    (d.source === "custom" ? " · yours" : " · from settings.yaml");
+    `${symbols.length} symbol${symbols.length === 1 ? "" : "s"}${where}`;
   const box = $("watch-input");
   /* Do not overwrite what somebody is part-way through typing. */
   if (document.activeElement !== box) box.value = symbols.join(", ");
+  const btn = $("btn-watch-auto");
+  btn.disabled = auto.available === false;
+  btn.textContent = d.source === "auto" ? "Re-rank now" : `Auto top ${auto.size || 10}`;
+  renderAutoTable(d);
+}
+
+/* The ranking behind the auto list: why each name is on it. */
+function renderAutoTable(d) {
+  const el = $("watch-auto");
+  const auto = d.auto || {};
+  if (d.source !== "auto") { el.innerHTML = ""; return; }
+  const held = new Set(auto.held || []);
+  const on = new Set(d.symbols || []);
+  const rows = (auto.table || []).filter(r => on.has(r.symbol));
+  const notes = (auto.notes || []).map(n => `<div class="muted">${esc(n)}</div>`).join("");
+  const sources = Object.entries(auto.sources || {})
+    .map(([k, v]) => `${esc(k.replace(/_/g, " "))}: ${esc(v)}`).join(" · ");
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty">No ranking yet — the first one runs at
+      ${esc(auto.start || "")} on a market day, or press the button.</div>` + notes;
+    return;
+  }
+  el.innerHTML = `<table class="watch-rank"><thead><tr><th>Symbol</th><th>Score</th>
+      <th>Move</th><th>RVOL</th><th>Why</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${esc(r.symbol)}${held.has(r.symbol)
+        ? ' <span class="tag">position open</span>' : ""}</td>
+      <td>${Number(r.score).toFixed(2)}</td>
+      <td class="${r.change_pct >= 0 ? "pos" : "neg"}">${Number(r.change_pct).toFixed(1)}%</td>
+      <td>${Number(r.rvol).toFixed(1)}x</td>
+      <td>${esc((r.reasons || []).join("; "))}</td></tr>`).join("") +
+    `</tbody></table>` + notes +
+    (sources ? `<div class="muted">Sources — ${sources}</div>` : "");
+}
+
+async function autoWatchlist() {
+  const btn = $("btn-watch-auto");
+  btn.disabled = true;
+  watchStatus("Ranking the day's names…");
+  try {
+    const d = await postJSON("/api/watchlist/auto", {enabled: true});
+    renderWatchlist(d);
+    watchStatus(`Auto: scanning the top ${d.symbols.length}, re-checked every ` +
+                `${d.auto?.refresh_minutes || 60} min.`, "good");
+    refreshActivity();
+  } catch (e) {
+    watchStatus(e.message, "bad");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function watchStatus(text, level) {
@@ -924,11 +978,16 @@ $("btn-daily-md").onclick = () => {
 
 $("btn-watch").onclick = saveWatchlist;
 $("btn-watch-reset").onclick = resetWatchlist;
+$("btn-watch-auto").onclick = autoWatchlist;
 $("watch-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") saveWatchlist();
 });
 
-getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
+function refreshWatchlist() {
+  getJSON("/api/watchlist").then(renderWatchlist).catch(() => {});
+}
+refreshWatchlist();
+setInterval(refreshWatchlist, 60000);
 
 /* ---- Rules & strategies ------------------------------------------------ */
 /* A pop-up, not a page: it is read beside the desk, not instead of it. The

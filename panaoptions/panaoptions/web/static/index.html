@@ -64,14 +64,19 @@
              placeholder="QQQ, SPY, AAPL, NVDA"
              aria-label="Tickers to scan, separated by commas">
       <button id="btn-watch">Scan these</button>
+      <button id="btn-watch-auto">Auto top 10</button>
       <button id="btn-watch-reset" class="ghost">Reset to config</button>
       <span id="watch-status"></span>
     </div>
+    <div id="watch-auto"></div>
     <div class="empty">
       Every enabled strategy runs against every symbol here, each cycle, and
-      takes paper trades when the rules agree. Changing this changes what the
-      desk looks at — it cannot open or close a position, and anything already
-      open keeps its own exit rules.
+      takes paper trades when the rules agree. <b>Auto top 10</b> ranks the
+      day's names (Yahoo's most-active, gainers, losers and trending lists,
+      analyst ratings, relative volume) before the open and re-checks every
+      hour; a symbol with an open position is never replaced until its trade
+      has closed. Typing a list turns auto off. Changing this changes what the
+      desk looks at — it cannot open or close a position.
     </div>
   </section>
 

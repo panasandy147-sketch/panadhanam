@@ -48,9 +48,10 @@ def gap_pct(previous_close: float, open_or_last: float) -> float:
     return round((open_or_last - previous_close) / previous_close * 100, 3)
 
 
-async def screen(feed, cfg, now_et: datetime) -> list[PreMarketRead]:
-    """Run the screen over the whole universe, concurrently."""
-    symbols = cfg.symbols
+async def screen(feed, cfg, now_et: datetime,
+                 symbols: list[str] | None = None) -> list[PreMarketRead]:
+    """Run the screen over the whole universe (or `symbols`), concurrently."""
+    symbols = list(symbols) if symbols else cfg.symbols
     min_rvol = float(cfg.get("premarket.min_rvol", 1.5))
     min_gap = float(cfg.get("premarket.min_gap_pct", 1.0))
     lookback = int(cfg.get("technical.volume_lookback", 20))

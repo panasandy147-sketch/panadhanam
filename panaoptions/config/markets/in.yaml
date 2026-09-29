@@ -83,6 +83,23 @@ universe:
   symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK", "ICICIBANK",
             "INFY", "TCS", "SBIN", "AXISBANK"]
 
+auto_watchlist:
+  # India ranks the names with a known lot size (data.lot_sizes) only — a
+  # name without one could be picked but never sized. Add a stock and its
+  # lot to lot_sizes above to put it in the running.
+  start: "09:00"
+  stop: "14:30"
+  pinned: ["NIFTY", "BANKNIFTY"]
+  screeners: []             # Yahoo's screeners are US-only
+  trending_region: "IN"
+  always_consider: []
+  lot_sizes_only: true
+  min_price: 0
+  max_price: 0
+  min_avg_volume: 0
+  min_market_cap: 0
+  liquidity_full: 10000000
+
 premarket:
   # The pre-open auction ends 09:08; screen from 09:10 on the gap it set.
   screen_from: "09:10"

@@ -357,6 +357,32 @@ The change applies on the next cycle, not the next restart, and it is saved to
 `data/watchlist.json` so it survives one. The panel header says whether the
 desk is running your list or the shipped one.
 
+### Auto top 10 (the default)
+
+Out of the box the desk picks its own list: the day's **top 10**, ranked
+before the open (08:45 ET; 09:00 IST on India) and re-checked **every hour**
+until 15:00 ET (14:30 IST). The sources are free and need no account — Yahoo
+Finance's most-active, gainers and losers screeners, Yahoo trending, and the
+brokers' average analyst rating. Each name is scored on the size of its move,
+relative volume, analyst conviction (more when the analysts agree with the
+move), how many lists it is on, and liquidity. Penny stocks, $600+ stocks,
+thin names and small caps are left out. SPY and QQQ (NIFTY and BANKNIFTY) are
+always on it; India ranks only the names with a known lot size.
+
+* **A symbol with an open position is never replaced.** Once its trade has
+  closed it can be, at the next hourly refresh — not the moment it closes.
+* An hourly refresh swaps a name only when a newcomer clearly beats it
+  (`swap_margin`), so the list does not churn.
+* If every source fails, the list in force stays and it retries in 10
+  minutes. It is never emptied.
+* Typing a list turns auto off; **Auto top 10** turns it back on and ranks
+  straight away. The panel shows each name's score and why it is there.
+* Every refresh is logged to `journal/watchlist/<date>.jsonl`
+  (`journal/in/watchlist/` for India) for the weekend review.
+
+All of it is under `auto_watchlist:` in `config/settings.yaml` (and
+`config/markets/in.yaml`); `enabled: false` switches it off.
+
 Two limits, both deliberate:
 
 * **20 symbols.** Each one costs several feed requests every cycle. Past this

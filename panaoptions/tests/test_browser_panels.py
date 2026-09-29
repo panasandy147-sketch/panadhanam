@@ -186,6 +186,21 @@ def test_the_watchlist_box_saves(page):
     _wait_text(page, "#watch-meta", "3")
 
 
+def test_the_auto_top_10_button_ranks_and_shows_why(page, desk, monkeypatch):
+    from tests.test_auto_watchlist import FakeDiscovery, _market
+
+    monkeypatch.delenv("PANAOPTIONS_AUTO_WATCHLIST", raising=False)
+    desk["desk"].discovery = FakeDiscovery(_market())
+    page.reload()
+    page.click("#btn-watch-auto")
+    _wait_text(page, "#watch-status", "Auto: scanning the top 10")
+    _wait_text(page, "#watch-meta", "auto top 10")
+    _wait_text(page, "#watch-auto", "S00")
+    assert "RVOL" in _text(page, "#watch-auto")
+    page.click("#btn-watch-reset")
+    _wait_text(page, "#watch-meta", "from settings.yaml")
+
+
 def test_todays_review_builds(page):
     if page.is_checked("#d-coach"):
         page.uncheck("#d-coach")

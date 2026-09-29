@@ -16,10 +16,10 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from panaoptions import alpha, clock, markets, watchlist
+from panaoptions import alpha, auto_watchlist, clock, markets, watchlist
 from panaoptions.activity import ActivityLog
 from panaoptions.agents import CMIO
 from panaoptions.config import Config, get_config
@@ -83,13 +83,26 @@ class OptionsDesk:
         self.last_cycle_seconds: float = 0.0
         self._predictor: Any = None
         self._reflection_task: asyncio.Task | None = None
-        # A watchlist saved from the dashboard wins over the config universe.
-        # Applied at construction so a restart keeps scanning what was asked
-        # for rather than quietly reverting to the shipped list.
-        saved = watchlist.load()
+        # The auto watchlist's sources (Yahoo screeners, trending, analyst
+        # ratings). Built on first use; tests put a fake here.
+        self.discovery: Any = None
+        self._watch_refreshing = False
+        # A watchlist saved from the dashboard, or the auto list, wins over
+        # the config universe. Applied at construction so a restart keeps
+        # scanning what was asked for rather than the shipped list.
+        self._apply_saved_universe()
+
+    def _apply_saved_universe(self) -> None:
+        how = auto_watchlist.mode(self.cfg)
+        saved: list[str] = []
+        if how == "custom":
+            saved = watchlist.load()
+        elif how == "auto":
+            saved = [s for s in auto_watchlist.load_state().get("symbols") or []
+                     if isinstance(s, str)][:watchlist.MAX_SYMBOLS]
         if saved:
             self.cfg.data.setdefault("universe", {})["symbols"] = list(saved)
-            log.info("watchlist in force: %s", ", ".join(saved))
+            log.info("watchlist in force (%s): %s", how, ", ".join(saved))
 
     # ------------------------------------------------------------------ #
     def set_universe(self, symbols: list[str]) -> list[str]:
@@ -103,6 +116,8 @@ class OptionsDesk:
         """
         self.cfg.data.setdefault("universe", {})["symbols"] = list(symbols)
         watchlist.save(symbols)
+        # A list typed by a person is theirs: the hourly refresh leaves it be.
+        auto_watchlist.set_mode("custom")
         # Force a re-screen on the next cycle rather than waiting for
         # tomorrow: the point of typing a symbol is to have it looked at.
         self._screened_on = ""
@@ -122,6 +137,7 @@ class OptionsDesk:
     def reset_universe(self) -> list[str]:
         """Back to `universe.symbols` from the config file."""
         watchlist.clear()
+        auto_watchlist.set_mode("config")
         self.cfg.reload()
         symbols = self.cfg.symbols
         self._screened_on = ""
@@ -131,6 +147,137 @@ class OptionsDesk:
                           f"back to the config universe: {', '.join(symbols)}",
                           level="info")
         return symbols
+
+    # ------------------------------------------------------------------ #
+    # The auto watchlist
+    # ------------------------------------------------------------------ #
+    def _held_symbols(self) -> list[str]:
+        out: list[str] = []
+        for trade in self.ledger.open_trades.values():
+            if trade.symbol.upper() not in out:
+                out.append(trade.symbol.upper())
+        return out
+
+    async def _maybe_refresh_watchlist(self, now: datetime) -> None:
+        """Before the open, then hourly — only while the auto list is on."""
+        if auto_watchlist.mode(self.cfg) != "auto":
+            return
+        kind = auto_watchlist.due(self.cfg, now, auto_watchlist.load_state())
+        if kind:
+            await self.refresh_watchlist(now, kind)
+
+    async def refresh_watchlist(self, now: datetime | None = None,
+                                kind: str = "hourly") -> dict[str, Any]:
+        """Re-rank the candidates and apply the new list.
+
+        Symbols with an open position are never removed — they stay until the
+        trade closes and are replaceable only at the next refresh after that.
+        If every source fails, the list in force stays.
+        """
+        now = now or clock.now(self.cfg.timezone)
+        today = now.date().isoformat()
+        current = list(self.cfg.symbols)
+        held = self._held_symbols()
+        pool, restrict = auto_watchlist.pool_for(self.cfg, current, held)
+        if self.discovery is None:
+            self.discovery = auto_watchlist.YahooDiscovery()
+        self._watch_refreshing = True
+        try:
+            found, sources = await asyncio.wait_for(
+                auto_watchlist.gather(self.discovery, self.feed, self.cfg, pool, now),
+                timeout=float(self.cfg.get("auto_watchlist.timeout_seconds", 45)))
+        except TimeoutError:
+            found, sources = {}, {"all": "timed out"}
+        finally:
+            self._watch_refreshing = False
+
+        ranked, refused = auto_watchlist.rank(found, self.cfg, now, restrict)
+        fallback = [str(s).upper() for s in
+                    self.cfg.get("auto_watchlist.always_consider", []) or []] or current
+        sel = auto_watchlist.select(current, ranked, held, self.cfg,
+                                    fresh=kind == "morning", fallback=fallback,
+                                    judged=set(found))
+        symbols = sel.symbols[:max(watchlist.MAX_SYMBOLS, len(held))]
+
+        every = int(self.cfg.get("auto_watchlist.refresh_minutes", 60))
+        stamp = now
+        if not ranked:
+            # Nothing answered: try again in 10 minutes, not an hour.
+            retry = int(self.cfg.get("auto_watchlist.retry_minutes", 10))
+            stamp = now - timedelta(minutes=max(every - retry, 0))
+        table = [c.row() for c in sorted(ranked.values(), key=lambda c: c.score,
+                                         reverse=True)][:25]
+        state = auto_watchlist.load_state()
+        state.update(mode="auto", day=today, last_refresh=stamp.isoformat(),
+                     refreshed_at=now.isoformat(), kind=kind, symbols=symbols,
+                     table=table, held=sel.held, notes=sel.notes, sources=sources,
+                     refused=dict(list(refused.items())[:30]))
+        auto_watchlist.save_state(state)
+        auto_watchlist.log_refresh(now, {
+            "market": self.cfg.market, "kind": kind, "symbols": symbols,
+            "added": sel.added, "removed": sel.removed, "held": sel.held,
+            "notes": sel.notes, "sources": sources, "top": table[:15]})
+
+        if symbols != current:
+            self.cfg.data.setdefault("universe", {})["symbols"] = list(symbols)
+            kept = set(symbols)
+            self.screened = [r for r in self.screened if r.symbol in kept]
+            # Already screened today: screen just the newcomers, now.
+            if self._screened_on == today and sel.added:
+                extra = await screen(self.feed, self.cfg, now, symbols=sel.added)
+                self.screened.extend(extra)
+        label = "pre-open top" if kind == "morning" else "hourly refresh —"
+        change = (f"added {', '.join(sel.added)}" if sel.added else "no change")
+        if sel.removed:
+            change += f"; removed {', '.join(sel.removed)}"
+        if sel.held:
+            change += f"; kept {', '.join(sel.held)} (position open)"
+        if not ranked:
+            change += " — no source answered, keeping the list; retrying in 10 min"
+        self.activity.add("watchlist.auto",
+                          f"{label} {len(symbols)}: {', '.join(symbols)} ({change})",
+                          level="good" if ranked else "warn", ts=now)
+        log.info("auto watchlist (%s): %s", kind, ", ".join(symbols))
+        return state
+
+    async def set_auto_watchlist(self, enabled: bool) -> dict[str, Any]:
+        """The Auto button. On: rank now and follow the hourly refresh. Off:
+        back to the universe in settings.yaml."""
+        if not enabled:
+            self.reset_universe()
+            return self.watchlist_status()
+        if not auto_watchlist.available(self.cfg):
+            raise ValueError("the auto watchlist is switched off "
+                             "(auto_watchlist.enabled in settings.yaml)")
+        auto_watchlist.set_mode("auto")
+        async with self._lock:
+            await self.refresh_watchlist(clock.now(self.cfg.timezone), "morning")
+        return self.watchlist_status()
+
+    def watchlist_status(self) -> dict[str, Any]:
+        how = auto_watchlist.mode(self.cfg)
+        state = auto_watchlist.load_state() if how == "auto" else {}
+        return {
+            "symbols": self.cfg.symbols, "source": how,
+            "config_symbols": list((self.cfg.get("universe", {}) or {}).get("symbols", [])),
+            "max": watchlist.MAX_SYMBOLS,
+            "auto": {
+                "available": auto_watchlist.available(self.cfg),
+                "on": how == "auto",
+                "size": int(self.cfg.get("auto_watchlist.size", 10)),
+                "refresh_minutes": int(self.cfg.get("auto_watchlist.refresh_minutes", 60)),
+                "start": str(self.cfg.get("auto_watchlist.start", "08:45")),
+                "stop": str(self.cfg.get("auto_watchlist.stop", "15:00")),
+                "refreshed_at": state.get("refreshed_at", ""),
+                "next_refresh": auto_watchlist.next_refresh(self.cfg, state),
+                "kind": state.get("kind", ""),
+                "table": state.get("table", []),
+                "held": self._held_symbols(),
+                "notes": state.get("notes", []),
+                "sources": state.get("sources", {}),
+                "refreshing": self._watch_refreshing,
+            },
+        }
 
     # ------------------------------------------------------------------ #
     async def start(self, cycle_seconds: int = 60) -> None:
@@ -208,9 +355,7 @@ class OptionsDesk:
         markets.activate(code)
         self.cfg.market = code
         self.cfg.reload()
-        saved = watchlist.load()
-        if saved:
-            self.cfg.data.setdefault("universe", {})["symbols"] = list(saved)
+        self._apply_saved_universe()
         self.feed = factory(self.cfg)
         self.risk = RiskManager(self.cfg)
         self.ledger = PaperLedger(self.cfg, self.risk)
@@ -333,7 +478,10 @@ class OptionsDesk:
             store.save_session(today, self.risk.state)
             return result
 
-        # 2. The pre-market screen.
+        # 2. The auto watchlist: built before the open, re-checked hourly.
+        await self._maybe_refresh_watchlist(now)
+
+        # 3. The pre-market screen.
         if self._should_screen(phase, today, now):
             self.screened = await screen(self.feed, self.cfg, now)
             self._screened_on = today
@@ -343,13 +491,13 @@ class OptionsDesk:
                 "screen.done", self._screen_summary(passed),
                 level="good" if passed else "info", ts=now)
 
-        # 3. Tightening is a clock event, not a phase one. The entry window now
+        # 4. Tightening is a clock event, not a phase one. The entry window now
         # runs to the last strategy's close, which is well past the tighten
         # time — so gating this on the "managing" phase would mean a trade
         # opened at 10:00 keeps its full stop until 13:30.
         await self._maybe_tighten(now)
 
-        # 4. New entries: only in the window, only when flat.
+        # 5. New entries: only in the window, only when flat.
         if phase == "entry_window":
             hunted = await self._hunt(now)
             result["actions"].extend(hunted)

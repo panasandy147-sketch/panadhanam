@@ -37,6 +37,9 @@ def _desk_files_elsewhere(tmp_path, monkeypatch, request):
     # The committee votes by rules alone in tests: no test may depend on
     # whether an Ollama happens to be running on the machine.
     monkeypatch.setenv("PANAOPTIONS_AGENT_LLM", "off")
+    # Nor on Yahoo's screeners: the auto watchlist is off unless a test
+    # turns it on (and gives it fake sources).
+    monkeypatch.setenv("PANAOPTIONS_AUTO_WATCHLIST", "off")
     # Every test starts on the US, whatever this machine's toggle says.
     from panaoptions import markets
     monkeypatch.delenv("PANAOPTIONS_MARKET", raising=False)

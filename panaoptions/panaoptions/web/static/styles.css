@@ -218,6 +218,12 @@ button.ghost { background: transparent; color: var(--muted); }
 button.ghost:hover { color: var(--text); }
 #watch-status.bad { color: var(--neg); }
 #watch-status.good { color: var(--pos); }
+#watch-auto { overflow-x: auto; }
+#watch-auto .watch-rank { width: 100%; margin-top: 8px; font-size: 13px; }
+#watch-auto .watch-rank td:last-child { color: var(--muted); }
+#watch-auto .tag { font-size: 11px; padding: 1px 6px; border-radius: 3px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+#watch-auto .muted { font-size: 12px; margin-top: 4px; }
 
 /* A published figure sits next to a measured one and must not read as
    equally authoritative. */

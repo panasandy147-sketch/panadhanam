@@ -80,6 +80,42 @@ universe:
   small_account_alternative:
     ["IWM", "PLTR", "INTC", "SOFI", "HOOD", "F", "XLF", "GDX"]
 
+auto_watchlist:
+  # The day's top names, picked before the open and re-checked every hour.
+  # Sources (free, no account): Yahoo's most-active, gainers and losers
+  # screeners, Yahoo trending, and the brokers' average analyst rating.
+  # Ranked on the move, relative volume, analyst conviction (more when the
+  # analysts agree with the move), how many lists a name is on, and liquidity.
+  #
+  #   A symbol with an open position is never replaced; once its trade has
+  #   closed it can be, at the next hourly refresh. SPY and QQQ always stay.
+  #   If every source fails the list in force is kept — never emptied.
+  #   Typing a list on the dashboard turns this off; "Auto top 10" turns it
+  #   back on. Every refresh is logged to journal/watchlist/<date>.jsonl.
+  enabled: true
+  size: 10
+  start: "08:45"            # the pre-open build (the screen runs from 09:00)
+  stop: "15:00"             # no refreshes after this — entries are ending
+  refresh_minutes: 60
+  retry_minutes: 10         # when no source answered
+  swap_margin: 0.10         # an hourly newcomer must beat the weakest by this
+  pinned: ["SPY", "QQQ"]
+  screeners: ["most_actives", "day_gainers", "day_losers"]
+  trending_region: "US"
+  # Always ranked, so a thin morning still has names to choose from.
+  always_consider: ["SPY", "QQQ", "IWM", "AAPL", "NVDA", "TSLA", "AMD", "MSFT",
+                    "AMZN", "META", "GOOGL", "PLTR", "AVGO", "NFLX"]
+  quote_types: ["EQUITY", "ETF"]
+  # Contracts on a $600+ stock cost more than one trade may spend; under $10
+  # the options are thin. Liquid names only.
+  min_price: 10
+  max_price: 600
+  min_avg_volume: 2000000
+  min_market_cap: 5000000000
+  move_full_pct: 3.0        # a 3% move scores the trend part in full
+  liquidity_full: 20000000
+  weights: { trend: 0.25, volume: 0.25, analysts: 0.20, buzz: 0.15, liquidity: 0.15 }
+
 flow:
   # Unusual options activity: a contract trading min_volume_to_oi times its
   # open interest (and at least min_volume contracts) means new positions in
