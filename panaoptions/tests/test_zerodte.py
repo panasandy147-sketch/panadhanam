@@ -119,3 +119,13 @@ def test_rules_describe_the_same_day_desk(zcfg):
     assert "Hammer, Shooting Star, Bullish Engulfing" in text
     assert "Three" not in "".join(p["pattern"] for s in doc["sections"]
                                   for p in s.get("patterns", []))
+
+
+def test_the_start_check_runs_on_the_same_day_profile(zcfg):
+    """min_dte 0 used to price the ATM estimate at $0 and crash ./start.sh
+    with a ZeroDivisionError in the scale-out check."""
+    from panaoptions import preflight
+    assert int(zcfg.get("contracts.min_dte")) == 0
+    findings = preflight.check(zcfg)
+    assert not [f for f in findings if f.level == "blocker"]
+    assert preflight._atm_cost("SPY", 0, 100) > 0

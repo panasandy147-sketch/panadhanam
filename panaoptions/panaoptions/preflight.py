@@ -97,7 +97,10 @@ def _atm_cost(symbol: str, dte: int, multiplier: int) -> float | None:
     if not spot_iv:
         return None
     spot, iv = spot_iv
-    return atm_premium_estimate(spot, iv, dte) * multiplier
+    # A same-day (0DTE) contract still has the session left to run: cost it
+    # as one day rather than as worthless.
+    cost = atm_premium_estimate(spot, iv, max(dte, 1)) * multiplier
+    return cost if cost > 0 else None
 
 
 def check(cfg) -> list[Finding]:
@@ -136,14 +139,22 @@ def check(cfg) -> list[Finding]:
         if min_delta >= 0.40 and cost > max_price:
             unaffordable.append((symbol, cost))
 
+    # With the over-budget ladder on (a nearer expiry, a debit spread, the
+    # secondary delta tier), an over-cap primary contract is not the end of
+    # the setup, so it is a warning rather than a reason not to start.
+    ladder = [r for r in (cfg.get("contracts.fallback_order") or [])
+              if r != "debit_spread" or cfg.get("contracts.debit_spread.enabled", True)]
     if unaffordable:
         worst = max(cost for _, cost in unaffordable)
         names = ", ".join(s for s, _ in unaffordable)
         findings.append(Finding(
-            "blocker", "contracts.max_contract_price vs contracts.min_delta",
+            "warning" if ladder else "blocker",
+            "contracts.max_contract_price vs contracts.min_delta",
             f"{min_delta:.2f}-{max_delta:.2f} delta is at the money, and an "
             f"at-the-money {max_dte}-day contract costs more than the "
-            f"${max_price:,.0f} cap on: {names} (up to ${worst:,.0f}).",
+            f"${max_price:,.0f} cap on: {names} (up to ${worst:,.0f})."
+            + (f" Those setups go down the fallback ladder ({', '.join(ladder)}) "
+               f"instead of being bought outright." if ladder else ""),
             f"Raise contracts.max_contract_price to about "
             f"{worst / multiplier:.2f} per share (${worst:,.0f} a contract), "
             f"trade cheaper underlyings, or lower contracts.min_delta."))

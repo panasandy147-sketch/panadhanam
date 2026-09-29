@@ -93,9 +93,11 @@ def test_swapping_to_the_cheaper_universe_also_clears_it(cfg):
 
 # --------------------------------------------------------------------------- #
 def test_the_original_price_cap_is_caught_as_an_empty_set(cfg):
-    # $1.00 a share with a 0.45-0.60 delta band: the bug this module exists for.
+    # $1.00 a share with a 0.45-0.60 delta band: the bug this module exists for
+    # (before the over-budget ladder, which is off here; with it, a warning).
     _settings(cfg, contracts__max_contract_price=1.00,
               contracts__min_contract_price=0.60)
+    cfg.data["contracts"]["fallback_order"] = []
     blockers = _blockers(cfg)
 
     assert any("max_contract_price" in f.setting and "min_delta" in f.setting
@@ -338,3 +340,21 @@ def test_no_override_at_all_raises_nothing(cfg, monkeypatch):
     cfg.data["account"]["starting_capital"] = 500.0
     assert not [f for f in preflight.check(cfg)
                 if f.setting == "PANAOPTIONS_CAPITAL"]
+
+
+def test_an_over_cap_primary_contract_blocks_only_without_the_ladder(cfg):
+    """With the fallback ladder on, an ATM contract over the price cap goes to
+    a nearer expiry / debit spread / the secondary tier — not a reason to
+    refuse to start. Without it, the desk really would take nothing."""
+    key = "contracts.max_contract_price vs contracts.min_delta"
+    c = cfg.data["contracts"]
+    saved = (c.get("max_contract_price"), c.get("min_delta"), c.get("fallback_order"))
+    try:
+        c["max_contract_price"], c["min_delta"] = 0.50, 0.40
+        [f] = [f for f in check(cfg) if f.setting == key]
+        assert f.level == "warning" and "fallback ladder" in f.problem
+        c["fallback_order"] = []
+        [f] = [f for f in check(cfg) if f.setting == key]
+        assert f.level == "blocker"
+    finally:
+        c["max_contract_price"], c["min_delta"], c["fallback_order"] = saved
