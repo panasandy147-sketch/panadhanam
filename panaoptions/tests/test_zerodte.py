@@ -39,7 +39,8 @@ def test_the_profile_is_same_day_with_the_asked_for_numbers(zcfg):
 def test_only_fast_patterns_are_traded(zcfg):
     allowed = set(zcfg.get("strategies.candlestick_at_level.allowed_patterns"))
     assert allowed == {"Hammer", "Shooting Star", "Bullish Engulfing",
-                       "Bearish Engulfing", "Tweezer Bottom", "Tweezer Top"}
+                       "Bearish Engulfing", "Tweezer Bottom", "Tweezer Top",
+                       "Double Rejection Top", "Double Rejection Bottom"}
 
 
 def _bars(rows):

@@ -61,6 +61,7 @@ class PaperLedger:
             long_label=c.long_leg.label if c.is_spread else c.label,
             short_label=c.short_leg.label if c.is_spread else "",
             max_value=c.width,
+            side_tag=signal.side_tag, execution=signal.execution,
             remaining=signal.quantity, max_price_seen=fill_price,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,

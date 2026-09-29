@@ -22,6 +22,14 @@ BELL = datetime(2026, 9, 23, 13, 30, tzinfo=UTC)
 PREMARKET = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def _per_pattern_bands(request):
+    """These tests are about each pattern asking for its own contract, so the
+    shipped `contracts.primary_band` (0.40-0.50 for everything) is lifted."""
+    if "cfg" in request.fixturenames:
+        request.getfixturevalue("cfg").data["contracts"].pop("primary_band", None)
+
+
 def _bar(ts, price, volume=2000.0, high=None, low=None):
     return Candle(ts=ts, open=price, high=high if high is not None else price + 0.3,
                   low=low if low is not None else price - 0.3, close=price,

@@ -129,6 +129,58 @@ def is_tweezer_top(prev: pd.Series, bar: pd.Series,
                      float(bar["close"]), tolerance)
 
 
+def _rejects(bar: pd.Series, top: bool) -> bool:
+    """Did this bar reject its extreme? A long wick on that side, or a close
+    in the far half of the range."""
+    rng = float(bar["high"] - bar["low"])
+    if rng <= 0:
+        return False
+    if top:
+        wick = float(bar["high"] - max(bar["open"], bar["close"]))
+        return wick >= 0.30 * rng or float(bar["close"]) <= float(bar["low"]) + rng / 2
+    wick = float(min(bar["open"], bar["close"]) - bar["low"])
+    return wick >= 0.30 * rng or float(bar["close"]) >= float(bar["high"]) - rng / 2
+
+
+def double_rejection(df: pd.DataFrame, top: bool, lookback: int = 8,
+                     tolerance: float = 0.0015) -> int:
+    """A second rejection of the same high (top) or low (bottom), 2 to
+    `lookback` bars after the first, with a pullback in between. Returns how
+    many bars back the first rejection was, or 0.
+
+    A tweezer is the same test on two ADJACENT candles; this is the wider
+    version traders call a double top/bottom on the intraday chart — the
+    level held twice, and the second attempt closed away from it.
+    """
+    if len(df) < 4:
+        return 0
+    bar = df.iloc[-1]
+    if not _rejects(bar, top) or not (
+            (bar["close"] < bar["open"]) if top else (bar["close"] > bar["open"])):
+        return 0
+    reference = float((df["high"] - df["low"]).tail(20).mean()) or 0.0
+    edge = "high" if top else "low"
+    level = float(bar[edge])
+    for k in range(2, min(lookback, len(df) - 1) + 1):
+        first = df.iloc[-1 - k]
+        near = (_matching(float(first[edge]), level, float(bar["close"]), tolerance)
+                or abs(float(first[edge]) - level) <= 0.15 * reference)
+        if not near or not _rejects(first, top):
+            continue
+        # In between, price must have LEFT the level (not kept testing it)
+        # and travelled a full average bar away from it.
+        between = df.iloc[-k:-1]
+        if top:
+            held = float(between["high"].max()) <= level - 0.25 * reference
+            pulled = float(between["low"].min()) <= level - 1.0 * reference
+        else:
+            held = float(between["low"].min()) >= level + 0.25 * reference
+            pulled = float(between["high"].max()) >= level + 1.0 * reference
+        if held and pulled:
+            return k
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # Two-candle range rejections
 # --------------------------------------------------------------------------- #
@@ -463,6 +515,23 @@ def detect_all(df: pd.DataFrame, tolerance: float = 0.0015) -> list[Pattern]:
             float(max(prev["high"], bar["high"])), bars=2,
             note="The same high rejected twice in a row."))
 
+    top_ago = double_rejection(df, top=True, tolerance=tolerance)
+    if top_ago:
+        first = df.iloc[-1 - top_ago]
+        hits.append(Pattern(
+            "Double Rejection Top", False, float(bar["low"]),
+            float(max(first["high"], bar["high"])), bars=top_ago + 1,
+            note=f"The same high rejected twice, {top_ago} bars apart, with a "
+                 f"pullback between — buyers failed at it on both attempts."))
+    bottom_ago = double_rejection(df, top=False, tolerance=tolerance)
+    if bottom_ago:
+        first = df.iloc[-1 - bottom_ago]
+        hits.append(Pattern(
+            "Double Rejection Bottom", True, float(bar["high"]),
+            float(min(first["low"], bar["low"])), bars=bottom_ago + 1,
+            note=f"The same low rejected twice, {bottom_ago} bars apart, with a "
+                 f"bounce between — sellers failed at it on both attempts."))
+
     if is_hammer(bar):
         hits.append(Pattern(
             "Hammer", True, float(bar["high"]), float(bar["low"]),
@@ -496,6 +565,22 @@ def detect_recent(df: pd.DataFrame, within: int = 2,
         if found is not None:
             return found, ago
     return None
+
+
+def detect_recent_all(df: pd.DataFrame, within: int = 2,
+                      tolerance: float = 0.0015,
+                      allowed: set[str] | None = None) -> list[tuple[Pattern, int]]:
+    """Every pattern completing within the last `within` bars, newest bar
+    first and strongest first within a bar — for a strategy that must try
+    the next one when the strongest fails its context."""
+    out: list[tuple[Pattern, int]] = []
+    for ago in range(0, max(within, 0) + 1):
+        window = df.iloc[: len(df) - ago] if ago else df
+        if len(window) < 2:
+            continue
+        out.extend((p, ago) for p in detect_all(window, tolerance)
+                   if allowed is None or p.name in allowed)
+    return out
 
 
 def bullish(df: pd.DataFrame) -> str:

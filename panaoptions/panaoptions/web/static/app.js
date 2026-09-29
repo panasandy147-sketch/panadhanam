@@ -815,15 +815,20 @@ function renderAuditDays(r) {
     <div class="k">Audit log — day by day</div>
     ${days.map((d, i) => `
       <details ${i === days.length - 1 ? "open" : ""}>
-        <summary><b>${esc(d.weekday)} ${esc(d.date)}</b> · ${d.buys} buy(s),
-          ${d.sells} sell(s) · <span class="${sign(d.pnl)}">${money(d.pnl)}</span>
+        <summary><b>${esc(d.weekday)} ${esc(d.date)}</b> · ${d.buys} buy(s)
+          (${d.spreads || 0} spread), ${d.sells} sell(s), ${d.skipped || 0} skipped ·
+          <span class="${sign(d.pnl)}">${money(d.pnl)}</span>
           · ${d.wins}W / ${d.losses}L</summary>
-        <table><thead><tr><th>Time</th><th>Event</th><th>Contract</th>
+        <table><thead><tr><th>Time</th><th>Event</th><th>Side</th><th>Executed as</th>
+          <th>Contract</th>
           <th>Strategy</th><th class="num">Qty</th><th class="num">Price</th>
           <th class="num">Cost / P&amp;L</th><th>Why</th></tr></thead>
         <tbody>${d.events.map((e) => `<tr>
-          <td>${esc(e.time)}</td><td>${esc(e.event)}</td><td>${esc(e.contract)}</td>
-          <td>${esc(e.strategy || "")}</td><td class="num">${e.quantity ?? ""}</td>
+          <td>${esc(e.time)}</td><td class="${e.event === "SKIP" ? "neg" : ""}">${
+            esc(e.event)}</td><td>${esc(e.side || "")}</td>
+          <td>${esc((e.execution || "").replace(/_/g, " ").toLowerCase())}</td>
+          <td>${esc(e.contract || "—")}</td>
+          <td>${esc(e.pattern || e.strategy || "")}</td><td class="num">${e.quantity ?? ""}</td>
           <td class="num">${e.price == null ? "—" : num(e.price, 2)}</td>
           <td class="num ${e.pnl == null ? "" : sign(e.pnl)}">${
             e.cost != null ? money(e.cost) : e.pnl != null ? money(e.pnl) : "—"}</td>

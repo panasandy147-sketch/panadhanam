@@ -152,9 +152,12 @@ technical:
 contracts:
   min_dte: 7
   max_dte: 14
-  # The primary tier: 0.40-0.50 delta.
+  # The primary tier: 0.40-0.50 delta, calls and puts alike. primary_band
+  # holds every pattern to it too (a pattern's own band is ignored while it
+  # is set); remove it to let each pattern ask for its own.
   min_delta: 0.40
   max_delta: 0.50
+  primary_band: [0.40, 0.50]
   # Delayed quotes on single-stock options 2-6 weeks out routinely show
   # 5-10% spreads; at 5% nearly every name but SPY and QQQ was turned away.
   # The Risk Gatekeeper refuses anything wider than risk.max_spread_pct_of_mid

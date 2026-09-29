@@ -34,6 +34,8 @@ DEFAULT_CONTRACT: dict[str, tuple[tuple[float, float], tuple[int, int]]] = {
     "Piercing Line":             ((0.50, 0.60), (14, 30)),
     "Dark Cloud Cover":          ((0.50, 0.60), (14, 30)),
     "Liquidity Sweep Rejection": ((0.55, 0.65), (14, 30)),
+    "Double Rejection Top":      ((0.40, 0.50), (14, 30)),
+    "Double Rejection Bottom":   ((0.40, 0.50), (14, 30)),
 }
 
 _PREFIX = "strategies.candlestick_at_level.patterns"
@@ -45,7 +47,14 @@ def key(pattern: str) -> str:
 
 
 def delta_band(cfg: Any, pattern: str) -> tuple[float, float]:
-    """The delta band this pattern asks for."""
+    """The delta band this pattern asks for.
+
+    `contracts.primary_band` holds every pattern, call or put, to one primary
+    tier (0.40-0.50); the over-budget ladder handles the rest.
+    """
+    primary = cfg.get("contracts.primary_band")
+    if isinstance(primary, list | tuple) and len(primary) == 2:
+        return float(primary[0]), float(primary[1])
     configured = cfg.get(f"{_PREFIX}.{key(pattern)}.delta")
     if isinstance(configured, list | tuple) and len(configured) == 2:
         return float(configured[0]), float(configured[1])

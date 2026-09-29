@@ -32,7 +32,7 @@ from panaoptions.engine import strategies
 from panaoptions.ledger import store
 from panaoptions.ledger.paper import PaperLedger
 from panaoptions.logging import get_logger
-from panaoptions.models import Direction, ExitReason, PreMarketRead
+from panaoptions.models import Direction, ExitReason, PreMarketRead, option_side
 from panaoptions.notify.webhook import Notifier
 from panaoptions.risk.gatekeeper import RiskGatekeeper
 from panaoptions.risk.guardrails import RiskManager
@@ -639,9 +639,10 @@ class OptionsDesk:
                     ts=now)
                 continue
 
+            side = option_side(setup.direction)
             self.activity.add(
                 "setup.fired",
-                f"{symbol} {setup.strategy.value} {setup.direction.value} — "
+                f"{symbol} {side} {setup.strategy.value} — "
                 f"{setup.pattern} (trigger {signal_a.trigger_price:.2f}, "
                 f"invalid at {signal_a.invalidation_level:.2f}, confidence "
                 f"{signal_a.confidence_score:.2f})", level="good", ts=now)
@@ -670,9 +671,11 @@ class OptionsDesk:
                 hard = bool(search.skipped_because)
                 self.activity.add(
                     "contract.skip" if hard else "contract.none",
-                    f"{symbol} {setup.strategy.value} — "
+                    f"{symbol} {side} {setup.strategy.value} — "
                     + (search.note if hard else search.note or "no contract qualified"),
                     level="bad" if hard else "warn", ts=now)
+                if hard:
+                    self._record_skip(symbol, side, setup, "contract ladder", search.note)
                 log.info("%s setup fired but no contract qualified. %s",
                          symbol, search.note)
                 continue
@@ -685,6 +688,9 @@ class OptionsDesk:
                     self.candidate.setdefault("reasoning", []).append(
                         f"**Committee.** {verdict.summary()}")
                 if not verdict.approved:
+                    if verdict.gate is not None and not verdict.gate.approved:
+                        self._record_skip(symbol, side, setup, "Risk Gatekeeper",
+                                          verdict.gate.reason)
                     self._candidate_refused(symbol, verdict.reason)
                     store.save_signal_seen(signal_id, now, symbol,
                                            setup.direction.value, False,
@@ -705,8 +711,9 @@ class OptionsDesk:
                                        setup.direction.value, False, refusal)
                 actions.append(f"{symbol}: {refusal}")
                 self.activity.add("risk.refused",
-                                  f"{symbol} SKIPPED — hard risk failure: {refusal}",
+                                  f"{symbol} {side} SKIPPED — hard risk failure: {refusal}",
                                   level="bad", ts=now)
+                self._record_skip(symbol, side, setup, "sizing", refusal)
                 continue
 
             trade = self.ledger.open(signal, now)
@@ -725,13 +732,17 @@ class OptionsDesk:
             store.save_signal_seen(signal_id, now, symbol,
                                    setup.direction.value, True, "taken",
                                    {"trade_id": trade.id,
-                                    "strategy": setup.strategy.value})
+                                    "strategy": setup.strategy.value,
+                                    "side": signal.side_tag,
+                                    "execution": signal.execution})
             await self.notifier.entry(signal)
             actions.append(f"{symbol}: ENTERED {signal.alert_line()}")
+            how = ("converted debit spread" if signal.contract.is_spread
+                   else "outright long option")
             self.activity.add(
                 "trade.open",
-                f"{signal.alert_line()} — {setup.strategy.value}, "
-                f"x{signal.quantity}",
+                f"EXECUTED {signal.side_tag} as {how} ({signal.execution}): "
+                f"{signal.alert_line()} — {setup.strategy.value}, x{signal.quantity}",
                 level="good", ts=now)
             # Keep going while there are slots left. Stopping after the first
             # entry would make max_open_trades a limit the desk could only
@@ -740,6 +751,14 @@ class OptionsDesk:
 
         self.scanning = ""
         return actions
+
+    def _record_skip(self, symbol: str, side: str, setup, gate: str, reason: str) -> None:
+        """A fired setup a hard risk gate refused: into the audit log, so the
+        weekly review shows what was skipped and why beside what was bought."""
+        from panaoptions import audit
+        audit.record_skip(self.cfg, symbol, side, reason, strategy=setup.strategy.value,
+                          pattern=setup.pattern, gate=gate,
+                          detail={"spot": setup.indicators.close})
 
     def _window_note(self, now: datetime) -> str:
         """Why nothing was judged, and when that changes."""

@@ -664,6 +664,34 @@ async def _backtest_spreads(limit: int, symbols: str | None, days: int) -> int:
     return 0
 
 
+async def _backtest_signals(symbols: str | None, days: int, only: str | None) -> int:
+    """Replay recent sessions through the scanner, both directions."""
+    from panaoptions import backtest_spreads as bt
+    from panaoptions.data.provider import make_feed
+
+    cfg = get_config()
+    now = clock.now(cfg.timezone)
+    names = ([s.strip().upper() for s in symbols.split(",") if s.strip()]
+             if symbols else list(cfg.symbols))
+    keep = {s.strip() for s in only.split(",")} if only else None
+    async with make_feed(cfg) as feed:
+        if not await feed.connect():
+            print("Could not reach the chart feed for historical prices.")
+            return 1
+        items = await bt.scan_history(names, days, feed, cfg, now, only=keep)
+        if not items:
+            print(f"\nNo setups fired on {', '.join(names)} in the last {days} session(s).")
+            return 1
+        results = await bt.replay(items, feed, cfg)
+    summary = bt.summarise(results)
+    title = (f"Backtest — the scanner on {', '.join(names)}, last {days} session(s): "
+             f"LONG_CALL and LONG_PUT")
+    print(bt.to_markdown(results, summary, cfg, title=title))
+    saved = bt.save(results, summary, cfg, now, kind="signals", title=title)
+    print(f"Saved: {saved['markdown']}")
+    return 0
+
+
 def _report(days: int) -> None:
     from datetime import date, timedelta
 
@@ -785,6 +813,12 @@ def main() -> None:
     parser.add_argument("--backtest-spreads", action="store_true",
                         help="replay blocked setups through the debit-spread "
                              "fallback on historical prices")
+    parser.add_argument("--backtest-signals", action="store_true",
+                        help="replay recent sessions bar by bar through the "
+                             "scanner (calls and puts) and the contract ladder")
+    parser.add_argument("--only", default=None,
+                        help="with --backtest-signals: only these strategies, "
+                             "e.g. candlestick_at_level")
     parser.add_argument("--limit", type=int, default=5,
                         help="how many blocked setups to replay (default 5)")
     parser.add_argument("--symbols", default=None,
@@ -885,6 +919,9 @@ def main() -> None:
     if args.screen:
         asyncio.run(_screen())
         return
+    if args.backtest_signals:
+        raise SystemExit(asyncio.run(_backtest_signals(args.symbols, args.days,
+                                                       args.only)))
     if args.backtest_spreads:
         raise SystemExit(asyncio.run(_backtest_spreads(args.limit, args.symbols,
                                                        args.days)))

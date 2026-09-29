@@ -59,6 +59,7 @@ def record_buy(cfg: Any, trade: Any, signal: Any, setup: Any,
     return _write(cfg, {
         "event": "BUY", "trade_id": trade.id, "signal_id": signal.id,
         "symbol": signal.symbol, "contract": c.label,
+        "side": signal.side_tag, "execution": signal.execution,
         "right": c.right.value, "strike": c.strike, "expiry": c.expiry, "dte": c.dte,
         "delta": c.delta, "iv": c.implied_volatility, "bid": c.bid, "ask": c.ask,
         "spread_pct": c.spread_pct_of_mid, "quantity": trade.quantity,
@@ -102,6 +103,7 @@ def record_sell(cfg: Any, trade: Any) -> dict[str, Any]:
     return _write(cfg, {
         "event": "SELL", "trade_id": trade.id, "signal_id": trade.signal_id,
         "symbol": trade.symbol, "contract": trade.contract_label,
+        "side": getattr(trade, "side_tag", ""), "execution": getattr(trade, "execution", ""),
         "strategy": trade.strategy.value, "pattern": trade.pattern,
         "market": getattr(cfg, "market", "US"),
         "currency": getattr(cfg, "currency", "$"),
@@ -113,6 +115,18 @@ def record_sell(cfg: Any, trade: Any) -> dict[str, Any]:
         "pnl": round(trade.realised_pnl, 2), "held_minutes": held,
         "invalidation_note": trade.invalidation_note,
     })
+
+
+def record_skip(cfg: Any, symbol: str, side: str, reason: str, *,
+                strategy: str = "", pattern: str = "", gate: str = "",
+                detail: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A setup that fired and was NOT bought because a hard risk gate refused
+    it — no affordable structure, the sizing rule, or the Risk Gatekeeper."""
+    return _write(cfg, {
+        "event": "SKIP", "trade_id": None, "symbol": symbol, "side": side,
+        "execution": "SKIPPED_HARD_RISK", "gate": gate, "strategy": strategy,
+        "pattern": pattern, "reason": reason[:600],
+        "market": getattr(cfg, "market", "US"), **(detail or {})})
 
 
 def entries(day: date | None = None, since: date | None = None,
@@ -148,6 +162,17 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
     for day in sorted(grouped):
         rows = []
         for e in sorted(grouped[day], key=lambda x: str(x.get("ts") or "")):
+            if e.get("event") == "SKIP":
+                rows.append({
+                    "time": str(e.get("market_time") or "")[11:16], "event": "SKIP",
+                    "trade_id": None, "symbol": e.get("symbol"), "side": e.get("side"),
+                    "execution": "SKIPPED_HARD_RISK", "contract": "",
+                    "strategy": e.get("strategy"), "pattern": e.get("pattern"),
+                    "quantity": None, "price": None, "cost": None, "stop": None,
+                    "option_stop": None, "target": None, "pnl": None,
+                    "held_minutes": None, "reason": e.get("reason") or "",
+                    "estimated": False})
+                continue
             buy = e.get("event") == "BUY"
             exits = e.get("exits") or []
             qty = sum(int(x.get("quantity") or 0) for x in exits) if not buy else e.get("quantity")
@@ -157,7 +182,8 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
             rows.append({
                 "time": str(e.get("market_time") or "")[11:16],
                 "event": e.get("event"), "trade_id": e.get("trade_id"),
-                "symbol": e.get("symbol"), "contract": e.get("contract"),
+                "symbol": e.get("symbol"), "side": e.get("side"),
+                "execution": e.get("execution"), "contract": e.get("contract"),
                 "strategy": e.get("strategy"), "pattern": e.get("pattern"),
                 "quantity": qty, "price": price,
                 "cost": e.get("cost") if buy else None,
@@ -171,10 +197,14 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
                           else str(e.get("exit_reason") or ""),
                 "estimated": bool(e.get("estimated_prices")),
             })
-        sells = [r for r in rows if r["pnl"] is not None]
+        sells = [r for r in rows if r["event"] == "SELL"]
+        skips = [r for r in rows if r["event"] == "SKIP"]
         wd = date.fromisoformat(day).strftime("%a") if len(day) == 10 else ""
         out.append({"date": day, "weekday": wd, "events": rows,
-                    "buys": len(rows) - len(sells), "sells": len(sells),
+                    "buys": len(rows) - len(sells) - len(skips), "sells": len(sells),
+                    "skipped": len(skips),
+                    "spreads": sum(1 for r in rows if r["event"] == "BUY"
+                                   and "SPREAD" in str(r.get("execution") or "")),
                     "wins": sum(1 for r in sells if (r["pnl"] or 0) > 0),
                     "losses": sum(1 for r in sells if (r["pnl"] or 0) < 0),
                     "pnl": round(sum(r["pnl"] or 0.0 for r in sells), 2)})
@@ -184,6 +214,8 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
 def by_trade(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for e in events:
+        if e.get("event") == "SKIP":
+            continue
         out.setdefault(str(e.get("trade_id")), {})[
             "sell" if e.get("event") == "SELL" else "buy"] = e
     return out
@@ -191,8 +223,10 @@ def by_trade(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def day_markdown(day: date) -> str:
     trades = by_trade(entries(day))
+    skips = [e for e in entries(day) if e.get("event") == "SKIP"]
     lines = [f"# Audit — {day.isoformat()}", "",
-             f"{len(trades)} trade(s), written at the fill and at the exit.", ""]
+             f"{len(trades)} trade(s), written at the fill and at the exit; "
+             f"{len(skips)} setup(s) skipped by a hard risk gate.", ""]
     for tid, t in trades.items():
         b, s = t.get("buy") or {}, t.get("sell") or {}
         head = b or s
@@ -200,6 +234,7 @@ def day_markdown(day: date) -> str:
                      f"({head.get('pattern')}) · {tid}")
         if b:
             lines += [
+                f"**{b.get('side', '')} — {b.get('execution', '')}**",
                 ("> **Estimated prices** — NSE refused; bought and marked on a "
                  "model price, not a market quote." if b.get("estimated_prices") else ""),
                 f"**BUY** {b.get('quantity')} @ {b.get('entry')} "
@@ -222,5 +257,11 @@ def day_markdown(day: date) -> str:
                       for x in s.get("exits") or []]
         else:
             lines += ["", "_Still open._"]
+        lines.append("")
+    if skips:
+        lines += ["## Skipped — hard risk gates", ""]
+        lines += [f"- {str(e.get('market_time', ''))[11:16]} {e.get('symbol')} "
+                  f"{e.get('side')} {e.get('pattern') or e.get('strategy')}: "
+                  f"[{e.get('gate')}] {e.get('reason')}" for e in skips]
         lines.append("")
     return "\n".join(lines)

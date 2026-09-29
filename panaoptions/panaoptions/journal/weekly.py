@@ -370,20 +370,24 @@ def _audit_markdown(review: Review, currency: str) -> list[str]:
     out += ["Every buy and sell with the case for it and how it ended, as the "
             "desk wrote it at the time.", ""]
     for d in days:
-        out += [f"### {d.get('weekday', '')} {d['date']} — {d['buys']} buy(s), "
-                f"{d['sells']} sell(s), P&L {currency}{d['pnl']:+,.2f} "
+        out += [f"### {d.get('weekday', '')} {d['date']} — {d['buys']} buy(s) "
+                f"({d.get('spreads', 0)} as debit spreads), {d['sells']} sell(s), "
+                f"{d.get('skipped', 0)} skipped, P&L {currency}{d['pnl']:+,.2f} "
                 f"({d['wins']}W / {d['losses']}L)", "",
                 f"File: `audit/{d['date']}.md`", "",
-                "| Time | Event | Contract | Strategy | Qty | Price | Cost / P&L | Why |",
-                "|---|---|---|---|---|---|---|---|"]
+                "| Time | Event | Side | Executed as | Contract | Strategy | Qty | Price | "
+                "Cost / P&L | Why |",
+                "|---|---|---|---|---|---|---|---|---|---|"]
         for e in d["events"]:
             money = (f"{currency}{e['cost']:,.2f}" if e.get("cost") is not None
                      else f"{currency}{e['pnl']:+,.2f}" if e.get("pnl") is not None else "—")
             why = str(e.get("reason") or "").replace("|", "/")[:220]
             if e.get("estimated"):
                 why = "ESTIMATED price. " + why
-            out.append(f"| {e.get('time', '')} | {e.get('event')} | {e.get('contract')} | "
-                       f"{e.get('strategy') or ''} | {e.get('quantity') or ''} | "
+            out.append(f"| {e.get('time', '')} | {e.get('event')} | {e.get('side') or ''} | "
+                       f"{e.get('execution') or ''} | {e.get('contract') or '—'} | "
+                       f"{e.get('pattern') or e.get('strategy') or ''} | "
+                       f"{e.get('quantity') or ''} | "
                        f"{e.get('price') if e.get('price') is not None else '—'} | "
                        f"{money} | {why} |")
         out.append("")

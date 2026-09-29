@@ -85,6 +85,11 @@ strategies:
       - "Bearish Engulfing"
       - "Tweezer Bottom"
       - "Tweezer Top"
+      # The wider version: the same high (LONG_PUT) or low (LONG_CALL)
+      # rejected twice a few bars apart, at the opening range, a swing point,
+      # VWAP or the pre-market extreme.
+      - "Double Rejection Top"
+      - "Double Rejection Bottom"
     patterns:
       hammer:                     { delta: [0.40, 0.50], dte: [0, 4] }
       shooting_star:              { delta: [0.40, 0.50], dte: [0, 4] }
@@ -92,6 +97,8 @@ strategies:
       bearish_engulfing:          { delta: [0.40, 0.50], dte: [0, 4] }
       tweezer_bottom:             { delta: [0.40, 0.50], dte: [0, 4] }
       tweezer_top:                { delta: [0.40, 0.50], dte: [0, 4] }
+      double_rejection_top:       { delta: [0.40, 0.50], dte: [0, 4] }
+      double_rejection_bottom:    { delta: [0.40, 0.50], dte: [0, 4] }
       # A hammer or shooting star that pierced the level and closed back.
       liquidity_sweep_rejection:  { delta: [0.40, 0.50], dte: [0, 4] }
 

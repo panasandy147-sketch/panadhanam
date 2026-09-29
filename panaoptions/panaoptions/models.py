@@ -214,6 +214,24 @@ class OptionContract(BaseModel):
 OptionContract.model_rebuild()
 
 
+def option_side(direction: Direction) -> str:
+    """The trade as it is bought: a long setup buys calls, a short one puts.
+    Both are LONG option positions — the desk never sells premium naked."""
+    if direction is Direction.LONG:
+        return "LONG_CALL"
+    if direction is Direction.SHORT:
+        return "LONG_PUT"
+    return ""
+
+
+def execution_kind(contract: OptionContract, direction: Direction) -> str:
+    """How the order is structured: outright, or a converted debit spread."""
+    if contract.is_spread:
+        return ("BULL_CALL_DEBIT_SPREAD" if contract.right is OptionRight.CALL
+                else "BEAR_PUT_DEBIT_SPREAD")
+    return f"OUTRIGHT_{option_side(direction)}"
+
+
 class ContractSearch(BaseModel):
     """The result of filtering a chain — including why nothing qualified.
 
@@ -268,6 +286,14 @@ class Signal(BaseModel):
     def risk_at_stop(self, multiplier: int = 100) -> float:
         m = self.contract.multiplier or multiplier
         return round((self.entry_price - self.stop_price) * self.quantity * m, 2)
+
+    @property
+    def side_tag(self) -> str:
+        return option_side(self.direction)
+
+    @property
+    def execution(self) -> str:
+        return execution_kind(self.contract, self.direction)
 
     def alert_line(self) -> str:
         arrow = "CALL" if self.direction is Direction.LONG else "PUT"
@@ -337,6 +363,10 @@ class PaperTrade(BaseModel):
     short_label: str = ""
     max_value: float = 0.0
     tier: str = ""
+    # LONG_CALL / LONG_PUT, and OUTRIGHT_LONG_CALL / OUTRIGHT_LONG_PUT /
+    # BULL_CALL_DEBIT_SPREAD / BEAR_PUT_DEBIT_SPREAD.
+    side_tag: str = ""
+    execution: str = ""
 
     remaining: int = 0
     fills: list[Fill] = Field(default_factory=list)

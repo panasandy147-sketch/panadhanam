@@ -137,14 +137,22 @@ def key_levels(df: pd.DataFrame, session: SessionLevels,
     if session.opening_range_low:
         levels.append(KeyLevel(session.opening_range_low, "support",
                                "opening range low"))
+    # A moving reference (VWAP, an average, yesterday's close) is support
+    # from above and resistance from below: price rallying into VWAP from
+    # underneath and rejecting it is a put setup, not a call one.
+    last = float(df["close"].iloc[-1]) if len(df) else 0.0
+
+    def side(value: float) -> str:
+        return "resistance" if last and last < value else "support"
+
     if session.previous_close:
-        levels.append(KeyLevel(session.previous_close, "support",
+        levels.append(KeyLevel(session.previous_close, side(session.previous_close),
                                "previous close"))
     if vwap:
-        levels.append(KeyLevel(vwap, "support", "VWAP"))
+        levels.append(KeyLevel(vwap, side(vwap), "VWAP"))
     for name, value in (moving_averages or {}).items():
         if value:
-            levels.append(KeyLevel(float(value), "support", name))
+            levels.append(KeyLevel(float(value), side(float(value)), name))
     return levels
 
 
@@ -164,4 +172,7 @@ def nearest_level(price: float, levels: list[KeyLevel], atr: float,
               if abs(price - lv.price) <= reach]
     if not within:
         return None
-    return min(within, key=lambda pair: pair[0])[1]
+    # On a tie, the session's own named level (opening range, pre-market,
+    # VWAP) is the better description than a swing point at the same price.
+    return min(within, key=lambda pair: (round(pair[0], 6),
+                                         pair[1].source.startswith("swing")))[1]

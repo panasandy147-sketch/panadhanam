@@ -426,13 +426,13 @@ class CandlestickAtLevel(Strategy):
         # structures that take sessions to play out.
         allowed_cfg = self.cfg.get("strategies.candlestick_at_level.allowed_patterns")
         allowed = set(allowed_cfg) if allowed_cfg else None
-        recent = patterns.detect_recent(frame, within=lookback, allowed=allowed)
-        if recent is None:
+        candidates_found = patterns.detect_recent_all(frame, within=lookback,
+                                                      allowed=allowed)
+        if not candidates_found:
             setup.blockers.append(
                 f"no reversal pattern on the last {lookback + 1} "
                 f"{timeframe} closes")
             return setup
-        found, bars_ago = recent
 
         snapshot = ta.compute(df5, self.cfg)
         setup.indicators = snapshot
@@ -440,22 +440,12 @@ class CandlestickAtLevel(Strategy):
         # --- what it interrupted ------------------------------------------ #
         # Most of these patterns are defined by their context: three long red
         # candles after a rally is distribution, and the same three in the
-        # middle of a range is noise with a story attached.
-        if found.requires_trend:
-            run_in = int(self.cfg.get(
-                "strategies.candlestick_at_level.trend_lookback", 10))
-            trend = patterns.prior_trend(
-                frame, before=bars_ago + found.bars, lookback=run_in)
-            if trend != found.requires_trend:
-                wanted = "a downtrend" if found.requires_trend < 0 else "an uptrend"
-                saw = ("an uptrend" if trend > 0
-                       else "a downtrend" if trend < 0 else "no clear trend")
-                setup.blockers.append(
-                    f"{found.name} needs {wanted} to interrupt and the last "
-                    f"{run_in} {timeframe} bars show {saw}")
-                return setup
-
-        # --- the location gate ------------------------------------------- #
+        # middle of a range is noise with a story attached. When the newest,
+        # strongest pattern fails its context, the next one on the same bars
+        # is tried — a double rejection at the high is still one even where a
+        # dark cloud cover without its uptrend is not.
+        run_in = int(self.cfg.get(
+            "strategies.candlestick_at_level.trend_lookback", 10))
         moving_averages = {"20 EMA": float(ta.ema(frame["close"], 20).iloc[-1]),
                            "50 EMA": float(ta.ema(frame["close"], 50).iloc[-1])
                            if len(frame) >= 50 else 0.0}
@@ -463,37 +453,59 @@ class CandlestickAtLevel(Strategy):
                                            moving_averages)
         tolerance = float(self.cfg.get(
             "strategies.candlestick_at_level.level_tolerance_atr", 0.5))
-        # Measure the level against the PATTERN's own extreme, not the latest
-        # bar's — the pattern is what formed at the level.
-        pattern_bar = frame.iloc[len(frame) - 1 - bars_ago]
-        anchor = float(pattern_bar["low"] if found.bullish
-                       else pattern_bar["high"])
-        level = levels_mod.nearest_level(anchor, candidates, snapshot.atr,
-                                         tolerance)
-
-        if level is None:
-            setup.blockers.append(
-                f"{found.name} printed, but not at a level — a reversal candle "
-                f"in the middle of a range is a bar with a wick")
-            return setup
-
-        wanted = "support" if found.bullish else "resistance"
-        if level.kind != wanted:
-            setup.blockers.append(
-                f"{found.name} is at {level.source} ({level.price:.2f}), which "
-                f"is {level.kind}, not {wanted}")
-            return setup
-
-        # --- the entry trigger -------------------------------------------- #
         last_price = snapshot.close
-        triggered = (last_price > found.trigger if found.bullish
-                     else last_price < found.trigger)
-        if not triggered:
-            setup.blockers.append(
-                f"{found.name} at {level.source} — waiting for price to "
-                f"{'break above' if found.bullish else 'break below'} "
-                f"{found.trigger:.2f} (now {last_price:.2f})")
+
+        def judge(found, bars_ago):
+            """(level, pattern_bar, "") when this pattern is actionable now,
+            else (None, None, why not)."""
+            if found.requires_trend:
+                trend = patterns.prior_trend(
+                    frame, before=bars_ago + found.bars, lookback=run_in)
+                if trend != found.requires_trend:
+                    wanted = "a downtrend" if found.requires_trend < 0 else "an uptrend"
+                    saw = ("an uptrend" if trend > 0
+                           else "a downtrend" if trend < 0 else "no clear trend")
+                    return None, None, (f"{found.name} needs {wanted} to interrupt and "
+                                        f"the last {run_in} {timeframe} bars show {saw}")
+            # --- the location gate: measured against the PATTERN's own
+            # extreme, not the latest bar's — the pattern is what formed there.
+            pattern_bar = frame.iloc[len(frame) - 1 - bars_ago]
+            anchor = float(pattern_bar["low"] if found.bullish else pattern_bar["high"])
+            level = levels_mod.nearest_level(anchor, candidates, snapshot.atr, tolerance)
+            if level is None:
+                return None, None, (f"{found.name} printed, but not at a level — a "
+                                    f"reversal candle in the middle of a range is a "
+                                    f"bar with a wick")
+            wanted = "support" if found.bullish else "resistance"
+            if level.kind != wanted:
+                return None, None, (f"{found.name} is at {level.source} "
+                                    f"({level.price:.2f}), which is {level.kind}, "
+                                    f"not {wanted}")
+            # --- the entry trigger
+            triggered = (last_price > found.trigger if found.bullish
+                         else last_price < found.trigger)
+            if not triggered:
+                return None, None, (f"{found.name} at {level.source} — waiting for "
+                                    f"price to {'break above' if found.bullish else 'break below'} "
+                                    f"{found.trigger:.2f} (now {last_price:.2f})")
+            return level, pattern_bar, ""
+
+        # Newest and strongest first; when one fails its context, its level or
+        # its trigger, the next pattern on the same bars is judged — a tweezer
+        # top that has triggered is a trade even while a fresher evening star
+        # on the next bar is still waiting for its own break.
+        first_refusal = ""
+        chosen = None
+        for found, bars_ago in candidates_found:
+            level, pattern_bar, why = judge(found, bars_ago)
+            if level is not None:
+                chosen = (found, bars_ago, level, pattern_bar)
+                break
+            first_refusal = first_refusal or why
+        if chosen is None:
+            setup.blockers.append(first_refusal)
             return setup
+        found, bars_ago, level, pattern_bar = chosen
 
         # --- confirmed ----------------------------------------------------- #
         # A single-wick rejection that actually PIERCED the level and closed

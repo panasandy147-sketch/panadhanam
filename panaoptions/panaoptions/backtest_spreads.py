@@ -4,6 +4,10 @@
     python run.py --backtest-spreads --limit 20      more of them
     python run.py --backtest-spreads --symbols SPY,QQQ,NVDA --days 5
                                                      any symbols, recent sessions
+    python run.py --backtest-signals --symbols SPY,QQQ --days 5
+                                                     replay the scanner bar by bar:
+                                                     every LONG_CALL and LONG_PUT
+                                                     setup, how it would execute
 
 Two sources of setups:
 
@@ -42,7 +46,7 @@ from panaoptions.data.greeks import delta as bs_delta
 from panaoptions.data.greeks import price as bs_price
 from panaoptions.engine import contracts
 from panaoptions.logging import get_logger
-from panaoptions.models import Direction, OptionContract, OptionRight
+from panaoptions.models import Direction, OptionContract, OptionRight, option_side
 
 log = get_logger("backtest")
 
@@ -59,6 +63,8 @@ class Blocked:
     reason: str = ""
     budget: float = 0.0
     source: str = "log"
+    pattern: str = ""
+    strategy: str = ""
 
 
 @dataclass
@@ -80,6 +86,10 @@ class Result:
     note: str = ""
     was_blocked: str = ""
     legs: list[str] = field(default_factory=list)
+    side: str = ""                     # LONG_CALL / LONG_PUT
+    execution: str = ""                # OUTRIGHT_LONG_CALL ... / *_DEBIT_SPREAD / SKIPPED_HARD_RISK
+    pattern: str = ""
+    strategy: str = ""
 
     @property
     def filled(self) -> bool:
@@ -261,7 +271,10 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
         when = b.ts if b.ts.tzinfo else b.ts.replace(tzinfo=tz)
         when = when.astimezone(tz)
         r = Result(symbol=b.symbol, ts=when.isoformat(timespec="minutes"),
-                   direction=b.direction, was_blocked=b.reason[:200])
+                   direction=b.direction, was_blocked=b.reason[:200],
+                   side=option_side(Direction.LONG if b.direction == "LONG"
+                                    else Direction.SHORT),
+                   pattern=b.pattern, strategy=b.strategy)
         if b.symbol not in cache:
             try:
                 intraday = await feed.candles(b.symbol, "5m")
@@ -308,10 +321,13 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
         search = contracts.choose(b.symbol, chain, direction, cfg, budget=r.budget)
         if search.chosen is None:
             r.note = search.note[:300]
+            r.execution = "SKIPPED_HARD_RISK"
             out.append(r)
             continue
         c = search.chosen
+        from panaoptions.models import execution_kind
         r.tier, r.contract, r.cost = search.tier, c.label, c.cost(lot)
+        r.execution = execution_kind(c, direction)
         if c.is_spread:
             r.legs = [f"BUY {c.long_leg.label} ({abs(c.long_leg.delta):.2f}Δ)",
                       f"SELL {c.short_leg.label} ({abs(c.short_leg.delta):.2f}Δ)"]
@@ -326,6 +342,63 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
     return out
 
 
+async def scan_history(symbols: list[str], days: int, feed: Any, cfg: Any,
+                       now: datetime, cooldown_minutes: int = 30,
+                       only: set[str] | None = None) -> list[Blocked]:
+    """Replay each of the last `days` sessions bar by bar through the desk's
+    own strategies, and return every setup that fired — calls and puts.
+
+    `only` limits it to some strategies (e.g. {"candlestick_at_level"}). A
+    repeat of the same symbol, side and pattern inside `cooldown_minutes` is
+    one setup, as it is on the desk.
+    """
+    from panaoptions.engine import levels as levels_mod
+    from panaoptions.engine import strategies
+
+    tz = ZoneInfo(cfg.timezone)
+    wanted_days: list[date] = []
+    day = now.astimezone(tz).date()
+    while len(wanted_days) < days:
+        day -= timedelta(days=1)
+        if day.weekday() < 5:
+            wanted_days.append(day)
+    found: list[Blocked] = []
+    for symbol in symbols:
+        try:
+            bars = await feed.candles(symbol, str(cfg.get("technical.timeframe", "5m")))
+        except Exception as exc:                     # noqa: BLE001
+            log.warning("no history for %s: %s", symbol, exc)
+            continue
+        bars = sorted(bars or [], key=lambda b: b.ts)
+        for d in sorted(wanted_days):
+            idx = [i for i, b in enumerate(bars) if b.ts.astimezone(tz).date() == d]
+            if not idx:
+                continue
+            session = levels_mod.compute(
+                bars[:idx[-1] + 1], cfg.timezone, d,
+                str(cfg.get("session.market_open", "09:30")),
+                str(cfg.get("session.market_close", "16:00")))
+            last_at: dict[tuple, datetime] = {}
+            for i in idx:
+                tape = bars[max(0, i - 299):i + 1]          # ~4 sessions of 5m bars
+                winner, _ = strategies.evaluate_all(symbol, tape, session, cfg)
+                if winner is None or (only and winner.strategy.name.lower() not in only
+                                      and winner.strategy.value not in only):
+                    continue
+                at = bars[i].ts.astimezone(tz) + timedelta(minutes=5)   # the bar's close
+                key = (symbol, winner.direction.value, winner.pattern or winner.strategy.value)
+                if key in last_at and (at - last_at[key]).total_seconds() < cooldown_minutes * 60:
+                    continue
+                last_at[key] = at
+                found.append(Blocked(
+                    symbol=symbol, ts=at, direction=winner.direction.value,
+                    reason=f"{option_side(winner.direction)} {winner.pattern or ''} "
+                           f"{winner.key_level_source or ''}".strip(),
+                    source="scan", pattern=winner.pattern,
+                    strategy=winner.strategy.value))
+    return sorted(found, key=lambda b: (b.ts, b.symbol))
+
+
 def summarise(results: list[Result]) -> dict[str, Any]:
     by_tier: dict[str, int] = {}
     for r in results:
@@ -333,17 +406,43 @@ def summarise(results: list[Result]) -> dict[str, Any]:
     priced = [r for r in results if r.spot]
     spreads = [r for r in results if r.tier == "debit_spread"]
     with_pnl = [r for r in results if r.pnl is not None]
+    by_side: dict[str, dict[str, Any]] = {}
+    for r in results:
+        slot = by_side.setdefault(r.side or "?", {"setups": 0, "filled": 0, "outright": 0,
+                                                  "debit_spread": 0, "skipped": 0,
+                                                  "winners": 0, "pnl": 0.0})
+        slot["setups"] += 1
+        if r.filled:
+            slot["filled"] += 1
+            slot["debit_spread" if r.tier == "debit_spread" else "outright"] += 1
+            slot["winners"] += 1 if (r.pnl or 0) > 0 else 0
+            slot["pnl"] = round(slot["pnl"] + (r.pnl or 0.0), 2)
+        else:
+            slot["skipped"] += 1
+    by_execution: dict[str, int] = {}
+    for r in results:
+        if r.spot:
+            by_execution[r.execution or "SKIPPED_HARD_RISK"] = (
+                by_execution.get(r.execution or "SKIPPED_HARD_RISK", 0) + 1)
     return {"setups": len(results), "priced": len(priced),
             "filled": sum(1 for r in results if r.filled),
             "as_debit_spread": len(spreads), "by_tier": by_tier,
+            "by_side": by_side, "by_execution": by_execution,
             "spread_pnl": round(sum(r.pnl or 0.0 for r in spreads), 2),
             "spread_winners": sum(1 for r in spreads if (r.pnl or 0) > 0),
             "total_pnl": round(sum(r.pnl or 0.0 for r in with_pnl), 2)}
 
 
-def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any) -> str:
+def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any,
+                title: str = "Backtest — blocked setups through the debit-spread ladder"
+                ) -> str:
     cur = getattr(cfg, "currency", "$")
-    lines = ["# Backtest — blocked setups through the debit-spread ladder", "",
+    sides = summary.get("by_side") or {}
+    side_lines = [f"- **{k}**: {v['setups']} setups — {v['outright']} outright, "
+                  f"{v['debit_spread']} debit spread, {v['skipped']} skipped; "
+                  f"{v['winners']} of {v['filled']} green at the close, "
+                  f"{cur}{v['pnl']:+,.2f}" for k, v in sorted(sides.items())]
+    lines = [f"# {title}", "", *side_lines, "",
              f"**{summary['filled']} of {summary['setups']}** setups would have filled "
              f"({summary['as_debit_spread']} as a debit spread); by rung: "
              + ", ".join(f"{k} {v}" for k, v in sorted(summary["by_tier"].items())) + ".",
@@ -352,14 +451,15 @@ def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any) -> str
              "_Model prices (Black-Scholes on the historical underlying and its recorded "
              "or realised volatility), not historical option quotes. Liquidity is not "
              "tested; the spread rule is._", "",
-             "| When | Symbol | Side | Spot | Budget | Naked 0.40-0.50 | Filled as | Cost | "
-             "Max profit | P&L at close | Note |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| When | Symbol | Side | Pattern | Spot | Budget | Naked 0.40-0.50 | "
+             "Executed as | Cost | Max profit | P&L at close | Note |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         naked = f"{r.naked} ({cur}{r.naked_cost:,.0f})" if r.naked else "—"
-        filled = (f"{r.tier}: {r.contract}" if r.tier else "SKIPPED")
+        filled = (f"{r.execution}: {r.contract}" if r.tier else "SKIPPED")
         lines.append(
-            f"| {r.ts} | {r.symbol} | {r.direction} | {r.spot or '—'} | {cur}{r.budget:,.0f} | "
+            f"| {r.ts} | {r.symbol} | {r.side or r.direction} | {r.pattern or r.strategy or '—'} | "
+            f"{r.spot or '—'} | {cur}{r.budget:,.0f} | "
             f"{naked} | {filled} | {cur}{r.cost:,.0f} | "
             f"{(cur + format(r.max_profit, ',.0f')) if r.max_profit else '—'} | "
             f"{'—' if r.pnl is None else cur + format(r.pnl, '+,.2f')} | "
@@ -368,13 +468,15 @@ def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any) -> str
 
 
 def save(results: list[Result], summary: dict[str, Any], cfg: Any,
-         when: datetime) -> dict[str, str]:
+         when: datetime, kind: str = "spreads", title: str | None = None
+         ) -> dict[str, str]:
     from panaoptions.journal import store as journal_store
     folder = journal_store.JOURNAL_DIR / "backtest"
     folder.mkdir(parents=True, exist_ok=True)
-    stem = f"spreads-{when:%Y-%m-%d-%H%M}"
+    stem = f"{kind}-{when:%Y-%m-%d-%H%M}"
     md, js = folder / f"{stem}.md", folder / f"{stem}.json"
-    md.write_text(to_markdown(results, summary, cfg), encoding="utf-8")
+    md.write_text(to_markdown(results, summary, cfg, **({"title": title} if title else {})),
+                  encoding="utf-8")
     js.write_text(json.dumps({"summary": summary,
                               "results": [asdict(r) for r in results]},
                              indent=2, default=str), encoding="utf-8")

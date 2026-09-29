@@ -651,6 +651,40 @@ Star, Tweezer Top, Dark Cloud Cover for puts.
 *Multi-candle structures:* Three-Line Strike, Three Black Crows, Three White
 Soldiers, Abandoned Baby, and the Liquidity Sweep Rejection.
 
+*Double rejections:* the same high (Double Rejection Top → **LONG_PUT**) or
+low (Double Rejection Bottom → **LONG_CALL**) rejected twice, 2-8 bars apart,
+with price leaving the level by a full average bar in between. This is the
+wider form of a tweezer, which tests the level on two adjacent candles.
+
+Calls and puts are symmetrical. The same gates are applied in reverse, so
+VWAP, the moving averages and yesterday's close count as resistance when
+price is below them and support when it is above. Every signal is tagged
+`LONG_CALL` or `LONG_PUT`. When the newest pattern is refused (wrong trend,
+no level, trigger not yet broken), the next pattern on the same bars is
+judged, so a triggered tweezer top is not hidden by a fresher pattern that
+is still waiting. Every pattern uses the 0.40-0.50 delta primary tier
+(`contracts.primary_band`).
+
+Each setup ends one of three ways, and all three are written to the activity
+log and the audit log:
+- **Outright:** `EXECUTED LONG_PUT as outright long option (OUTRIGHT_LONG_PUT)`.
+- **Converted:** `… as converted debit spread (BEAR_PUT_DEBIT_SPREAD)`.
+- **Skipped:** a `SKIP` event saying which hard gate refused it (the contract
+  ladder, the Risk Gatekeeper, or sizing) and why.
+
+The weekly review counts buys, spreads, sells and skips for each day.
+
+Replay history through the scanner, calls and puts together:
+
+    python run.py --backtest-signals --symbols SPY,QQQ,NVDA --days 5
+    python run.py --backtest-signals --only candlestick_at_level --days 10
+
+This walks each session's 5-minute bars exactly as the desk would. Every
+LONG_CALL and LONG_PUT that fires is priced from the historical chart and
+sent through the contract ladder. The report shows, for each side: how many
+setups fired, how many were outright, debit spreads or skipped, and how many
+were green at the close. It is saved to `journal/backtest/`.
+
 The pattern is the smaller half of the rule. Three gates have to clear:
 
 1. **Location.** It must print at a level the market has already turned at — a
