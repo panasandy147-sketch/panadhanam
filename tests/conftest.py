@@ -55,6 +55,10 @@ def cfg():
     from app.core.config import get_config
     c = get_config()
     c.reload()
+    # The pre-market screener gates every entry to today's screened list; the
+    # older tests trade symbols they name themselves. test_screener.py tests it.
+    for settings in (c._base_settings, c.settings):
+        settings.setdefault("screener", {})["enabled"] = False
     return c
 
 

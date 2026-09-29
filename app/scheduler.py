@@ -210,6 +210,44 @@ class TradingEngine:
         return summary
 
     # ------------------------------------------------------------------ #
+    # The pre-market screener (app/analysis/pre_market_screener.py)
+    # ------------------------------------------------------------------ #
+    def _screened_only(self) -> bool:
+        return bool(self.cfg.get("screener.enabled", False))
+
+    def _screened_targets(self) -> list[str]:
+        from app.analysis import pre_market_screener as scr
+        max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
+        if max_daily and self.risk.state.trades_today >= max_daily:
+            log.info("daily trade cap reached (%d/%d) — no new signals this session",
+                     self.risk.state.trades_today, max_daily)
+            return []
+        entry = scr.todays(self.cfg, clock.market_now(self.timezone).date())
+        return list((entry or {}).get("symbols") or [])
+
+    async def maybe_run_screener(self, force: bool = False) -> dict[str, Any] | None:
+        """Once a day at screener.run_at on the market clock (09:00 IST), from
+        yesterday's end-of-day bars. `force` runs it now (the API / --screen)."""
+        from app.analysis import pre_market_screener as scr
+        if not self._screened_only() and not force:
+            return None
+        now = clock.market_now(self.timezone)
+        if not force:
+            if now.weekday() >= 5 or scr.todays(self.cfg, now.date()) is not None:
+                return None
+            run_at = str(self.cfg.get("screener.run_at", "09:00"))
+            h, _, m = run_at.partition(":")
+            if now.hour * 60 + now.minute < int(h) * 60 + int(m or 0):
+                return None
+        try:
+            entry = await scr.run(self.cfg, self.broker, now.date())
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("the pre-market screener failed: %s", exc)
+            return None
+        await bus.publish("screener.done", entry)
+        return entry
+
+    # ------------------------------------------------------------------ #
     # One full cycle
     # ------------------------------------------------------------------ #
     async def run_cycle(self, symbols: list[str] | None = None) -> list[dict[str, Any]]:
@@ -250,6 +288,11 @@ class TradingEngine:
         ready: dict[str, Any] = {}
         if symbols:
             targets = list(symbols)
+        elif self._screened_only():
+            # The pre-market screener replaces full-universe scanning: only
+            # today's Band A/B names are cycled (and the risk desk refuses
+            # anything else); none at all once the day's trade cap is reached.
+            targets = self._screened_targets()
         else:
             targets, ready = await self.focus.targets(cycle_id, news_items, macro_snap)
         outcomes: list[dict[str, Any]] = []
@@ -360,6 +403,8 @@ class TradingEngine:
 
                 phase = self.session_phase()
                 today = clock.market_now(self.timezone).date().isoformat()
+                # Today's Band A/B watchlist, from yesterday's close, at 09:00.
+                await self.maybe_run_screener()
 
                 if phase == "premarket" and self._premarket_done_on != today:
                     await self.run_premarket_scan()

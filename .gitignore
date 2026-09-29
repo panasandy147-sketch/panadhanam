@@ -10,6 +10,7 @@ env/
 data/runtime/*.db
 data/runtime/*.db-*
 data/runtime/*.jsonl
+data/runtime/todays_watchlist.json
 data/runtime/tokens/
 logs/
 .pytest_cache/

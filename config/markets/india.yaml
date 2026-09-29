@@ -25,6 +25,15 @@ risk:
   # The high-notional index options that get the 25% premium flex.
   index_symbols: ["NIFTY 50", "NIFTY BANK", "FINNIFTY", "NIFTY", "BANKNIFTY"]
 
+# The pre-market screener and the entry windows, on the IST clock.
+screener:
+  run_at: "09:00"
+  windows:
+    morning_from: "09:30"      # Band A only
+    morning_to: "11:15"
+    afternoon_from: "13:30"    # 11:15-13:30 is the midday freeze
+    afternoon_to: "14:45"      # Band A/B VWAP pullbacks only
+
 currency:
   symbol: "₹"
   code: "INR"

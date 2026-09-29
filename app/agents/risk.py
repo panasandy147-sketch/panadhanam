@@ -123,6 +123,55 @@ class RiskManager:
         return reasons
 
     # ------------------------------------------------------------------ #
+    # Today's screened watchlist and the entry windows
+    # ------------------------------------------------------------------ #
+    def screener_checks(self, symbol: str, bias: Bias,
+                        indicators: dict[str, Any]) -> list[str]:
+        """Only today's screened names, only in their window:
+        Band A 09:30-11:15, nothing 11:15-13:30, Band A/B VWAP pullbacks
+        13:30-14:45 (IST; the US desk uses its own clock). A Band B name also
+        trades only the side its close pointed to."""
+        from app.analysis import pre_market_screener as scr
+        if not bool(self.cfg.get("screener.enabled", False)):
+            return []
+        now = clock.market_now(str(self.cfg.get("system.timezone", "Asia/Kolkata")))
+        entry = scr.todays(self.cfg, now.date())
+        if entry is None:
+            return ([f"No screened watchlist for today yet — the pre-market screener "
+                     f"runs at {self.cfg.get('screener.run_at', '09:00')}; nothing is "
+                     f"traded off-list"] if bool(self.cfg.get("screener.required", True))
+                    else [])
+        row = scr.band_of(entry, symbol)
+        if row is None:
+            listed = ", ".join(entry.get("symbols") or []) or "none today"
+            return [f"{symbol} is not on today's screened watchlist ({listed})"]
+        g = self.cfg.get
+        spans = (f"{g('screener.windows.morning_from')}-{g('screener.windows.morning_to')}",
+                 f"{g('screener.windows.morning_to')}-{g('screener.windows.afternoon_from')}",
+                 f"{g('screener.windows.afternoon_from')}-{g('screener.windows.afternoon_to')}")
+        where = scr.window(self.cfg, now)
+        long = bias == Bias.BULLISH
+        out: list[str] = []
+        if where == "freeze":
+            out.append(f"Midday freeze {spans[1]} — no new entries (the chop filter)")
+        elif where == "closed":
+            out.append(f"Outside the entry windows ({spans[0]} Band A; {spans[2]} "
+                       f"Band A/B VWAP pullbacks)")
+        elif where == "morning" and row["band"] != "A":
+            out.append(f"{symbol} is Band B — Band B enters only in the afternoon "
+                       f"VWAP-pullback window ({spans[2]})")
+        elif where == "afternoon" and not scr.is_vwap_pullback(
+                indicators, long, float(g("screener.vwap_pullback_atr", 0.5))):
+            out.append(f"Afternoon window ({spans[2]}) takes VWAP pullbacks only — "
+                       f"{symbol} is not on the trend side of VWAP within "
+                       f"{g('screener.vwap_pullback_atr', 0.5)} ATR of it")
+        side = row.get("side", "BOTH")
+        if (side == "LONG" and not long) or (side == "SHORT" and long):
+            out.append(f"{symbol} is Band B {side.lower()}s-only (it closed at "
+                       f"{row.get('close_location', 0):.0%} of yesterday's range)")
+        return out
+
+    # ------------------------------------------------------------------ #
     # The daily lockout
     # ------------------------------------------------------------------ #
     def lock(self, reason: str) -> None:
@@ -325,6 +374,7 @@ class RiskManager:
         # ---- desk-level gates ----
         reasons.extend(self.desk_checks())
         reasons.extend(self.symbol_checks(ctx.symbol))
+        reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {}))
 
         # ---- can this instrument actually be bought? ----
         if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):

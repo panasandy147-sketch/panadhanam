@@ -429,6 +429,43 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     })
 
     # ------------------------------------------------------------------ #
+    if g("screener.enabled", False):
+        a, b = g("screener.band_a") or {}, g("screener.band_b") or {}
+        w = g("screener.windows") or {}
+        sections.append({
+            "title": "Today's watchlist: the pre-market screener (Band A / B)",
+            "intro": ("Before the open, from YESTERDAY's daily bars across the index "
+                      "universe: ATR% (14-day ATR / close), RVOL (yesterday's volume "
+                      "/ 20-day average), NR7, inside day, and where it closed in its "
+                      "range. Only the names it picks are traded that day — nothing "
+                      "off the list, and no list means no entries."),
+            "rules": [
+                _rule("Runs at (market clock)", g("screener.run_at", "09:00"),
+                      "screener.run_at"),
+                _rule(f"Band A (top {a.get('size', 5)}): ATR% ≥ {a.get('min_atr_pct', 2.0)}, "
+                      f"RVOL ≥ {a.get('min_rvol', 1.2)}, and NR7 or an inside day; "
+                      f"ranked by RVOL", "both sides", "screener.band_a"),
+                _rule(f"Band B (next {b.get('size', 5)}): ATR% ≥ {b.get('min_atr_pct', 2.0)}, "
+                      f"RVOL ≥ {b.get('min_rvol', 1.5)}, and a close in the top "
+                      f"{1 - float(b.get('long_close_location', 0.8)):.0%} of the range "
+                      f"(longs only) or the bottom {float(b.get('short_close_location', 0.2)):.0%}"
+                      f" (shorts only)", "one side", "screener.band_b"),
+                _rule("Morning window: Band A entries only",
+                      f"{w.get('morning_from')}–{w.get('morning_to')}", "screener.windows"),
+                _rule("Midday freeze: no new entries (the chop filter)",
+                      f"{w.get('morning_to')}–{w.get('afternoon_from')}", "screener.windows"),
+                _rule("Afternoon window: Band A/B VWAP pullbacks only (trend side, "
+                      f"within {g('screener.vwap_pullback_atr', 0.5)} ATR of VWAP)",
+                      f"{w.get('afternoon_from')}–{w.get('afternoon_to')}",
+                      "screener.windows / vwap_pullback_atr"),
+                _rule("Trades a day (open or closed), then no new signals",
+                      g("risk.max_daily_trades") or "no limit", "risk.max_daily_trades"),
+                _rule("Everything still open is squared off at",
+                      g("system.square_off_time"), session_key + "square_off_time"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     if g("risk.pyramid.enabled", False):
         steps = g("risk.pyramid.levels") or []
         rows = [_rule("No averaging down: any add, or any new order on a symbol "

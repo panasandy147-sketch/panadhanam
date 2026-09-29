@@ -98,6 +98,10 @@ def desk():
 
     cfg = get_config()
     cfg.reload()
+    # These panels are about the desk trading named symbols; the screener
+    # has its own tests (tests/test_screener.py).
+    for settings in (cfg._base_settings, cfg.settings):
+        settings.setdefault("screener", {})["enabled"] = False
     cfg.switch_market("US")
     # Every day is a session here, so the suite also runs at the weekend.
     cfg.settings.setdefault("system", {})["trading_days"] = [0, 1, 2, 3, 4, 5, 6]

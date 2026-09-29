@@ -31,6 +31,35 @@ def _server() -> None:
     )
 
 
+async def _screen(market: str | None) -> int:
+    """Run the pre-market screener now and print today's Band A/B list."""
+    from app.brokers.factory import build_broker
+    from app.core.config import get_config
+    from app.scheduler import TradingEngine
+    from app.storage import db
+
+    cfg = get_config()
+    if market:
+        cfg.switch_market(market.upper())
+    db.init_db()
+    engine = TradingEngine(await build_broker(cfg), cfg)
+    entry = await engine.maybe_run_screener(force=True)
+    if not entry:
+        print("The screener could not run — see the log above.")
+        return 1
+    print(f"\n=== TODAY'S WATCHLIST — {entry['market']} {entry['date']} "
+          f"({entry['screened']} of {entry['universe']} screened) ===")
+    for band in ("band_a", "band_b"):
+        rows = entry[band]
+        print(f"\n  Band {band[-1].upper()} ({len(rows)}):")
+        for r in rows:
+            print(f"    {r['symbol']:<12} {r['side']:<5} {r['why']}")
+        if not rows:
+            print("    none qualified")
+    print("\n  Saved to data/runtime/todays_watchlist.json — the desk trades only these today.")
+    return 0
+
+
 async def _one_cycle(premarket: bool = False) -> None:
     from app.brokers.factory import build_broker
     from app.core.config import get_config
@@ -305,6 +334,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="panadhanam trading intelligence")
     parser.add_argument("--cycle", action="store_true", help="run one cycle and exit")
     parser.add_argument("--premarket", action="store_true", help="run the pre-market scan and exit")
+    parser.add_argument("--screen", action="store_true",
+                        help="run the pre-market screener now (Band A/B → todays_watchlist.json)")
     parser.add_argument("--size", nargs="+", metavar="N",
                         help="CAPITAL RISK_PCT ENTRY STOP [LOT_SIZE]")
     parser.add_argument("--reload", action="store_true", help="auto-reload the server")
@@ -351,6 +382,8 @@ def main() -> None:
         from app.data.feeds.check import run_check
         ok = asyncio.run(run_check(args.market))
         raise SystemExit(0 if ok else 1)
+    if args.screen:
+        raise SystemExit(asyncio.run(_screen(args.market)))
     if args.size:
         _sizing(args.size)
     elif args.cycle:

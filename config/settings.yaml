@@ -246,6 +246,30 @@ decisions:
 # the four voting analysts below. They are bounded and written to
 # config/strategy_weights.json (git-ignored), which the CMIO applies on top
 # of these weights. Delete that file to go back to these numbers.
+# PRE-MARKET SCREENER (app/analysis/pre_market_screener.py) — the day's
+# tradeable names, picked before the open from YESTERDAY's daily bars across
+# the index universe, saved to data/runtime/todays_watchlist.json. The desk
+# trades nothing else that day (required: no list = no entries).
+#   Band A (top 5): ATR% >= 2.0, RVOL >= 1.2, NR7 or an inside day; by RVOL.
+#   Band B (next 5): ATR% >= 2.0, RVOL >= 1.5, close in the top 20% of the
+#     range (longs only) or the bottom 20% (shorts only); by RVOL.
+# Windows (the market's clock; India 09:30-11:15 Band A, 11:15-13:30 freeze,
+# 13:30-14:45 Band A/B VWAP pullbacks within vwap_pullback_atr of VWAP).
+screener:
+  enabled: true
+  required: true
+  run_at: "09:00"
+  history_days: 40
+  vwap_pullback_atr: 0.5
+  band_a: {size: 5, min_atr_pct: 2.0, min_rvol: 1.2}
+  band_b: {size: 5, min_atr_pct: 2.0, min_rvol: 1.5,
+           long_close_location: 0.80, short_close_location: 0.20}
+  windows:
+    morning_from: "09:30"
+    morning_to: "11:15"
+    afternoon_from: "13:30"
+    afternoon_to: "14:45"
+
 # VOLUME PROFILE — the Volume Profile analyst and the CMIO's confluence rule.
 # Sessions follow the active market's hours (US 09:30-16:00 ET) unless
 # rth_open / rth_close are set here.

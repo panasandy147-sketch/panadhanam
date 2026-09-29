@@ -423,6 +423,7 @@ async def test_the_shipped_profile_trades_on_one_strong_voice(engine, cfg):
     enough. Candlestick +0.75 alone was the commonest "no trade" on the
     desk's log before it."""
     cfg.reload()
+    cfg._base_settings.setdefault("screener", {})["enabled"] = False
     cfg.switch_market("IN")
     cfg.settings["consensus"]["trend_filter"] = False
     cfg.settings["risk"]["reentry_cooldown_minutes"] = 0   # earlier cases closed it

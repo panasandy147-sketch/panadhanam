@@ -172,6 +172,14 @@ class MarketProfile:
         if risk_profile:
             out.setdefault("risk", {}).update(risk_profile)
 
+        # The pre-market screener's clock (its run time and entry windows) is
+        # the market's own.
+        for key, value in (self.data.get("screener", {}) or {}).items():
+            base = out.setdefault("screener", {})
+            base[key] = ({**base[key], **value}
+                         if isinstance(value, dict) and isinstance(base.get(key), dict)
+                         else value)
+
         out["currency"] = self.data.get("currency", {})
         out["market"] = self.data.get("market", {})
         return out
