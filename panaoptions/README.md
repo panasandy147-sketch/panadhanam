@@ -39,7 +39,9 @@ Committee (agents/)                      Technical · Derivatives & Flow · Macr
             |
 Risk Gatekeeper (risk/gatekeeper.py)     20% cap ($800), 25% on SPY/QQQ/DIA
                                          ($1,000), spread <= 7%, delta band,
-                                         $400 (10%) daily circuit breaker
+                                         $80 (2%) loss at the stop a trade,
+                                         2 open / 4 a day, $120 (3%) daily
+                                         lockout
             |
 Paper Execution & Ledger                 stops on the UNDERLYING level,
                                          45% premium disaster backstop
@@ -79,8 +81,9 @@ mid, delta inside the band (down to the 0.30 fallback floor), the per-trade
 cap — 20% of $4,000 = $800, or 25% = $1,000 on SPY, QQQ and DIA — and the
 total ceiling. A committee approval cannot pass it.
 
-**The circuit breaker** counts closed AND open losses: at $400 (10%) the
-desk sells everything and stops for the day.
+**The circuit breaker** counts closed AND open losses: at $120 (3%) the
+desk sells everything and is locked out for the rest of the day, restarts
+included (see "Tournament risk rules").
 
 **The Friday reflection** (`learning/reflect.py`). After Friday's close — or
 on the next start if the desk was off — the week's graded trades go to Ollama
@@ -919,6 +922,63 @@ previous-day high or low, the opening range or the pre-market extreme sits
 inside that 3R, the road is not open: the setup is skipped as a hard risk
 failure, naming the level. The Risk Gatekeeper checks it again before any
 order.
+
+## Tournament risk rules
+
+These are Robbins World Cup–style limits: small risk per trade, few trades, and a hard stop
+for the day. They apply to every profile, US and India.
+
+| Rule | Setting | $4,000 account | ₹3,50,000 (India) |
+|---|---|---|---|
+| Loss at the stop per trade | `risk.max_risk_per_trade_pct: 2.0` | $80 | ₹7,000 |
+| Open trades at once | `risk.max_open_trades: 2` | 2 | 2 |
+| Trades a day | `risk.max_daily_trades: 4` | 4 | 4 |
+| Daily circuit breaker | `risk.daily_loss_limit_pct: 3.0` | $120 | ₹10,500 |
+
+**Risk per trade** caps the loss, not the premium. The loss is the first exit
+to fire: |delta| × the distance to the underlying stop, or the 45% premium
+backstop. `max_capital_deployed_pct` (20%) still caps the premium, and the
+tighter of the two sizes the trade. 2% of $4,000 as the premium itself would
+be $80, which buys no at-the-money SPY contract, so the desk would never trade.
+
+**The breaker** counts realised plus open losses. When it trips:
+1. Pending signals are cancelled.
+2. Every open position is sold.
+3. The paper ledger refuses orders.
+4. The lockout is saved for the calendar day.
+
+A restart the same day restores the day's loss, its trade count and the
+lockout. The next day starts clean.
+
+**Verified 1:3.** The Previous Day Liquidity Sweep and Value Area Rejection
+must reach 1:3 with their own target: VWAP-or-3R for the sweep, the POC for
+the rejection. A projected 3R past a nearer POC is refused
+(`risk.own_target_strategies`).
+
+### Validate the rule book on history
+
+    ../.venv/Scripts/python.exe run.py --backtest                       # the watchlist, last 10 sessions
+    ../.venv/Scripts/python.exe run.py --backtest --market IN --symbols NIFTY,BANKNIFTY,HDFCBANK,INFY
+    ../.venv/Scripts/python.exe run.py --backtest --days 20
+
+This replays the sessions through the strategies, the gates and the contract
+picker, then through the account rules above: sizing, 2 open, 4 a day, and
+the 3% lockout. It reports:
+- **Expectancy:** the mean R per trade, where R is P&L ÷ the loss planned at
+  the stop.
+- **Max drawdown:** % of the account's peak.
+- A per-strategy table.
+- The setups the rules did not take, and why.
+
+**PASS** needs expectancy ≥ **0.5R** and max drawdown ≤ **5%** over at least
+20 trades. Fewer than 20 trades is **INCONCLUSIVE**
+(`backtest.validation`). The report is saved to `journal/backtest/`, and
+`--check-config` (run by `./start.sh`) warns until a run passes. Paper trading
+still starts, because it is the rehearsal.
+
+The same two limits as the other backtests apply. Option prices are
+Black-Scholes on the real underlying. Historical open interest isn't
+available, so only the price half of the F&O confluence rule is tested.
 
 ## Over budget: the fallback ladder
 
