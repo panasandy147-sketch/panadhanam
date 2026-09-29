@@ -49,3 +49,19 @@ def test_the_header_links_to_the_rules_pop_up():
     script = (STATIC / "app.js").read_text()
     assert 'getJSON("/api/rules")' in script
     assert 'location.hash === "#rules"' in script
+
+
+def test_the_new_rules_are_on_the_page(cfg):
+    """Every rule the desk enforces is written out: the F&O confluence, the
+    1:3 gate, the debit-spread ladder, calls and puts, and how a trade ends."""
+    import json
+    doc = rules.build(cfg, capital=4000)
+    text = json.dumps(doc)
+    section = next(s for s in doc["sections"]
+                   if s["title"] == "Previous-day F&O and reward to risk")
+    values = {r["setting"]: r["value"] for r in section["rules"]}
+    assert values["risk.min_reward_risk / reward_room_levels"] == "1:3"
+    assert values["fno.confluence.when_oi_unknown"] == "block"
+    for words in ("previous-day LOW", "rising call OI", "LONG_PUT", "double rejection",
+                  "debit spread", "skipped by a hard risk gate", "Long Buildup"):
+        assert words.lower() in text.lower(), words

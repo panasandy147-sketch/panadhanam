@@ -862,6 +862,38 @@ The percentage stop survives as a **disaster backstop** (`disaster_stop_pct`,
 45%) — wide enough that the underlying level normally fires first, but still
 there for a gap or a collapse in the option itself.
 
+## Previous-day F&O, confluence, and 1:3
+
+**The map.** Once a day, after the screen, each watched symbol's previous
+session is mapped:
+- **Levels:** high (PDH), low (PDL) and close (PDC).
+- **Open interest:** total call and put open interest across the near
+  expiries, with its change.
+- **Build-up:** Long Buildup (price up, open interest up), Short Buildup
+  (down, up), Short Covering (up, down) or Long Unwinding (down, down).
+
+It is saved per day, shown in the activity log (`fno.ingest`) and served at
+`/api/fno`. US chains carry the previous close's open interest, so the change
+is the previous session's. NSE updates it during the day.
+
+**The confluence filter** (`fno.confluence`, on). Reversal setups, from the
+Candlestick-at-a-Level and Liquidity Sweep strategies, are taken only here:
+- **LONG_CALL:** the pattern's low swept the **PDL** and price closed back
+  above it, with **call open interest rising**.
+- **LONG_PUT:** the pattern's high tested the **PDH** and price closed back
+  below it, with **put open interest rising**.
+
+"At" the level means within 0.15 ATR. With no open interest in the chain
+(India on estimated prices), `when_oi_unknown: block` skips the setup;
+`allow` judges it on the level alone and says so.
+
+**The 1:3 gate** (`risk.min_reward_risk: 3`). Every trade's projected target
+is at least 3 times the distance from entry to the invalidation level. If the
+previous-day high or low, the opening range or the pre-market extreme sits
+inside that 3R, the road is not open: the setup is skipped as a hard risk
+failure, naming the level. The Risk Gatekeeper checks it again before any
+order.
+
 ## Over budget: the fallback ladder
 
 The primary contract is **0.40-0.50 delta**. When it costs more than the

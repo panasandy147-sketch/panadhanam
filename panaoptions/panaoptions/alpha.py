@@ -59,6 +59,9 @@ class AlphaSignal:
     confidence_score: float
     source: str = ""
     pattern: str = ""
+    # The projected target on the underlying (engine/reward.py). Not one of
+    # the five keys: the risk desk reads it for the 1:3 gate.
+    target_price: float = 0.0
 
     def to_dict(self) -> SignalDict:
         return SignalDict(symbol=self.symbol, direction=self.direction,
@@ -137,7 +140,8 @@ def from_setup(setup: Setup) -> AlphaSignal | None:
         trigger_price=float(trigger),
         invalidation_level=float(setup.underlying_support),
         confidence_score=confidence(setup),
-        source=setup.strategy.name.lower(), pattern=setup.pattern)
+        source=setup.strategy.name.lower(), pattern=setup.pattern,
+        target_price=float(setup.underlying_target or 0.0))
     problems = validate(signal.to_dict())
     if problems:
         log.info("%s %s dropped: %s", setup.symbol, setup.strategy.value,

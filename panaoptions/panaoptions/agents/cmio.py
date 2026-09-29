@@ -138,7 +138,8 @@ class CMIO:
         if not verdict.committee_approved or search.chosen is None:
             return verdict
         gate = self.gatekeeper.review(signal.to_dict(), search.chosen,
-                                      setup.delta_band, unrealised)
+                                      setup.delta_band, unrealised,
+                                      target=getattr(signal, "target_price", 0.0) or None)
         verdict.gate = gate
         verdict.approved = gate.approved
         verdict.reason = "" if gate.approved else f"Risk Gatekeeper: {gate.reason}"

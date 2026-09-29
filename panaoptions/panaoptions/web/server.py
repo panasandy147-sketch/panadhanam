@@ -406,6 +406,13 @@ def create_app(desk: Any, cycle_seconds: int = 60) -> FastAPI:
         capital = getattr(getattr(desk, "risk", None), "capital", None)
         return rules_mod.build(cfg, capital=capital or cfg.capital)
 
+    @app.get("/api/fno")
+    async def fno_picture(day: str | None = None) -> dict[str, Any]:
+        """The previous day's F&O map: PDH/PDL/PDC, OI and build-up per symbol."""
+        from panaoptions import fno
+        when = day or clock.now(cfg.timezone).date().isoformat()
+        return {"day": when, "symbols": fno.pictures(when)}
+
     @app.get("/api/audit")
     async def audit_log(day: str | None = None) -> dict[str, Any]:
         """Every BUY and SELL of one session, with the reasons (today by default)."""

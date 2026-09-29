@@ -282,6 +282,8 @@ def desk(cfg, monkeypatch, tmp_path):
                                                "resamples": 2,
                                                "resample_delay_seconds": 0}
     cfg.data["universe"]["symbols"] = ["SPY"]
+    # Chain reads are counted here; the daily F&O ingest would add one.
+    cfg.data.setdefault("fno", {})["ingest"] = False
     monkeypatch.setattr(clock, "now",
                         lambda tz: datetime(2026, 9, 23, 10, 20, tzinfo=ET))
     return OptionsDesk(cfg=cfg, feed=SpreadFeed())

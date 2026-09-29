@@ -66,6 +66,25 @@ CREATE TABLE IF NOT EXISTS iv_history (
     PRIMARY KEY (symbol, day)
 );
 
+-- Open interest per symbol per day: the first reading and the latest, so
+-- "rising" can be judged intraday (NSE) or day over day (US chains carry
+-- the previous close's OI).
+CREATE TABLE IF NOT EXISTS fno_oi (
+    symbol TEXT NOT NULL,
+    day TEXT NOT NULL,
+    first_ts TEXT, call_oi_first INTEGER, put_oi_first INTEGER,
+    last_ts TEXT, call_oi INTEGER, put_oi INTEGER,
+    PRIMARY KEY (symbol, day)
+);
+
+-- The previous day's F&O picture per symbol, as the desk mapped it.
+CREATE TABLE IF NOT EXISTS fno_daily (
+    symbol TEXT NOT NULL,
+    day TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
 CREATE TABLE IF NOT EXISTS signals_seen (
     id TEXT PRIMARY KEY,
     ts TEXT,

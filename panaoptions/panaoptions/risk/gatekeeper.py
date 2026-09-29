@@ -16,6 +16,8 @@ a particular contract may be bought for that signal, and it checks, in order:
     6. the per-trade capital cap   20% of capital ($800), or 25% ($1,000) on the
                                    high-notional index ETFs (SPY, QQQ, DIA)
     7. the total ceiling           everything open together
+    8. reward to risk              the projected target at least 3x the
+                                   distance to the invalidation (1:3)
 
 The index exception exists because a near-the-money SPY or QQQ contract costs
 $900-$1,000 on its own: at a flat 20% every valid index signal was refused on
@@ -151,7 +153,7 @@ class RiskGatekeeper:
     # -- the gate ------------------------------------------------------ #
     def review(self, signal: Mapping[str, Any], contract: OptionContract,
                delta_band: tuple[float, float] | None = None,
-               unrealised: float = 0.0) -> GateDecision:
+               unrealised: float = 0.0, target: float | None = None) -> GateDecision:
         """Approve or refuse buying `contract` for `signal`.
 
         Every check runs, so a refusal lists everything wrong at once rather
@@ -202,6 +204,23 @@ class RiskGatekeeper:
             else:
                 ok(f"{contract.structure}: net debit {mid:.2f}, width "
                    f"{contract.width:g}, max loss is the debit")
+
+        # The asymmetric gate: the projected target must be at least
+        # risk.min_reward_risk (3) times the distance to the invalidation.
+        need = float(self.cfg.get("risk.min_reward_risk", 3.0) or 0.0)
+        if target is not None and need > 0:
+            try:
+                entry = float(signal.get("trigger_price"))
+                stop = float(signal.get("invalidation_level"))
+            except (TypeError, ValueError):
+                entry = stop = 0.0
+            risk = abs(entry - stop)
+            rr = round(abs(float(target) - entry) / risk, 2) if risk and target else 0.0
+            if rr + 1e-9 < need:
+                no(f"reward:risk 1:{rr:.1f} is under the 1:{need:g} minimum"
+                   + ("" if target else " (no projected target)"))
+            else:
+                ok(f"reward:risk 1:{rr:.1f} ≥ 1:{need:g} (target {float(target):,.2f})")
 
         low, high = self.delta_bounds(delta_band)
         delta = abs(contract.delta)

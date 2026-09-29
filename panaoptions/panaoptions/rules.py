@@ -222,14 +222,30 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                  + " (a hammer or shooting star that pierced the level and closed "
                    "back counts as a liquidity sweep rejection)."
                  if allowed_patterns else
-                 f"A reversal pattern on the {tf} chart. Calls: hammer, bullish "
-                 "engulfing, morning star, tweezer bottom, piercing line, three "
-                 "white soldiers, bullish three-line strike, bullish abandoned "
-                 "baby. Puts: the bearish mirror of each."),
+                 f"A reversal pattern on the {tf} chart. LONG_CALL: hammer, "
+                 "bullish engulfing, morning star, tweezer bottom, double "
+                 "rejection bottom, piercing line, three white soldiers, bullish "
+                 "three-line strike, bullish abandoned baby. LONG_PUT: the bearish "
+                 "mirror of each (tweezer top, double rejection top …)."),
+                "Double rejection: the same high (put) or low (call) rejected "
+                "twice, 2–8 bars apart, with price leaving the level by a full "
+                "average bar in between.",
                 f"It prints AT a level the market has turned at before, within "
-                f"{tol} ATR: a swing high or low, the pre-market extreme, the "
-                "opening range edge, yesterday's close, VWAP or a moving average. "
-                "A pattern anywhere else is ignored.",
+                f"{tol} ATR: the previous-day high or low, a swing high or low, "
+                "the pre-market extreme, the opening range edge, yesterday's "
+                "close, VWAP or a moving average. VWAP, the averages and "
+                "yesterday's close are resistance from below and support from "
+                "above. A pattern anywhere else is ignored.",
+                "When the newest pattern is refused (its trend, its level, or its "
+                "trigger not broken yet) the next pattern on the same bars is "
+                "judged.",
+                *([("F&O confluence (strict): a call only where the pattern "
+                    "swept the previous-day LOW and closed back above it with "
+                    "call open interest rising; a put only where it tested the "
+                    "previous-day HIGH and closed back below it with put open "
+                    "interest rising. Unknown OI: "
+                    + str(g("fno.confluence.when_oi_unknown", "block")) + ".")]
+                  if g("fno.confluence.enabled", False) else []),
                 f"Price then takes out the pattern's trigger (the high of a hammer, "
                 f"the low of a shooting star) within {within} bars. The pattern "
                 "alone is not the entry.",
@@ -315,8 +331,42 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                        if claimed else "",
         })
     sections.append({
+        "title": "Previous-day F&O and reward to risk",
+        "intro": ("Once a day after the screen the desk maps each watched symbol's "
+                  "previous session: high (PDH), low (PDL), close (PDC), total "
+                  "call and put open interest and their change, and the build-up "
+                  "— Long Buildup (price up, OI up), Short Buildup (down, up), "
+                  "Short Covering (up, down), Long Unwinding (down, down). US "
+                  "chains carry the previous close's OI, so the change is the "
+                  "previous session's; NSE updates it during the day."),
+        "rules": [
+            _rule("Map the previous day's F&O picture",
+                  "on" if g("fno.ingest", True) else "off", "fno.ingest"),
+            _rule("Reversal calls only at a PDL sweep with rising call OI; "
+                  "reversal puts only at a PDH test with rising put OI",
+                  ("on — " + ", ".join(g("fno.confluence.strategies",
+                                         ["candlestick_at_level"]) or []))
+                  if g("fno.confluence.enabled", False) else "off",
+                  "fno.confluence.enabled / strategies"),
+            _rule("'At' the PDH / PDL means within",
+                  f"{g('fno.confluence.touch_atr', 0.15)} ATR", "fno.confluence.touch_atr"),
+            _rule("When the chain carries no open interest",
+                  g("fno.confluence.when_oi_unknown", "block"),
+                  "fno.confluence.when_oi_unknown"),
+            _rule("Every trade's projected target is at least this multiple of "
+                  "the distance to its invalidation, with no previous-day, "
+                  "opening-range or pre-market level in the way",
+                  f"1:{g('risk.min_reward_risk', 3.0):g}" if g("risk.min_reward_risk", 3.0)
+                  else "off", "risk.min_reward_risk / reward_room_levels"),
+        ],
+    })
+
+    sections.append({
         "title": "Which contract it buys",
-        "intro": ("Calls for a long setup, puts for a short one. A single "
+        "intro": ("Calls for a LONG_CALL setup, puts for a LONG_PUT one — both "
+                  "bought, never sold naked. Each trade is logged as executed "
+                  "outright, converted to a debit spread, or skipped by a hard "
+                  "risk gate (with which gate and why). A single "
                   "option you buy — or, when that is over budget, a debit "
                   "spread: buy the target-delta option and sell one further "
                   "out of the money, so the most it can lose is what was paid."),

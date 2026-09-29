@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -496,6 +497,9 @@ class OptionsDesk:
                 "screen.done", self._screen_summary(passed),
                 level="good" if passed else "info", ts=now)
 
+        # 3b. The previous day's F&O picture, once a day after the screen.
+        await self._maybe_ingest_fno(now)
+
         # 4. Tightening is a clock event, not a phase one. The entry window now
         # runs to the last strategy's close, which is well past the tighten
         # time — so gating this on the "managing" phase would mean a trade
@@ -648,6 +652,46 @@ class OptionsDesk:
                 f"{signal_a.confidence_score:.2f})", level="good", ts=now)
             self._remember_candidate(symbol, setup, now)
 
+            # Previous-day F&O confluence: reversals only at a PDL sweep with
+            # rising call OI, or a PDH test with rising put OI.
+            from panaoptions import fno
+            from panaoptions.engine import confluence, reward
+            if confluence.applies(setup, self.cfg):
+                why, notes = confluence.check(setup, session_levels,
+                                              fno.read_oi(symbol, now), self.cfg)
+                if why:
+                    self._candidate_refused(symbol, why)
+                    store.save_signal_seen(signal_id, now, symbol, setup.direction.value,
+                                           False, f"F&O confluence: {why}",
+                                           {"strategy": setup.strategy.value,
+                                            "pattern": setup.pattern, "side": side})
+                    self.activity.add("confluence.refused", f"{symbol} {side} — {why}",
+                                      level="warn", ts=now)
+                    continue
+                setup.confirmations.extend(notes)
+                self.activity.add("confluence.ok", f"{symbol} {side} — {'; '.join(notes)}",
+                                  level="good", ts=now)
+
+            # The 1:3 gate: a projected target at least 3x the distance to the
+            # invalidation, with open road to it.
+            target, rr, why, note = reward.project(setup, session_levels, self.cfg)
+            if why:
+                self._candidate_refused(symbol, f"reward:risk — {why}")
+                store.save_signal_seen(signal_id, now, symbol, setup.direction.value,
+                                       False, f"reward:risk: {why}",
+                                       {"strategy": setup.strategy.value,
+                                        "pattern": setup.pattern, "side": side})
+                self.activity.add("risk.refused",
+                                  f"{symbol} {side} SKIPPED — hard risk failure: "
+                                  f"reward:risk {why}", level="bad", ts=now)
+                self._record_skip(symbol, side, setup, "reward:risk", why)
+                continue
+            if target:
+                setup.underlying_target = target
+                signal_a = replace(signal_a, target_price=target)
+                if note:
+                    setup.confirmations.append(note)
+
             search, chain = await self._pick_contract(symbol, setup, now)
             if search.chosen is not None and search.tier == "debit_spread":
                 self.activity.add("contract.spread",
@@ -751,6 +795,33 @@ class OptionsDesk:
 
         self.scanning = ""
         return actions
+
+    async def _maybe_ingest_fno(self, now: datetime) -> None:
+        """Map PDH/PDL/PDC, open interest and the build-up for every watched
+        symbol — once a day, after the screen has run."""
+        if not bool(self.cfg.get("fno.ingest", True)):
+            return
+        today = now.date().isoformat()
+        if getattr(self, "_fno_on", "") == today or self._screened_on != today:
+            return
+        self._fno_on = today
+        from panaoptions import fno
+        max_dte = int(self.cfg.get("contracts.max_dte", 14))
+        lines = []
+        for symbol in list(self.cfg.symbols):
+            try:
+                levels = await self._levels_for(symbol, now)
+                spot = levels.previous_close or 0.0
+                chain = await self.feed.chain_for_window(symbol, spot, 0, max_dte)
+                fno.record_oi(symbol, now, chain, max_dte)
+                pic = fno.picture(symbol, now, levels)
+                fno.save_picture(pic)
+                lines.append(pic.line())
+            except Exception as exc:                   # noqa: BLE001
+                log.warning("F&O ingest failed for %s: %s", symbol, exc)
+        if lines:
+            self.activity.add("fno.ingest", "previous day F&O — " + " | ".join(lines)[:900],
+                              level="info", ts=now)
 
     def _record_skip(self, symbol: str, side: str, setup, gate: str, reason: str) -> None:
         """A fired setup a hard risk gate refused: into the audit log, so the
@@ -962,6 +1033,11 @@ class OptionsDesk:
         shortest = min(min_dte, int(self.cfg.get("contracts.min_dte", 7)))
         chain = await self.feed.chain_for_window(symbol, spot, shortest, max_dte)
         self._note_flow(symbol, setup, chain)
+        try:
+            from panaoptions import fno
+            fno.record_oi(symbol, now, chain, int(self.cfg.get("contracts.max_dte", 14)))
+        except Exception:                              # noqa: BLE001
+            pass
         rolling = bool(self.cfg.get("contracts.rolling_spread.enabled", True))
         if rolling:
             self.spreads.annotate(chain, now)

@@ -71,6 +71,11 @@ class SessionLevels(BaseModel):
     premarket_high: float = 0.0
     premarket_low: float = 0.0
     previous_close: float = 0.0
+    # The previous session's high and low (PDH / PDL), and the close before
+    # it — for the day's price change in the F&O build-up read.
+    previous_high: float = 0.0
+    previous_low: float = 0.0
+    close_before: float = 0.0
 
     @property
     def range_height(self) -> float:

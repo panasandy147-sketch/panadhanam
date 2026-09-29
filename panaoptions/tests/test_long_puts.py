@@ -248,6 +248,10 @@ def desk(scan_cfg, monkeypatch, tmp_path):
 
     monkeypatch.setattr(store, "db_path", lambda: tmp_path / "p.db")
     scan_cfg.data["agents"]["enabled"] = False        # the execution path, not the vote
+    # These tests are about how a put executes. The 1:3 gate and the PDH/PDL
+    # confluence filter have their own tests (tests/test_fno_confluence.py).
+    scan_cfg.data["risk"]["min_reward_risk"] = 0
+    scan_cfg.data.setdefault("fno", {})["confluence"] = {"enabled": False}
     scan_cfg.data["contracts"].update(min_dte=0, max_dte=4, max_contract_price=5.0,
                                       min_contract_price=0.10)
     scan_cfg.data["universe"]["symbols"] = ["SPY"]
