@@ -18,9 +18,19 @@ class CandlestickAgent(BaseAgent):
                                data_available=False,
                                rationale="No candle data available for this symbol.")
 
+        # --- The Previous Day Liquidity Sweep, confirmed by its reversal
+        # candle, is a complete setup on its own: scored 1.0 (a liquidity trap
+        # is the highest-probability read this analyst makes).
+        sweep = ind.get("pd_sweep") or {}
+        if sweep.get("confirmed") and bool(self.cfg.get("pd_sweep.enabled", True)):
+            return self._sweep_report(ctx, primary, sweep)
+
         score = 0.0
         evidence: list[Evidence] = []
         price = primary.get("last_close", 0.0)
+        if sweep:
+            evidence.append(Evidence(label="PD sweep (not approved)",
+                                     value=sweep.get("note", ""), weight=0.0))
 
         # --- 1. EMA structure -------------------------------------------------
         if primary.get("ema_stacked_bull"):
@@ -109,6 +119,33 @@ class CandlestickAgent(BaseAgent):
             suggested_target=round(target, 2) if target else None,
             extra={"rsi": rsi, "atr": atr, "regime": primary.get("regime"),
                    "volume_surge": surge, "patterns": [p["name"] for p in patterns]},
+        )
+
+    def _sweep_report(self, ctx: MarketContext, primary: dict, sweep: dict) -> AgentReport:
+        from app.strategies.pd_sweep import SETUP_NAME
+        direction = int(sweep.get("direction") or 0)
+        score = float(self.cfg.get("pd_sweep.score", 1.0)) * direction
+        price = float(primary.get("last_close") or sweep.get("close") or 0.0)
+        vwap = float(primary.get("vwap") or 0.0)
+        pattern = str(sweep.get("pattern", "")).replace("_", " ")
+        side = "high (PDH)" if sweep.get("side") == "PDH" else "low (PDL)"
+        return AgentReport(
+            agent_id=self.agent_id, symbol=ctx.symbol,
+            bias=self._bias_from_score(score), score=round(score, 3),
+            confidence=0.95,
+            rationale=(f"{SETUP_NAME}: {sweep.get('note', '')}. Trapped "
+                       f"{'buyers' if direction < 0 else 'sellers'} above/below the "
+                       f"previous-day {side} fuel the move back — target VWAP "
+                       f"{vwap:,.2f} or 3R."),
+            evidence=[Evidence(label=SETUP_NAME, value=sweep.get("note", ""), weight=1.0),
+                      Evidence(label=pattern.title() or "Reversal",
+                               value=f"on the {sweep.get('timeframe')} close", weight=0.0)],
+            # The risk desk places the stop exactly 2 ticks beyond this wick.
+            invalidation_level=round(float(sweep.get("wick") or 0.0), 4),
+            suggested_entry=price,
+            suggested_target=round(vwap, 2) if vwap else None,
+            extra={"setup": SETUP_NAME, "sweep": sweep, "patterns": [sweep.get("pattern")],
+                   "atr": primary.get("atr", 0.0), "vwap": vwap},
         )
 
     @staticmethod

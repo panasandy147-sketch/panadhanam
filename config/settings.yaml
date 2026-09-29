@@ -100,6 +100,9 @@ risk:
   # still in control. Exit at market rather than waiting for the price stop.
   time_stop_minutes: 30
   time_stop_setups: ["Mean Reversion"]   # which setups the timer applies to
+  # Setups that are NEVER time-stopped: they run to the target, the stop or
+  # the intraday square-off.
+  no_time_stop_setups: ["PD Liquidity Sweep"]
   # Trailing
   trail_after_r: 1.0             # start trailing once trade is +1R
   trail_step_r: 0.5
@@ -162,6 +165,8 @@ consensus:
   # design against the move that brought price there. When the Volume Profile
   # analyst triggers in the trade's direction the trend filter stands aside.
   trend_filter_exempt_volume_profile: true
+  # ...and a confirmed Previous Day Liquidity Sweep, a reversal by design.
+  trend_filter_exempt_pd_sweep: true
 
 # --------------------------------------------------------------------------
 # NEWS BLACKOUT — no new entries around high-impact macro releases.
@@ -287,6 +292,28 @@ technical:
     - tweezer_top
     - double_rejection_bottom
     - double_rejection_top
+
+# --------------------------------------------------------------------------
+# PREVIOUS DAY LIQUIDITY SWEEP (failed breakout) — US and India, intraday
+# --------------------------------------------------------------------------
+# Price pierces the previous-day HIGH (or LOW) and the 5m or 15m candle
+# closes back inside yesterday's range: the breakout traders are trapped.
+#   PDH sweep -> SHORT, only if the sweep candle is a Shooting Star or a
+#                Bearish Engulfing
+#   PDL sweep -> LONG,  only if it is a Hammer or a Bullish Engulfing
+# The candlestick analyst scores a confirmed sweep 1.0. The stop is exactly
+# stop_ticks beyond the sweep candle's wick; the target is the day's VWAP or
+# min_reward_risk (3R), whichever is further; there is no time stop — it runs
+# to the target, the stop, or the square-off (15:15 India).
+pd_sweep:
+  enabled: true
+  timeframes: ["5m", "15m"]
+  score: 1.0
+  stop_ticks: 2
+  min_reward_risk: 3.0
+  # The sweep is itself the PDH/PDL condition of the F&O confluence rule;
+  # true also demands rising call (PDL) / put (PDH) open interest.
+  require_rising_oi: false
 
 # --------------------------------------------------------------------------
 # PREVIOUS-DAY F&O CONFLUENCE

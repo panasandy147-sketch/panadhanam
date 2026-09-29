@@ -245,6 +245,45 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     })
 
     # ------------------------------------------------------------------ #
+    if g("pd_sweep.enabled", True):
+        sections.append({
+            "title": "Strategy: Previous Day Liquidity Sweep (failed breakout)",
+            "intro": ("Stops rest just beyond yesterday's high and low. When price "
+                      "runs them and fails, the breakout traders are trapped and "
+                      "their exit fuels the move back. US and India, intraday."),
+            "rules": [
+                _rule("The trigger: the latest candle pierces the previous-day high "
+                      "(PDH) or low (PDL) and CLOSES BACK INSIDE yesterday's range, on",
+                      " or ".join(g("pd_sweep.timeframes", ["5m", "15m"]) or []),
+                      "pd_sweep.timeframes"),
+                _rule("PDH sweep → SHORT (a put) only if the sweep candle is a "
+                      "Shooting Star or a Bearish Engulfing", "confirmation",
+                      "pd_sweep.enabled"),
+                _rule("PDL sweep → LONG (a call) only if it is a Hammer or a "
+                      "Bullish Engulfing", "confirmation", "pd_sweep.enabled"),
+                _rule("The candlestick analyst's score for a confirmed sweep",
+                      g("pd_sweep.score", 1.0), "pd_sweep.score"),
+                _rule("Stop: exactly this many ticks beyond the sweep candle's wick "
+                      "(₹0.05 ticks on NSE, $0.01 in the US) — no ATR widening",
+                      g("pd_sweep.stop_ticks", 2), "pd_sweep.stop_ticks"),
+                _rule("Target: the day's VWAP, or this many R — whichever is further",
+                      f"{g('pd_sweep.min_reward_risk', 3.0)}R",
+                      "pd_sweep.min_reward_risk"),
+                _rule("No time stop: it runs to the target, the stop, or the "
+                      "intraday square-off",
+                      g("system.square_off_time", "15:15"),
+                      "risk.no_time_stop_setups"),
+                _rule("The trend filter stands aside for it (a PDH sweep short sits "
+                      "above VWAP by design)",
+                      "on" if g("consensus.trend_filter_exempt_pd_sweep", True) else "off",
+                      "consensus.trend_filter_exempt_pd_sweep"),
+                _rule("Also needs rising call (PDL) / put (PDH) open interest",
+                      "yes" if g("pd_sweep.require_rising_oi", False) else "no",
+                      "pd_sweep.require_rising_oi"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     sections.append({
         "title": "Previous-day F&O confluence",
         "intro": ("Each symbol's previous session is mapped every day: high "

@@ -66,3 +66,14 @@ def test_the_previous_day_fno_rules_are_written_out(cfg):
                   "fno_confluence.when_oi_unknown", "1:3"):
         assert words in text, words
     assert "tweezer" in json.dumps(doc).lower()
+
+
+def test_the_liquidity_sweep_strategy_is_written_out(cfg):
+    import json
+    doc = build(cfg)
+    section = next(s for s in doc["sections"] if s["title"].startswith(
+        "Strategy: Previous Day Liquidity Sweep"))
+    text = json.dumps(section)
+    for words in ("Shooting Star", "Bearish Engulfing", "Hammer", "Bullish Engulfing",
+                  "CLOSES BACK INSIDE", "VWAP", "No time stop", "pd_sweep.stop_ticks"):
+        assert words in text, words

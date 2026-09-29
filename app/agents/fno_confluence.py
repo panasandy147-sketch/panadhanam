@@ -105,6 +105,12 @@ def confluence_reason(ctx: Any, bias: Bias, reports: list[AgentReport], cfg: Any
     pattern = reversal_pattern(reports, bias)
     if not pattern:
         return ""
+    # A confirmed Previous Day Liquidity Sweep IS the level condition; it
+    # needs rising OI too only if pd_sweep.require_rising_oi says so.
+    from app.strategies.pd_sweep import SETUP_NAME
+    if any(r.agent_id == "candlestick" and (r.extra or {}).get("setup") == SETUP_NAME
+           for r in reports) and not bool(cfg.get("pd_sweep.require_rising_oi", False)):
+        return ""
     ind = ctx.indicators or {}
     prev = ind.get("previous_day") or {}
     primary = ind.get("primary") or {}

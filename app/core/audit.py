@@ -106,6 +106,7 @@ def record_buy(cfg: Any, signal: Any, order: dict[str, Any] | None = None) -> di
     return _write(cfg, {
         "event": "BUY" if side == "BUY" else "SELL_SHORT",
         "signal_id": signal.id, "code_version": signal.code_version or code_version(),
+        "setup": getattr(signal, "setup", "") or None,
         "symbol": inst.symbol, "tradingsymbol": inst.tradingsymbol,
         "instrument_type": _value(inst.instrument_type), "side": side,
         "bias": _value(signal.bias), "quantity": signal.quantity,

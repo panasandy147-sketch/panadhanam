@@ -115,6 +115,20 @@ buy and sell with its reason, Monday to today. The week so far is saved to
 `journal/weekly/<week>-<us|in>.md` after every session, so US and India each
 have their own file.
 
+**Previous Day Liquidity Sweep (failed breakout).** US and India, intraday.
+- **Trigger:** a 5m or 15m candle pierces the previous-day high or low and
+  closes back inside yesterday's range.
+- **Confirmation:** a PDH sweep is a short only if that candle is a Shooting
+  Star or Bearish Engulfing. A PDL sweep is a long only if it is a Hammer or
+  Bullish Engulfing. A confirmed sweep scores **1.0** with the candlestick
+  analyst.
+- **Stop:** exactly 2 ticks beyond the sweep candle's wick.
+- **Target:** VWAP or 3R, whichever is further.
+- **Exit:** no time stop. It runs to the target, the stop, or the square-off.
+- **Filters:** the trend filter stands aside for it.
+
+The journal grades it as its own setup, "PD Liquidity Sweep".
+
 **Previous-day F&O and 1:3.** Each symbol's previous session is mapped
 every cycle and stored once a day (`fno_daily`):
 - **Levels:** high (PDH), low (PDL) and close (PDC).

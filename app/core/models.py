@@ -245,6 +245,9 @@ class TradeSignal(BaseModel):
     counter_argument: str = ""
     rejection_reasons: list[str] = Field(default_factory=list)
     reports: list[AgentReport] = Field(default_factory=list)
+    # The named setup behind the trade, when there is one ("PD Liquidity
+    # Sweep"): it decides the stop, the target and whether a time stop applies.
+    setup: str = ""
     regime: Regime | None = None
     # The code that placed it, so results can be read per version.
     code_version: str = ""

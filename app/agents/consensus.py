@@ -182,6 +182,18 @@ def volume_profile_confluence(ctx: Any, reports: list[Any], composite: float,
     return composite, notes, veto
 
 
+def sweep_backs(reports: list[Any], composite: float) -> bool:
+    """Did the candlestick analyst confirm a Previous Day Liquidity Sweep in
+    this trade's direction? A sweep is a reversal by design."""
+    from app.strategies.pd_sweep import SETUP_NAME
+    for report in reports or []:
+        if getattr(report, "agent_id", "") == "candlestick" \
+                and (getattr(report, "extra", None) or {}).get("setup") == SETUP_NAME \
+                and float(getattr(report, "score", 0.0) or 0.0) * composite > 0:
+            return True
+    return False
+
+
 def volume_profile_backs(reports: list[Any], composite: float) -> bool:
     """Did the Volume Profile analyst trigger in this trade's direction?"""
     for report in reports or []:

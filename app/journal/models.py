@@ -21,6 +21,7 @@ class SetupType(str, Enum):
     BREAKOUT = "Breakout"
     SECTOR_LAGGARD = "Sector Laggard"
     NEWS_MOMENTUM = "News Momentum"
+    LIQUIDITY_SWEEP = "PD Liquidity Sweep"
     OTHER = "Other"
 
 

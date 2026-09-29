@@ -191,8 +191,13 @@ class RiskManager:
         if instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}:
             side = Side.BUY
 
-        stop_loss, target, sl_note, ustop = self._levels(ctx, bias, entry, instrument,
-                                                         source_report)
+        sweep = self._sweep_report(reports or ctx.__dict__.get("_reports") or [], bias)
+        if sweep is not None:
+            stop_loss, target, sl_note, ustop = self._sweep_levels(
+                ctx, bias, entry, instrument, source_report, sweep)
+        else:
+            stop_loss, target, sl_note, ustop = self._levels(ctx, bias, entry, instrument,
+                                                             source_report)
 
         # Record the underlying's spot and the leg's delta at entry so the outcome
         # tracker can mark an option position to market later.
@@ -211,6 +216,7 @@ class RiskManager:
             bias=bias, composite_score=round(composite_score, 3),
             confirmations=confirmations, rationale=rationale,
             counter_argument=counter_argument, reports=reports, regime=ctx.regime,
+            setup=(sweep.extra or {}).get("setup", "") if sweep is not None else "",
         )
 
         # ---- desk-level gates ----
@@ -243,7 +249,9 @@ class RiskManager:
             # Option premiums are far more volatile; widen the band for them.
             if instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}:
                 min_pct, max_pct = min_pct * 4, max_pct * 12
-            if stop_pct < min_pct:
+            # A sweep's stop is hard-coded 2 ticks beyond the wick: the wick IS
+            # the invalidation, so the "too tight" floor does not apply to it.
+            if stop_pct < min_pct and sweep is None:
                 reasons.append(f"Stop {stop_pct:.2f}% is too tight (min {min_pct}%) — noise will hit it")
             elif stop_pct > max_pct:
                 reasons.append(f"Stop {stop_pct:.2f}% is too wide (max {max_pct}%) — invalidation ill-defined")
@@ -256,7 +264,11 @@ class RiskManager:
         spot = ctx.quote.last_price if ctx.quote else entry
         u_entry, u_stop = ((spot, ustop.level) if ustop and instrument.instrument_type in
                            {InstrumentType.CALL, InstrumentType.PUT} else (entry, stop_loss))
-        why = fno_confluence.room_reason(ctx, bias, u_entry, u_stop, self.cfg)
+        # A sweep's target is defined by the setup (VWAP or 3R): the far side
+        # of yesterday's range is where a failed breakout rotates to, not a
+        # wall, so the room check does not apply to it.
+        why = ("" if sweep is not None
+               else fno_confluence.room_reason(ctx, bias, u_entry, u_stop, self.cfg))
         if why:
             reasons.append(f"Reward:risk — {why}")
 
@@ -633,6 +645,70 @@ class RiskManager:
                   else entry - stop_points * min_rr)
         return stop, target, f"{note}, target at {min_rr}R", guard.UnderlyingStop(
             round(stop, 4), "structure" if structural else "atr", note)
+
+    @staticmethod
+    def _sweep_report(reports: list[AgentReport], bias: Bias) -> AgentReport | None:
+        """The candlestick analyst's confirmed PD Liquidity Sweep in this
+        trade's direction, if that is what this trade is."""
+        from app.strategies.pd_sweep import SETUP_NAME
+        want = 1 if bias == Bias.BULLISH else -1
+        for r in reports or []:
+            if (r.agent_id == "candlestick" and (r.extra or {}).get("setup") == SETUP_NAME
+                    and r.score * want > 0 and r.invalidation_level):
+                return r
+        return None
+
+    def _sweep_levels(self, ctx: MarketContext, bias: Bias, entry: float,
+                      instrument: Instrument, source: AgentReport | None,
+                      sweep: AgentReport) -> tuple[float, float, str, guard.UnderlyingStop]:
+        """A sweep's stop and target, on the UNDERLYING:
+
+          stop    exactly pd_sweep.stop_ticks (2) ticks beyond the sweep
+                  candle's wick — no ATR widening, no swing substitute;
+          target  the day's VWAP when it is at least pd_sweep.min_reward_risk
+                  (3R) away, otherwise 3R.
+        For an option the premium stop/target are what it marks at there.
+        """
+        meta = self.cfg.instrument_meta(ctx.symbol)
+        # The listed tick, else the market's: ₹0.05 on NSE, $0.01 in the US.
+        tick = float(meta.get("tick_size")
+                     or (0.01 if str(getattr(self.cfg, "active_market", "IN")).upper() == "US"
+                         else 0.05))
+        ticks = int(self.cfg.get("pd_sweep.stop_ticks", 2))
+        need = float(self.cfg.get("pd_sweep.min_reward_risk", 3.0))
+        long = bias == Bias.BULLISH
+        wick = float(sweep.invalidation_level)
+        u_stop = round(wick - ticks * tick if long else wick + ticks * tick, 4)
+        is_option = instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}
+        spot = (ctx.quote.last_price if ctx.quote else 0.0) if is_option else entry
+        u_risk = abs(spot - u_stop)
+        if u_risk <= 0 or (long and u_stop >= spot) or (not long and u_stop <= spot):
+            # Price already back through the wick: not a trade; the stop-sanity
+            # checks downstream refuse it with this note.
+            return (entry, entry, f"sweep wick {wick:.2f} already breached",
+                    guard.UnderlyingStop(u_stop, "sweep", "wick breached"))
+        sign = 1.0 if long else -1.0
+        three_r = spot + sign * need * u_risk
+        vwap = float((sweep.extra or {}).get("vwap") or 0.0)
+        vwap_r = (vwap - spot) * sign / u_risk if vwap else 0.0
+        if vwap_r >= need:
+            u_target, how = vwap, f"VWAP {vwap:.2f} ({vwap_r:.1f}R)"
+        else:
+            u_target, how = three_r, (f"{need:g}R ({three_r:.2f}; VWAP {vwap:.2f} is only "
+                                      f"{max(vwap_r, 0):.1f}R)" if vwap else f"{need:g}R")
+        rr = abs(u_target - spot) / u_risk
+        note = (f"sweep stop {ticks} tick(s) beyond the wick {wick:.2f} → {u_stop:.2f}; "
+                f"target {how}; no time stop")
+        ustop = guard.UnderlyingStop(u_stop, "sweep", note)
+        if is_option:
+            leg = (source.extra.get("suggested_leg") or {}) if source else {}
+            is_call = instrument.instrument_type == InstrumentType.CALL
+            stop = guard.premium_at_stop(entry, leg.get("delta"), spot, u_stop, is_call)
+            if stop >= entry:
+                stop = entry * 0.5
+            target = entry + (entry - stop) * rr
+            return stop, target, note + f" (option marks {stop:.2f} at the stop)", ustop
+        return u_stop, u_target, note, ustop
 
     @staticmethod
     def _structural_is_sane(level: float, entry: float, bias: Bias, atr: float) -> bool:

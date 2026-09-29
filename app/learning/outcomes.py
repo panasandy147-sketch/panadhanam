@@ -242,6 +242,12 @@ class OutcomeTracker:
         """Best-effort setup tag from what the desk recorded at entry."""
         from app.journal.models import SetupType
         blob = f"{row.get('confirmations') or ''} {row.get('rationale') or ''}".lower()
+        try:
+            import json
+            if json.loads(row.get("payload") or "{}").get("setup") == "PD Liquidity Sweep":
+                return SetupType.LIQUIDITY_SWEEP
+        except (TypeError, ValueError):
+            pass
         if "breakout" in blob or "flag" in blob:
             return SetupType.BREAKOUT
         if "vwap" in blob or "reversion" in blob or "oversold" in blob:
@@ -322,6 +328,10 @@ class OutcomeTracker:
         # through, so the 30-minute Mean Reversion timer closed EVERY trade
         # that was not yet green — ten exits at -0.04R to -0.46R in a morning.
         if setup not in setups:
+            return False
+        # Never on a setup that must run to its target or its stop (the
+        # Previous Day Liquidity Sweep): only the square-off ends it early.
+        if setup in (self.cfg.get("risk.no_time_stop_setups") or ["PD Liquidity Sweep"]):
             return False
 
         entry_ts = row.get("ts")

@@ -157,6 +157,13 @@ class MarketDataService:
             today = clock.market_now(tz).date()
             prev = fno_confluence.previous_day(candles, tz, today)
             ctx.indicators["previous_day"] = prev
+            # The Previous Day Liquidity Sweep trigger: price pierced the PDH
+            # or PDL and the 5m/15m candle closed back inside the range.
+            if prev and bool(self.cfg.get("pd_sweep.enabled", True)):
+                from app.strategies import pd_sweep
+                sweep = pd_sweep.detect(candles, prev, tz, today, tuple(
+                    self.cfg.get("pd_sweep.timeframes") or ("5m", "15m")))
+                ctx.indicators["pd_sweep"] = sweep.to_dict() if sweep else None
             if prev:
                 pic = fno_confluence.picture(symbol, prev, ctx.indicators.get("derivatives"))
                 ctx.indicators["fno_picture"] = pic

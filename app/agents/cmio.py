@@ -174,6 +174,13 @@ class CMIOAgent(BaseAgent):
             conflicts.append(f"Trend filter stood aside for a volume-profile setup "
                              f"({against})")
             against = ""
+        # So is a Previous Day Liquidity Sweep: a PDH sweep short usually sits
+        # above VWAP, a PDL sweep long below it — that is the trap.
+        if against and consensus.get("trend_filter_exempt_pd_sweep", True) \
+                and consensus_mod.sweep_backs(active, composite):
+            conflicts.append(f"Trend filter stood aside for a previous-day liquidity "
+                             f"sweep ({against})")
+            against = ""
 
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
