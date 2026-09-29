@@ -219,7 +219,11 @@ def test_switching_to_india_shows_the_india_watchlist_at_once(page, desk, monkey
         assert "SPY" not in page.input_value("#watch-input")
     finally:
         page.click("#market-toggle button[data-mode='US']")
-        _wait_text(page, "#watch-meta", "08:45", timeout=5000)
+        # The US names, not "first ranking 08:45": inside US hours the list has
+        # already been ranked and the meta reads "next HH:MM" instead.
+        page.wait_for_function(
+            "() => document.getElementById('watch-input').value.includes('SPY')",
+            timeout=5000)
 
 
 def test_todays_review_builds(page):

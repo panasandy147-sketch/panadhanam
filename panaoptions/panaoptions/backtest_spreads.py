@@ -100,6 +100,14 @@ class Result:
     execution: str = ""                # OUTRIGHT_LONG_CALL ... / *_DEBIT_SPREAD / SKIPPED_HARD_RISK
     pattern: str = ""
     strategy: str = ""
+    # For sizing in validate.py: the underlying stop and target, the chosen
+    # contract's premium, (net) delta and lot, and when the trade ended.
+    stop: float = 0.0
+    target: float = 0.0
+    mid: float = 0.0
+    delta: float = 0.0
+    lot: int = 0
+    exit_ts: str = ""
 
     @property
     def filled(self) -> bool:
@@ -414,6 +422,9 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
         from panaoptions.models import execution_kind
         r.tier, r.contract, r.cost = search.tier, c.label, c.cost(lot)
         r.execution = execution_kind(c, direction)
+        r.stop, r.target, r.mid, r.lot = b.stop, b.target, c.mid, c.multiplier or lot
+        r.delta = round(abs(c.long_leg.delta) - abs(c.short_leg.delta) if c.is_spread
+                        else abs(c.delta), 4)
         if c.is_spread:
             r.legs = [f"BUY {c.long_leg.label} ({abs(c.long_leg.delta):.2f}Δ)",
                       f"SELL {c.short_leg.label} ({abs(c.short_leg.delta):.2f}Δ)"]
@@ -430,6 +441,7 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
                 r.pnl = round((value - c.mid) * lot_n, 2)
                 r.r_multiple = round((value - c.mid) / c.mid, 2) if c.mid else None
                 r.exit_at, r.exit_reason = (at + timedelta(minutes=5)).strftime("%H:%M"), reason
+                r.exit_ts = (at + timedelta(minutes=5)).isoformat(timespec="minutes")
                 r.session_over = reason != "LAST_BAR"
                 r.note = search.note[:300]
                 out.append(r)
@@ -441,6 +453,7 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
             r.exit_value = round(value, 4)
             r.pnl = round((value - c.mid) * (c.multiplier or lot), 2)
             r.exit_at = (at + timedelta(minutes=5)).strftime("%H:%M")
+            r.exit_ts = (at + timedelta(minutes=5)).isoformat(timespec="minutes")
             hh, mm = (int(x) for x in str(cfg.get("session.force_exit_at", "15:45")).split(":"))
             r.session_over = (at + timedelta(minutes=5)).time() >= time(hh, mm)
         r.note = search.note[:300]

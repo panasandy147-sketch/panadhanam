@@ -444,6 +444,62 @@ class OptionsDesk:
             self.activity.add("restored", f"{len(restored)} open position(s) "
                               f"picked up after the restart: {labels}")
 
+    def _restore_day(self, today: str) -> None:
+        """Pick up today's counters and any lockout after a restart.
+
+        Without this a restart mid-session wiped the day's realised loss, its
+        trade count and a tripped breaker — the lockout lasted only until the
+        app was started again.
+        """
+        try:
+            row = store.load_session(today)
+            locked = store.lockout(today)
+        except Exception as exc:                        # noqa: BLE001
+            log.warning("could not restore today's session: %s", exc)
+            return
+        state = self.risk.state
+        if row:
+            state.trades_taken = int(row.get("trades") or 0)
+            state.wins = int(row.get("wins") or 0)
+            state.losses = int(row.get("losses") or 0)
+            state.realised_pnl = float(row.get("realised_pnl") or 0.0)
+        if locked or (row and row.get("halted")):
+            state.halted = True
+            state.halt_reason = ((locked or {}).get("reason")
+                                 or "the daily circuit breaker tripped earlier today")
+            self._locked_for = today
+            self.activity.add("halt", f"LOCKED OUT for {today} — {state.halt_reason}",
+                              level="bad")
+        elif row:
+            self.activity.add("restored", f"today so far: {state.trades_taken} trade(s), "
+                              f"{state.realised_pnl:+,.2f} realised")
+
+    async def _enforce_lockout(self, now: datetime) -> list[str]:
+        """Once the breaker trips: cancel what is pending, flatten what is
+        open, and record the lockout so nothing trades again today — not even
+        after a restart. The ledger refuses new orders while halted."""
+        if not self.risk.state.halted:
+            return []
+        today = now.date().isoformat()
+        actions: list[str] = []
+        if self.ledger.open_trades:
+            actions += await self._circuit_breaker(now)
+        if getattr(self, "_locked_for", None) != today:
+            self._locked_for = today
+            try:
+                store.save_lockout(today, self.risk.state.halt_reason, now)
+            except Exception as exc:                    # noqa: BLE001
+                log.warning("could not save the lockout: %s", exc)
+            if self.candidate and not self.candidate.get("taken"):
+                self.candidate["refused"] = "cancelled — daily circuit breaker"
+            self.candidate, self.scanning = None, ""
+            self.activity.add("halt", f"LOCKED OUT for the rest of {today}: "
+                              f"{self.risk.state.halt_reason}. Pending signals "
+                              f"cancelled; orders refused until tomorrow.",
+                              level="bad", ts=now)
+            actions.append("circuit breaker: locked out for the day")
+        return actions
+
     async def cycle(self) -> dict[str, Any]:
         async with self._lock:
             return await self._locked_cycle()
@@ -462,7 +518,8 @@ class OptionsDesk:
     async def _cycle(self) -> dict[str, Any]:
         now = clock.now(self.cfg.timezone)
         today = now.date().isoformat()
-        self.risk.roll_day(today)
+        if self.risk.roll_day(today):
+            self._restore_day(today)
 
         phase = clock.session_phase(self.cfg, now)
         result: dict[str, Any] = {"phase": phase, "ts": now.isoformat(),
@@ -476,6 +533,8 @@ class OptionsDesk:
         # 1. Manage what is already open, always and first.
         managed = await self._manage(now)
         result["actions"].extend(managed)
+        # 1b. A tripped breaker locks the desk out for the rest of the day.
+        result["actions"].extend(await self._enforce_lockout(now))
 
         if phase == "closed":
             await self._square_off(now)
@@ -525,6 +584,13 @@ class OptionsDesk:
         """
         if self.risk.state.halted:
             self.scanning = ""
+            return []
+        max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
+        if max_daily and self.risk.state.trades_taken >= max_daily:
+            self.scanning = ""
+            self.activity.add(
+                "hunt.skip", f"{self.risk.state.trades_taken} of {max_daily} trades "
+                f"taken today — the daily limit; no new entries until tomorrow", ts=now)
             return []
         max_open = int(self.cfg.get("risk.max_open_trades", 1))
         if len(self.ledger.open_trades) >= max_open:
@@ -1182,7 +1248,9 @@ class OptionsDesk:
             return []
         unrealised = self._unrealised()
         limit = self.risk.daily_limit
-        if limit <= 0 or self.gatekeeper.drawdown(unrealised) < limit:
+        # Already halted (a realised loss tripped it): flatten what is left.
+        if not self.risk.state.halted and (
+                limit <= 0 or self.gatekeeper.drawdown(unrealised) < limit):
             return []
         self.gatekeeper.breaker_tripped(unrealised)
         prices = {t.contract_label: t.last_price or t.entry_price

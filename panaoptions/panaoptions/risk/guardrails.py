@@ -27,6 +27,35 @@ from panaoptions.risk.gatekeeper import cap_pct, index_symbols
 log = get_logger("risk")
 
 
+def planned_loss_per_contract(cfg, contract: OptionContract, spot: float = 0.0,
+                              stop_underlying: float = 0.0) -> float:
+    """What one contract loses if the trade is wrong — the first exit to fire.
+
+    In underlying mode the structural stop normally fires first: the option
+    loses about |delta| x the distance from the underlying to its stop. The
+    premium backstop (45%) caps it, and a debit spread can never lose more
+    than its debit. In premium mode it is the premium stop.
+    """
+    delta = (abs(contract.long_leg.delta) - abs(contract.short_leg.delta)
+             if contract.is_spread else abs(contract.delta))
+    return planned_loss(cfg, contract.mid, delta, contract.multiplier or cfg.multiplier,
+                        spot, stop_underlying, contract.is_spread)
+
+
+def planned_loss(cfg, mid: float, delta: float, mult: int, spot: float = 0.0,
+                 stop_underlying: float = 0.0, is_spread: bool = False) -> float:
+    """planned_loss_per_contract from the numbers alone (the backtest's form)."""
+    underlying_mode = str(cfg.get("risk.stop_mode", "premium")) == "underlying"
+    stop_pct = float(cfg.get("risk.disaster_stop_pct" if underlying_mode
+                             else "risk.stop_loss_pct", 45.0 if underlying_mode else 20.0))
+    loss = mid * stop_pct / 100.0 * mult
+    if underlying_mode and spot and stop_underlying and delta > 0:
+        loss = min(loss, delta * abs(spot - stop_underlying) * mult)
+    if is_spread:
+        loss = min(loss, mid * mult)
+    return round(max(loss, 0.0), 2)
+
+
 @dataclass
 class DayState:
     """Resets each session. Losses accumulate; the breaker latches."""
@@ -65,15 +94,30 @@ class RiskManager:
         return round(self.capital * pct / 100.0, 2)
 
     # ------------------------------------------------------------------ #
-    def roll_day(self, today: str) -> None:
-        """A new session clears yesterday's counters, including the halt."""
+    def roll_day(self, today: str) -> bool:
+        """A new session clears yesterday's counters, including the halt.
+        True when the day changed (the caller restores today's saved state)."""
         if self.state.date == today:
-            return
+            return False
         if self.state.date:
             log.info("new session %s — resetting daily counters (yesterday: "
                      "%+.2f over %d trades)", today, self.state.realised_pnl,
                      self.state.trades_taken)
         self.state = DayState(date=today)
+        return True
+
+    @property
+    def risk_per_trade(self) -> float:
+        """The most one trade may lose at its stop (0 = no such cap)."""
+        pct = float(self.cfg.get("risk.max_risk_per_trade_pct", 0) or 0)
+        return round(self.capital * pct / 100.0, 2) if pct > 0 else 0.0
+
+    def halt(self, reason: str) -> None:
+        """Latch the breaker for the rest of the calendar day."""
+        if not self.state.halted:
+            self.state.halted = True
+            self.state.halt_reason = reason
+            log.warning("CIRCUIT BREAKER — %s", reason)
 
     def record_pnl(self, amount: float) -> None:
         """Book a realised amount and trip the breaker if the day is done."""
@@ -85,11 +129,8 @@ class RiskManager:
 
         limit = self.daily_limit
         if not self.state.halted and self.state.realised_pnl <= -limit:
-            self.state.halted = True
-            self.state.halt_reason = (
-                f"daily loss limit hit: {self.state.realised_pnl:+.2f} against a "
-                f"-{limit:.2f} limit. No more entries today.")
-            log.warning("CIRCUIT BREAKER — %s", self.state.halt_reason)
+            self.halt(f"daily loss limit hit: {self.state.realised_pnl:+.2f} against a "
+                      f"-{limit:.2f} limit. Locked out for the rest of the day.")
 
     @property
     def remaining_loss_budget(self) -> float:
@@ -130,6 +171,13 @@ class RiskManager:
                 f"Already holding {self.state.open_trades} position(s) and the "
                 f"limit is {max_open}. One trade at a time is the rule that "
                 f"stops a bad morning compounding.")
+
+        max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
+        if max_daily and self.state.trades_taken >= max_daily:
+            return self._reject(
+                f"Daily trade limit: {self.state.trades_taken} of {max_daily} "
+                f"taken today. No more entries until tomorrow — over-trading is "
+                f"how a good morning is given back.")
 
         entry = contract.mid
         if entry <= 0:
@@ -179,6 +227,22 @@ class RiskManager:
         # Never let rounding push the position past the budget.
         while quantity > 1 and quantity * cost_per_contract > budget:
             quantity -= 1
+
+        # Risk per trade: what the position loses at its first stop must fit
+        # risk.max_risk_per_trade_pct (2% = $80 on $4,000). Deployment above
+        # caps the premium; this caps the LOSS, and the tighter one decides.
+        cap = self.risk_per_trade
+        if cap > 0:
+            per = planned_loss_per_contract(self.cfg, contract, setup.indicators.close,
+                                            setup.underlying_support)
+            cur = str(self.cfg.get("account.currency", "$") or "$")
+            if per > cap:
+                return self._reject(
+                    f"Risk per trade: one {contract.label} loses {cur}{per:,.2f} at its "
+                    f"stop, over the {self.cfg.get('risk.max_risk_per_trade_pct')}% "
+                    f"({cur}{cap:,.2f}) a trade may risk.")
+            if per > 0:
+                quantity = min(quantity, int(cap // per))
 
         # In underlying mode the percentage stop is a DISASTER backstop: the
         # strategy's own invalidation level is what normally fires, and it is
@@ -250,9 +314,15 @@ class RiskManager:
                 "risk.index_max_capital_deployed_pct", deployed_pct)),
             "index_max_deployed_per_trade": round(capital * float(self.cfg.get(
                 "risk.index_max_capital_deployed_pct", deployed_pct)) / 100, 2),
-            # The number that actually matters, spelled out.
-            "risk_per_trade_pct": round(deployed_pct * stop_pct / 100, 2),
-            "risk_per_trade": round(capital * deployed_pct * stop_pct / 10000, 2),
+            # The number that actually matters, spelled out: the risk cap when
+            # one is set, else what the deployment cap and the stop imply.
+            "risk_per_trade_pct": (float(self.cfg.get("risk.max_risk_per_trade_pct"))
+                                   if self.risk_per_trade
+                                   else round(deployed_pct * stop_pct / 100, 2)),
+            "risk_per_trade": (self.risk_per_trade or
+                               round(capital * deployed_pct * stop_pct / 10000, 2)),
+            "max_open_trades": int(self.cfg.get("risk.max_open_trades", 1)),
+            "max_daily_trades": int(self.cfg.get("risk.max_daily_trades", 0) or 0),
             "daily_loss_limit": self.daily_limit,
             "stop_mode": str(self.cfg.get("risk.stop_mode", "premium")),
             "exit_style": str(self.cfg.get("risk.exit_style", "scale")),

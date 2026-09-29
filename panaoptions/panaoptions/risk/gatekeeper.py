@@ -141,12 +141,10 @@ class RiskGatekeeper:
         limit = self.risk.daily_limit
         loss = self.drawdown(unrealised)
         if limit > 0 and loss >= limit:
-            self.risk.state.halted = True
-            self.risk.state.halt_reason = (
+            self.risk.halt(
                 f"daily drawdown ${loss:,.2f} reached the ${limit:,.2f} limit "
-                f"({limit / self.capital:.0%} of capital) — trading stopped "
-                f"for the day")
-            log.warning("CIRCUIT BREAKER — %s", self.risk.state.halt_reason)
+                f"({limit / self.capital:.0%} of capital) — locked out for the "
+                f"rest of the day")
             return True
         return False
 

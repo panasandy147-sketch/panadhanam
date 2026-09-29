@@ -224,6 +224,9 @@ def check(cfg) -> list[Finding]:
     daily_limit = (abs(float(absolute)) if absolute not in (None, "", 0, 0.0)
                    else capital * float(cfg.get("risk.daily_loss_limit_pct", 10.0)) / 100.0)
     risk_per_trade = budget * stop_pct / 100.0
+    risk_cap_pct = float(cfg.get("risk.max_risk_per_trade_pct", 0) or 0)
+    if risk_cap_pct > 0:
+        risk_per_trade = min(risk_per_trade, capital * risk_cap_pct / 100.0)
     if risk_per_trade > daily_limit:
         findings.append(Finding(
             "warning", "risk.daily_loss_limit vs risk.stop_loss_pct",
@@ -401,6 +404,26 @@ def check(cfg) -> list[Finding]:
             f"The minimum (${min_price:,.0f}) is above the maximum "
             f"(${max_price:,.0f}), so no contract can ever qualify.",
             "Set min below max."))
+
+    # 7. Has the rule book been validated on history? Paper trading is the
+    #    rehearsal, so this warns rather than blocks.
+    from panaoptions import validate
+    last = validate.latest()
+    command = f"{_python()} run.py --backtest"
+    if last is None:
+        findings.append(Finding(
+            "warning", "backtest.validation",
+            "The rule book has not been validated on history on this machine yet.",
+            f"Run `{command}` (expectancy ≥ "
+            f"{cfg.get('backtest.validation.min_expectancy_r', 0.5)}R, max drawdown "
+            f"≤ {cfg.get('backtest.validation.max_drawdown_pct', 5.0)}%)."))
+    elif last.get("verdict") != "PASS":
+        findings.append(Finding(
+            "warning", "backtest.validation",
+            f"The last validation ({str(last.get('at', ''))[:10]}) was "
+            f"{last.get('verdict')}: " + "; ".join(last.get("reasons") or []) + ".",
+            "Paper trading continues. Change the rules the per-strategy table "
+            f"points at and run `{command}` again."))
 
     return findings
 

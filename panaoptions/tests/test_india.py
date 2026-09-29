@@ -129,15 +129,20 @@ def test_sizing_and_pnl_use_the_nse_lot(india):
     assert gate.cap("NIFTY") == 87500.0                         # 25% index flex
     signal, refusal = risk.size(setup, call, "SIG-IN", now)
     assert signal is not None, refusal
-    assert signal.quantity == 7                                 # 87,500 // 11,250
-    assert signal.cost() == pytest.approx(7 * 150 * 75)
+    # 87,500 // 11,250 = 7 lots by deployment; the 2% risk cap (₹7,000 at
+    # the stop) is tighter, and it too is judged per LOT.
+    from panaoptions.risk.guardrails import planned_loss_per_contract
+    per_lot = planned_loss_per_contract(india, call, 24000, 23950)
+    lots = min(7, int(7000 // per_lot))
+    assert signal.quantity == lots
+    assert signal.cost() == pytest.approx(lots * 150 * 75)
 
     ledger = PaperLedger(india, risk)
     trade = ledger.open(signal, now)
     assert trade.multiplier == 75 and trade.market == "IN"
     ledger.close(trade.id, 160.0, ExitReason.DAY_END, now)
     per_share = 160.0 - float(india.get("risk.slippage_per_contract", 0.02)) - trade.entry_price
-    assert trade.realised_pnl == pytest.approx(per_share * 7 * 75, abs=1.0)
+    assert trade.realised_pnl == pytest.approx(per_share * lots * 75, abs=1.0)
 
 
 # --------------------------------------------------------------------------- #

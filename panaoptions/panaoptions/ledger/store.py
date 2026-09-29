@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at TEXT
 );
 
+-- The daily circuit breaker's lockout: one row per calendar day it tripped.
+CREATE TABLE IF NOT EXISTS lockouts (
+    day TEXT PRIMARY KEY,
+    reason TEXT,
+    at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS open_book (
     id TEXT PRIMARY KEY,
     payload TEXT NOT NULL
@@ -208,6 +215,28 @@ def save_session(date_iso: str, state: Any) -> None:
           round(state.realised_pnl, 2), int(state.halted),
           json.dumps(state.rejections), datetime.now().isoformat()))
     conn.commit()
+
+
+def load_session(date_iso: str) -> dict[str, Any] | None:
+    """Today's saved counters, so a restart does not wipe the day's losses,
+    its trade count or a tripped breaker."""
+    row = get_conn().execute("SELECT * FROM sessions WHERE session_date = ?",
+                             (date_iso,)).fetchone()
+    return dict(row) if row else None
+
+
+def save_lockout(date_iso: str, reason: str, at: datetime) -> None:
+    """The circuit breaker's lockout for a calendar day: survives restarts."""
+    conn = get_conn()
+    conn.execute("INSERT OR IGNORE INTO lockouts (day, reason, at) VALUES (?,?,?)",
+                 (date_iso, reason, at.isoformat()))
+    conn.commit()
+
+
+def lockout(date_iso: str) -> dict[str, Any] | None:
+    row = get_conn().execute("SELECT * FROM lockouts WHERE day = ?",
+                             (date_iso,)).fetchone()
+    return dict(row) if row else None
 
 
 def save_signal_seen(signal_id: str, ts: datetime, symbol: str,

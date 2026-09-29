@@ -32,7 +32,7 @@ def test_the_profile_is_same_day_with_the_asked_for_numbers(zcfg):
     assert g("strategies.candlestick_at_level.timeframe") == "5m"
     assert g("risk.stop_mode") == "underlying"
     assert g("risk.disaster_stop_pct") == 45.0
-    assert g("risk.daily_loss_limit_pct") == 10.0
+    assert g("risk.daily_loss_limit_pct") == 3.0       # the 3% breaker, $120
     assert zcfg.last_entry_hhmm == "15:00"
 
 

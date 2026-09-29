@@ -184,6 +184,8 @@ def test_a_closed_trade_cannot_be_marked_again(ledger):
 def test_losses_reach_the_circuit_breaker(cfg):
     ledger = PaperLedger(cfg, RiskManager(cfg))
     for i in range(5):
+        if ledger.risk.state.halted:        # locked out: no more orders today
+            break
         signal = _signal(quantity=4, entry=0.50)
         signal.id = f"S{i}"
         trade = ledger.open(signal, TS)

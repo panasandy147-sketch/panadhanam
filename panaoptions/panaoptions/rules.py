@@ -391,6 +391,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "opening-range or pre-market level in the way",
                   f"1:{g('risk.min_reward_risk', 3.0):g}" if g("risk.min_reward_risk", 3.0)
                   else "off", "risk.min_reward_risk / reward_room_levels"),
+            _rule("Verified 1:3 — these must reach it with their OWN target (the "
+                  "POC for a value-area rejection, VWAP-or-3R for the sweep), not "
+                  "a projected one",
+                  ", ".join(str(s).replace("_", " ")
+                            for s in (g("risk.own_target_strategies") or [])) or "none",
+                  "risk.own_target_strategies"),
         ],
     })
 
@@ -469,9 +475,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     # ------------------------------------------------------------------ #
     sections.append({
         "title": "How much it buys",
-        "intro": ("Size is set by capital deployed: the premium paid as a "
-                  "share of the account. The stop then decides how much of "
-                  "that premium is actually at risk."),
+        "intro": ("Two caps size every trade and the tighter wins: the premium "
+                  "paid as a share of the account, and what the trade loses at "
+                  "its stop. Then the tournament throttles: few positions, few "
+                  "trades a day, and a hard daily lockout."),
         "rules": [
             _rule("Account size", _money(capital, cur),
                   "account.starting_capital (or PANAOPTIONS_CAPITAL in .env)"),
@@ -488,13 +495,29 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("All open trades together, at most",
                   f"{_pct(total)} = {_money(capital * total / 100, cur)}",
                   "risk.max_total_deployed_pct"),
+            *([_rule("Loss at the stop per trade, at most — the first exit to fire "
+                     "(delta x the distance to the underlying stop, or the premium "
+                     "backstop); with the premium cap above, the tighter one sizes it",
+                     f"{_pct(g('risk.max_risk_per_trade_pct'))} = "
+                     f"{_money(capital * float(g('risk.max_risk_per_trade_pct')) / 100, cur)}",
+                     "risk.max_risk_per_trade_pct")]
+              if g("risk.max_risk_per_trade_pct") else []),
             _rule("Open trades at once, at most", g("risk.max_open_trades", 1),
                   "risk.max_open_trades"),
+            _rule("Trades a day, at most (no over-trading)",
+                  g("risk.max_daily_trades") or "no limit", "risk.max_daily_trades"),
             _rule("Circuit breaker: once the day's loss, closed plus open, "
-                  "reaches this, everything is sold and trading stops for the day",
+                  "reaches this, pending signals are cancelled, everything is sold, "
+                  "orders are refused and the desk is LOCKED OUT for the rest of "
+                  "the calendar day — a restart does not clear it",
                   _money(loss_fixed, cur) if loss_fixed
                   else f"{_pct(loss_pct)} = {_money(capital * float(loss_pct) / 100, cur)}",
                   "risk.daily_loss_limit_pct"),
+            _rule("History validation (python run.py --backtest): expectancy per "
+                  "trade at least, and max drawdown no more than",
+                  f"{g('backtest.validation.min_expectancy_r', 0.5)}R · "
+                  f"{_pct(g('backtest.validation.max_drawdown_pct', 5.0))}",
+                  "backtest.validation"),
             _rule("Simulated cost per contract, each side",
                   f"${g('risk.slippage_per_contract', 0.02)}",
                   "risk.slippage_per_contract"),

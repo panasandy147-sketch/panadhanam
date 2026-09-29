@@ -455,10 +455,22 @@ risk:
   # with no previous-day / opening-range / pre-market level in the way.
   min_reward_risk: 3.0
   reward_room_levels: ["previous_day", "opening_range", "premarket"]
-  # Three names can be live at once. The desk reads every symbol on the
-  # watchlist in the same instant each cycle and takes as many setups as it
-  # has room for, rather than queueing them one at a time.
-  max_open_trades: 3
+  # These two must reach 1:3 with their OWN target — the POC for a value-area
+  # rejection, VWAP-or-3R for the previous-day sweep — before the risk gate.
+  # Others may use a projected 3R when the road to it is open.
+  own_target_strategies: ["pd_liquidity_sweep", "va_rejection"]
+  # --- The tournament throttles (Robbins World Cup style) ----------------
+  # Two names at once, four trades a day at most. Over-trading is how a
+  # good morning is given back: the 10-session backtest took 400+ setups
+  # with no throttle, and the extra trades were the losing ones.
+  max_open_trades: 2
+  max_daily_trades: 4
+  # The most one trade may LOSE at its first stop, as a share of capital:
+  # 2% = $80 on $4,000. max_capital_deployed_pct (below) still caps the
+  # PREMIUM; this caps the loss, and whichever is tighter sizes the trade.
+  # (2% of capital as the premium itself would be $80 — not one at-the-money
+  # SPY contract, so the desk would never trade.)
+  max_risk_per_trade_pct: 2.0
   # One position per symbol: a setup stays valid for several cycles, and
   # without this the same idea was bought again every minute (AMZN x5, x3).
   one_position_per_symbol: true
@@ -535,11 +547,26 @@ risk:
   # is the opposite — see the scalp profile.
   max_hold_minutes: null
 
-  daily_loss_limit_pct: 10.0
+  # The hard daily circuit breaker: 3% ($120 on $4,000), realised plus open.
+  # When hit: pending signals are cancelled, open positions are sold, the
+  # order path refuses, and the lockout is saved — it holds for the rest of
+  # the calendar day, restarts included.
+  daily_loss_limit_pct: 3.0
   # Set this to a number to override the percentage with a fixed amount.
   daily_loss_limit: null
   # Simulated fill cost per contract, per side.
   slippage_per_contract: 0.02
+
+backtest:
+  # `python run.py --backtest` — the rule book must earn its keep on history
+  # before it trades: expectancy per trade (P&L / the loss planned at the stop)
+  # of at least 0.5R, and a max drawdown under 5%, after the sizing, the
+  # throttles and the daily breaker. Fewer than min_trades is INCONCLUSIVE.
+  validation:
+    min_expectancy_r: 0.5
+    max_drawdown_pct: 5.0
+    min_trades: 20
+    days: 10
 
 journal:
   # Grade every closed trade the moment it closes, and write a card to

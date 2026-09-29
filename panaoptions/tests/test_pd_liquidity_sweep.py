@@ -171,9 +171,11 @@ def test_hdfcbank_and_infy_cost_premium_times_their_lot(india):
     rows = {r["symbol"]: r for r in verify.lot_dry_fire(india, ["HDFCBANK", "INFY"], 20.0)}
     assert rows["HDFCBANK"]["cost_per_lot"] == 13000.0
     assert rows["INFY"]["cost_per_lot"] == 8000.0
-    # Sizing buys whole lots inside the 20% (₹70,000) cap.
-    assert rows["HDFCBANK"]["lots_bought"] == 5 and rows["HDFCBANK"]["deployed"] == 65000.0
-    assert rows["INFY"]["lots_bought"] == 8
+    # Whole lots inside the 20% (₹70,000) deployment cap AND the 2% (₹7,000)
+    # risk cap at the stop — the tighter decides: 5 and 8 lots by deployment,
+    # 2 and 3 by risk (0.45 delta x ₹10 to the stop x the lot).
+    assert rows["HDFCBANK"]["lots_bought"] == 2 and rows["HDFCBANK"]["deployed"] == 26000.0
+    assert rows["INFY"]["lots_bought"] == 3 and rows["INFY"]["deployed"] == 24000.0
 
 
 def test_the_gate_and_a_spread_use_the_lot_too(india):

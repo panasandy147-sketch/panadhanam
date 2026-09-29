@@ -487,7 +487,7 @@ def test_learned_yaml_only_patches_strategy_weights(cfg, tmp_path):
         encoding="utf-8")
     fresh = config_mod.Config()
     assert fresh.get("strategy_weights.orb_vwap") == 0.7
-    assert fresh.get("risk.daily_loss_limit_pct") == 10.0
+    assert fresh.get("risk.daily_loss_limit_pct") == 3.0      # the shipped figure
 
 
 # =========================================================================== #

@@ -63,6 +63,20 @@ def project(setup: Any, levels: Any, cfg: Any,
 
     own = float(setup.underlying_target or 0.0)
     own_r = (own - entry) * sign / risk if own else 0.0
+    # Strategies whose 1:3 must be VERIFIED by their own target (the POC for
+    # a value-area rejection, VWAP-or-3R for the PD sweep) — a projected 3R
+    # past a nearer natural target is not accepted for them.
+    strict = {str(s).lower() for s in (cfg.get("risk.own_target_strategies") or [])}
+    if strict & {setup.strategy.name.lower(), str(setup.strategy.value).lower()}:
+        if own_r + 1e-6 < need:
+            return 0.0, round(own_r, 2), (
+                f"the strategy's own target {own:,.2f} is only {own_r:.1f}R on a risk "
+                f"of {risk:,.2f} — {setup.strategy.value} needs a verified "
+                f"1:{need:g}"), ""
+        if own_r > room_r:
+            where = min(blockers)[1]
+            return 0.0, room_r, (f"only {room_r:.1f}R of room before the {where}, short "
+                                 f"of its own {own_r:.1f}R target {own:,.2f}"), ""
     if own_r >= need and own_r <= room_r:
         return own, round(own_r, 2), "", f"target {own:,.2f} = {own_r:.1f}R (the strategy's own)"
     return (round(projected, 4), need, "",

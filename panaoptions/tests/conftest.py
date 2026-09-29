@@ -74,6 +74,11 @@ def cfg(tmp_path, monkeypatch):
     # capital from rewriting all of them. Tests about the shipped figure read
     # it from the file instead; see test_preflight.
     cfg.data["account"]["starting_capital"] = 500.0
+    # The same for the throttles: the loop tests predate the tournament
+    # rules (2% risk a trade, 2 open, 4 a day, 3% breaker) and assert figures
+    # under the old ones. tests/test_throttles.py tests the shipped rules.
+    cfg.data["risk"].update({"max_risk_per_trade_pct": 0, "max_daily_trades": 0,
+                             "max_open_trades": 3, "daily_loss_limit_pct": 10.0})
     return cfg
 
 

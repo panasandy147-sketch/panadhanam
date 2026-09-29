@@ -37,6 +37,11 @@ class PaperLedger:
     def open(self, signal: Signal, ts: datetime | None = None) -> PaperTrade:
         """Enter at the mid plus slippage — you pay up to get filled."""
         ts = ts or signal.ts
+        if self.risk.state.halted:
+            # The breaker revokes order permission for the rest of the day:
+            # the lowest layer refuses, whatever path asked.
+            raise PermissionError(f"orders are locked out today: "
+                                  f"{self.risk.state.halt_reason}")
         c = signal.contract
         legs = 2 if c.is_spread else 1
         # Slippage on every leg: a spread is two fills.

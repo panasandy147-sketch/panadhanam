@@ -788,6 +788,32 @@ async def _backtest_compare(symbols: str | None, days: int, market: str | None) 
     return 0
 
 
+async def _backtest_validate(symbols: str | None, days: int | None,
+                             market: str | None) -> int:
+    """Replay history under today's rules and account limits; PASS / FAIL."""
+    from panaoptions import validate
+    from panaoptions.data.provider import make_feed
+
+    cfg = _backtest_cfg(market, "Validating the rule book")
+    now = clock.now(cfg.timezone)
+    days = days or int(cfg.get("backtest.validation.days", 10))
+    names = ([s.strip().upper() for s in symbols.split(",") if s.strip()]
+             if symbols else list(cfg.symbols))
+    async with make_feed(cfg) as feed:
+        if not await feed.connect():
+            print("Could not reach the chart feed for historical prices.")
+            return 1
+        verdict = await validate.run(names, days, feed, cfg, now)
+    text = validate.markdown(verdict, cfg.currency)
+    print("\n" + text.split("\n## By day")[0])
+    path = validate.save(verdict, cfg.currency)
+    print(f"Saved: {path}")
+    if verdict.verdict != "PASS":
+        print(f"\n[!] {verdict.verdict} — this is PAPER trading, so the desk still "
+              f"starts, and --check-config will show this verdict until a run passes.")
+    return {"PASS": 0, "FAIL": 1}.get(verdict.verdict, 2)
+
+
 def _report(days: int) -> None:
     from datetime import date, timedelta
 
@@ -918,6 +944,9 @@ def main() -> None:
                         help="is the previous session's high/low cached before the open?")
     parser.add_argument("--backtest-compare", action="store_true",
                         help="the same sessions under the old and the new rules")
+    parser.add_argument("--backtest", action="store_true",
+                        help="validate today's rules on history: expectancy >= 0.5R, "
+                             "max drawdown < 5% (PASS/FAIL)")
     parser.add_argument("--backtest-signals", action="store_true",
                         help="replay recent sessions bar by bar through the "
                              "scanner (calls and puts) and the contract ladder")
@@ -931,8 +960,8 @@ def main() -> None:
                         help="how many blocked setups to replay (default 5)")
     parser.add_argument("--symbols", default=None,
                         help="backtest these symbols instead of the log, e.g. SPY,QQQ")
-    parser.add_argument("--days", type=int, default=5,
-                        help="sessions back for --symbols (default 5)")
+    parser.add_argument("--days", type=int, default=None,
+                        help="sessions back for --symbols (default 5; --backtest: 10)")
     parser.add_argument("--explain-contracts", action="store_true",
                         help="what your budget actually buys, on live chains")
     parser.add_argument("--report", nargs="?", const=30, type=int, metavar="DAYS",
@@ -1031,15 +1060,19 @@ def main() -> None:
         raise SystemExit(_dry_fire_lots(args.dry_fire_lots, args.premium, args.market))
     if args.check_pdh:
         raise SystemExit(asyncio.run(_check_pdh(args.market)))
+    if args.backtest:
+        raise SystemExit(asyncio.run(_backtest_validate(args.symbols, args.days,
+                                                        args.market)))
+    days = args.days or 5
     if args.backtest_compare:
-        raise SystemExit(asyncio.run(_backtest_compare(args.symbols, args.days,
+        raise SystemExit(asyncio.run(_backtest_compare(args.symbols, days,
                                                        args.market)))
     if args.backtest_signals:
-        raise SystemExit(asyncio.run(_backtest_signals(args.symbols, args.days,
+        raise SystemExit(asyncio.run(_backtest_signals(args.symbols, days,
                                                        args.only, args.market)))
     if args.backtest_spreads:
         raise SystemExit(asyncio.run(_backtest_spreads(args.limit, args.symbols,
-                                                       args.days, args.market)))
+                                                       days, args.market)))
     if args.report is not None:
         _report(args.report)
         return

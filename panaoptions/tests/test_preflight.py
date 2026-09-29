@@ -146,7 +146,8 @@ def test_a_conventional_configuration_raises_nothing(cfg):
               risk__max_capital_deployed_pct=8.0,
               risk__max_open_trades=1,
               risk__daily_loss_limit=500.0)
-    assert check(cfg) == []
+    # (the history validation is its own reminder, tested in test_throttles)
+    assert [f for f in check(cfg) if f.setting != "backtest.validation"] == []
 
 
 def test_holding_several_at_once_is_reported_as_a_dollar_figure(cfg):

@@ -144,7 +144,8 @@ risk:
   # 20% of capital per trade (₹70,000), 25% on the indices (₹87,500).
   index_symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
   index_max_capital_deployed_pct: 25.0
-  daily_loss_limit_pct: 10.0       # ₹35,000
+  daily_loss_limit_pct: 3.0        # ₹10,500 — locked out for the day
+  # 2% risk a trade (₹7,000), 2 open, 4 a day: settings.yaml.
 
 agents:
   macro:

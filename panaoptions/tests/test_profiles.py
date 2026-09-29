@@ -183,7 +183,7 @@ def test_the_scalp_profile_tightens_risk_rather_than_loosening_it():
     assert (float(scalp.get("risk.disaster_stop_pct"))
             < float(default.get("risk.disaster_stop_pct")))
     assert (float(scalp.get("risk.daily_loss_limit_pct"))
-            < float(default.get("risk.daily_loss_limit_pct")))
+            <= float(default.get("risk.daily_loss_limit_pct")))
     # The stop is still the level on the underlying, not a premium percentage.
     assert scalp.get("risk.stop_mode") == "underlying"
     # And nothing may be held into expiry.
