@@ -68,6 +68,9 @@ class PaperLedger:
             max_value=c.width,
             side_tag=signal.side_tag, execution=signal.execution,
             remaining=signal.quantity, max_price_seen=fill_price,
+            underlying_entry=signal.underlying_at_entry,
+            risk_r=round(abs(signal.underlying_at_entry - signal.underlying_support), 4)
+            if signal.underlying_at_entry and signal.underlying_support else 0.0,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
                                 price=fill_price, reason="ENTRY"))
@@ -131,6 +134,10 @@ class PaperLedger:
                 fills.append(self._exit(trade, contract_price, ts,
                                         ExitReason.UNDERLYING_BREAK))
                 return fills
+
+        if (str(self.cfg.get("risk.exit_style", "scale")).lower() == "r_multiple"
+                and underlying_price is not None and trade.risk_r > 0):
+            return fills + self._manage_r(trade, contract_price, underlying_price, ts)
 
         if self._trailing(trade):
             return fills + self._manage_trail(trade, contract_price,
@@ -207,6 +214,45 @@ class PaperLedger:
         if closed_against:
             return [self._exit(trade, contract_price, ts, ExitReason.EMA_TRAIL)]
         return []
+
+    def _manage_r(self, trade: PaperTrade, contract_price: float,
+                  underlying_price: float, ts: datetime) -> list[Fill]:
+        """The R-multiple plan, judged on the UNDERLYING in units of the
+        trade's own risk (1R = entry to the original stop):
+
+          at +scale_out_r (1.5R)  sell take_profit_1_size_pct (half) and move
+                                  the stop to breakeven — one contract cannot
+                                  be halved, so it only moves the stop
+          then                    trail the rest runner_trail_r (1R) behind
+                                  the best the underlying has reached
+
+        The backtest showed wins averaging ~1.2R against 3R targets: most
+        trades were squared off before the target. This banks the move that
+        usually happens and lets the rest run as far as the day allows.
+        """
+        sign = 1.0 if trade.direction is Direction.LONG else -1.0
+        move = (underlying_price - trade.underlying_entry) * sign / trade.risk_r
+        trade.best_r = max(trade.best_r, move)
+        scale_r = float(self.cfg.get("risk.scale_out_r", 1.5))
+        trail_r = float(self.cfg.get("risk.runner_trail_r", 1.0))
+        fills: list[Fill] = []
+        if not trade.breakeven_armed:
+            if move >= scale_r:
+                share = float(self.cfg.get("risk.take_profit_1_size_pct", 50.0))
+                part = int(round(trade.remaining * share / 100.0))
+                if trade.remaining >= 2 and part >= 1:
+                    fills.append(self._reduce(trade, part, contract_price, ts, "TARGET_1"))
+                trade.breakeven_armed = True
+                # The stop moves to breakeven ON THE UNDERLYING: step 3 of
+                # mark() closes the rest if price comes back to the entry.
+                trade.underlying_support = trade.underlying_entry
+                log.info("%s reached +%.1fR — %sstop to breakeven %.2f, trailing %.1fR",
+                         trade.contract_label, move,
+                         f"sold {part}, " if fills else "", trade.underlying_entry, trail_r)
+            return fills
+        if move <= trade.best_r - trail_r:
+            fills.append(self._exit(trade, contract_price, ts, ExitReason.TRAIL))
+        return fills
 
     # ------------------------------------------------------------------ #
     def close(self, trade_id: str, price: float, reason: ExitReason,

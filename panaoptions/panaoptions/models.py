@@ -386,6 +386,12 @@ class PaperTrade(BaseModel):
     breakeven_armed: bool = False
     max_price_seen: float = 0.0
     last_price: float = 0.0
+    # The R-multiple exit plan (risk.exit_style "r_multiple"): the underlying
+    # at entry, the original distance to its stop (1R), and the furthest the
+    # underlying has run in the trade's favour, in R.
+    underlying_entry: float = 0.0
+    risk_r: float = 0.0
+    best_r: float = 0.0
 
     @property
     def is_open(self) -> bool:

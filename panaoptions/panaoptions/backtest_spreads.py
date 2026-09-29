@@ -108,6 +108,14 @@ class Result:
     delta: float = 0.0
     lot: int = 0
     exit_ts: str = ""
+    # The same fill under the R-multiple exit plan (risk.exit_style
+    # "r_multiple"): per contract when half can be sold at +1.5R, and for a
+    # single contract (breakeven + trail only); when the last piece closed.
+    pnl_r: float | None = None
+    pnl_r1: float | None = None
+    exit_ts_r: str = ""
+    exit_ts_r1: str = ""
+    exit_reason_r: str = ""
 
     @property
     def filled(self) -> bool:
@@ -353,6 +361,55 @@ def _walk(bars: list[Any], when: datetime, cfg: Any, direction: Direction,
     return b.ts.astimezone(tz), float(b.close), "SQUARE_OFF" if over else "LAST_BAR"
 
 
+def _walk_r(bars: list[Any], when: datetime, cfg: Any, direction: Direction,
+            entry: float, stop: float, split: bool
+            ) -> list[tuple[datetime, float, float, str]]:
+    """The R-multiple plan on the underlying: [(time, price, fraction, why)].
+
+    Stop at the original stop; at +scale_out_r sell half (`split`) and move
+    the stop to breakeven; then trail runner_trail_r behind the best level
+    reached; whatever is left goes at the square-off. Within a bar the stop
+    is checked first (the conservative reading of an OHLC bar)."""
+    tz = when.tzinfo
+    hh, mm = (int(x) for x in str(cfg.get("session.force_exit_at", "15:45")).split(":"))
+    last = datetime.combine(when.date(), time(hh, mm), tzinfo=tz)
+    path = [b for b in bars if b.ts.astimezone(tz).date() == when.date()
+            and when <= b.ts.astimezone(tz) + timedelta(minutes=5)
+            and b.ts.astimezone(tz) < last]
+    risk = abs(entry - stop)
+    if not path or risk <= 0:
+        return []
+    sign = 1.0 if direction is Direction.LONG else -1.0
+    scale_r = float(cfg.get("risk.scale_out_r", 1.5))
+    trail_r = float(cfg.get("risk.runner_trail_r", 1.0))
+    share = float(cfg.get("risk.take_profit_1_size_pct", 50.0)) / 100.0 if split else 0.0
+    left, best, armed, cur_stop = 1.0, 0.0, False, stop
+    legs: list[tuple[datetime, float, float, str]] = []
+    for b in path:
+        at = b.ts.astimezone(tz) + timedelta(minutes=5)
+        worst = b.low if sign > 0 else b.high
+        top = b.high if sign > 0 else b.low
+        # The protective level for this bar: the stop, or the trail once armed.
+        guard = cur_stop
+        if armed:
+            trail = entry + sign * (best - trail_r) * risk
+            guard = max(guard, trail) if sign > 0 else min(guard, trail)
+        if (worst - guard) * sign <= 0:
+            why = "STOP" if not armed else ("BREAKEVEN" if guard == entry else "TRAIL")
+            legs.append((at, guard, left, why))
+            return legs
+        best = max(best, (top - entry) * sign / risk)
+        if not armed and best >= scale_r:
+            armed, cur_stop = True, entry
+            if share:
+                legs.append((at, entry + sign * scale_r * risk, share, "TARGET_1"))
+                left -= share
+    b = path[-1]
+    legs.append((b.ts.astimezone(tz) + timedelta(minutes=5), float(b.close), left,
+                 "SQUARE_OFF"))
+    return legs
+
+
 async def replay(items: list[Blocked], feed: Any, cfg: Any,
                  budget_now: float | None = None) -> list[Result]:
     from panaoptions.ledger import store
@@ -425,6 +482,21 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
         r.stop, r.target, r.mid, r.lot = b.stop, b.target, c.mid, c.multiplier or lot
         r.delta = round(abs(c.long_leg.delta) - abs(c.short_leg.delta) if c.is_spread
                         else abs(c.delta), 4)
+        # The same fill under the R-multiple exit plan, both ways: with half
+        # sold at +1.5R, and as one contract (breakeven and trail only).
+        if b.stop:
+            lot_n = c.multiplier or lot
+            for split in (True, False):
+                legs = _walk_r(intraday, when, cfg, direction, float(bar.close), b.stop, split)
+                if not legs:
+                    continue
+                pnl = round(sum(frac * (value_at(c, price, iv, at, cfg) - c.mid) * lot_n
+                                for at, price, frac, _ in legs), 2)
+                done = legs[-1][0].isoformat(timespec="minutes")
+                if split:
+                    r.pnl_r, r.exit_ts_r, r.exit_reason_r = pnl, done, legs[-1][3]
+                else:
+                    r.pnl_r1, r.exit_ts_r1 = pnl, done
         if c.is_spread:
             r.legs = [f"BUY {c.long_leg.label} ({abs(c.long_leg.delta):.2f}Δ)",
                       f"SELL {c.short_leg.label} ({abs(c.short_leg.delta):.2f}Δ)"]

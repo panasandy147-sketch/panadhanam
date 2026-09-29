@@ -97,6 +97,22 @@ def _when(text: str) -> datetime | None:
         return None
 
 
+def r_plan(cfg: Any) -> bool:
+    """True when the desk exits on the R-multiple plan (ledger._manage_r)."""
+    return str(cfg.get("risk.exit_style", "auto")).lower() == "r_multiple"
+
+
+def outcome(r: Any, cfg: Any, qty: int = 2) -> tuple[float | None, str, str]:
+    """(P&L per contract, exit time, exit reason) of a fill under the
+    configured exit plan. One contract cannot be halved: under the R plan it
+    only moves to breakeven and trails (pnl_r1)."""
+    if r_plan(cfg):
+        if qty >= 2:
+            return r.pnl_r, r.exit_ts_r, r.exit_reason_r or "SQUARE_OFF"
+        return r.pnl_r1, r.exit_ts_r1 or r.exit_ts_r, "TRAIL/BREAKEVEN"
+    return r.pnl, r.exit_ts, r.exit_reason or "SQUARE_OFF"
+
+
 def edge_of(results: list[Any], cfg: Any) -> dict[str, dict[str, Any]]:
     """Each strategy's expectancy over every fill, one contract each: R = the
     fill's P&L / the loss planned at its stop. Before any throttle, so it
@@ -105,12 +121,13 @@ def edge_of(results: list[Any], cfg: Any) -> dict[str, dict[str, Any]]:
     from panaoptions.risk.guardrails import planned_loss
     rows: dict[str, list[float]] = defaultdict(list)
     for r in results:
-        if not (r.filled and r.pnl is not None and r.mid > 0):
+        pnl = outcome(r, cfg)[0] if r.filled else None
+        if pnl is None or not r.mid > 0:
             continue
         per = planned_loss(cfg, r.mid, r.delta, int(r.lot or cfg.multiplier), r.spot,
                            r.stop, r.tier == "debit_spread")
         if per > 0:
-            rows[ranking.key(r.strategy)].append(r.pnl / per)
+            rows[ranking.key(r.strategy)].append(pnl / per)
     return {k: {"fills": len(v), "expectancy_r": round(sum(v) / len(v), 2),
                 "win_rate": round(sum(1 for x in v if x > 0) / len(v) * 100, 1)}
             for k, v in sorted(rows.items(), key=lambda kv: -sum(kv[1]) / len(kv[1]))}
@@ -139,8 +156,8 @@ def simulate(results: list[Any], cfg: Any, edge: dict[str, float] | None = None
              else capital * float(g("risk.daily_loss_limit_pct", 10.0)) / 100.0)
     slip = float(g("risk.slippage_per_contract", 0.02) or 0.0)
 
-    fills = [r for r in results if r.filled and r.pnl is not None and r.mid > 0
-             and _when(r.ts) and _when(r.exit_ts)]
+    fills = [r for r in results if r.filled and r.mid > 0 and _when(r.ts)
+             and outcome(r, cfg)[0] is not None and _when(outcome(r, cfg)[1])]
     fills.sort(key=lambda r: (_when(r.ts), -ranking.score(cfg, r.strategy, edge), r.symbol))
 
     taken: list[Taken] = []
@@ -166,7 +183,7 @@ def simulate(results: list[Any], cfg: Any, edge: dict[str, float] | None = None
             max_dd = max(max_dd, (peak - equity) / peak * 100 if peak else 0.0)
 
     for r in fills:
-        start, end = _when(r.ts), _when(r.exit_ts)
+        start = _when(r.ts)
         book_until(start)
         day = r.ts[:10]
         if day in locked:
@@ -202,13 +219,17 @@ def simulate(results: list[Any], cfg: Any, edge: dict[str, float] | None = None
             if per > 0:
                 qty = min(qty, int(risk_cap // per))
         legs = 2 if r.tier == "debit_spread" else 1
-        pnl = round(r.pnl * qty - slip * legs * 2 * lot * qty, 2)
+        each, out_at, why = outcome(r, cfg, qty)
+        if each is None:
+            skipped["no exit under the exit plan"] += 1
+            continue
+        end = _when(out_at)
+        pnl = round(each * qty - slip * legs * 2 * lot * qty, 2)
         risk = round(per * qty, 2) or round(cost * qty, 2)
-        trade = Taken(symbol=r.symbol, entry=r.ts, exit=r.exit_ts, side=r.side,
+        trade = Taken(symbol=r.symbol, entry=r.ts, exit=out_at, side=r.side,
                       strategy=r.strategy, pattern=r.pattern, contract=r.contract,
                       quantity=qty, risk=risk, pnl=pnl,
-                      r=round(pnl / risk, 2) if risk else 0.0,
-                      exit_reason=r.exit_reason or "SQUARE_OFF")
+                      r=round(pnl / risk, 2) if risk else 0.0, exit_reason=why)
         taken.append(trade)
         count[day] += 1
         open_pos.append((end, trade, cost * qty))
@@ -281,7 +302,8 @@ def judge(taken: list[Taken], skipped: Counter, locked: set[str], max_dd: float,
         max_drawdown_pct=max_dd,
         thresholds={"min_expectancy_r": min_exp, "max_drawdown_pct": max_dd_allowed,
                     "min_trades": min_trades},
-        rules={"max_risk_per_trade_pct": g("risk.max_risk_per_trade_pct"),
+        rules={"exit_style": g("risk.exit_style"),
+               "max_risk_per_trade_pct": g("risk.max_risk_per_trade_pct"),
                "max_capital_deployed_pct": g("risk.max_capital_deployed_pct"),
                "max_open_trades": g("risk.max_open_trades"),
                "max_daily_trades": g("risk.max_daily_trades"),
