@@ -2,7 +2,7 @@
 
   1. A 0.40-0.50 delta contract over the per-trade budget is not refused: the
      desk builds a bull call (or bear put) debit spread that fits.
-  2. The primary tier is 0.40-0.50 delta; 0.30-0.39 is the fallback, liquid
+  2. The primary tier is 0.40-0.50 delta; 0.25-0.39 is the fallback, liquid
      contracts only.
   3. The spread check uses a rolling 1-minute volume-weighted spread, so a
      momentary spike does not refuse a valid entry.
@@ -121,7 +121,7 @@ def test_with_spreads_off_the_secondary_tier_takes_a_liquid_0_3x_delta(desk_cfg)
     assert 0.30 <= abs(search.chosen.delta) < 0.40
     # 0.38 delta costs $490 (over $400); the 0.30 at $340 is the highest that fits.
     assert abs(search.chosen.delta) == 0.30 and search.chosen.cost(100) == 340.0
-    assert "secondary tier (0.30-0.39 delta, liquid)" in search.note
+    assert "secondary tier (0.25-0.39 delta, liquid)" in search.note
 
 
 def test_the_secondary_tier_refuses_an_illiquid_contract(desk_cfg):
@@ -322,7 +322,7 @@ def test_a_setup_no_rung_can_fund_is_skipped_as_a_hard_risk_failure(desk):
     assert not desk.ledger.open_trades
     skip = events["contract.skip"]
     assert skip["level"] == "bad" and "SKIPPED — hard risk failure" in skip["detail"]
-    assert "debit spread:" in skip["detail"] and "0.30-0.39 delta tier" in skip["detail"]
+    assert "debit spread:" in skip["detail"] and "0.25-0.39 delta tier" in skip["detail"]
 
 
 def test_a_momentary_wide_quote_is_resampled_not_refused(desk):

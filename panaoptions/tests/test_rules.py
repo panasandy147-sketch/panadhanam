@@ -12,7 +12,7 @@ def test_every_strategy_is_written_out_with_its_live_window(cfg):
     doc = rules.build(cfg, capital=4000)
     [section] = [s for s in doc["sections"] if s["title"] == "The strategies"]
     keys = [s["key"] for s in section["strategies"]]
-    assert keys == ["orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
+    assert keys == ["pd_liquidity_sweep", "orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
                     "candlestick_at_level", "va_rejection", "lvn_acceleration",
                     "poc_bounce"]
     # ...which is every strategy the desk actually runs, in its order.
@@ -65,3 +65,28 @@ def test_the_new_rules_are_on_the_page(cfg):
     for words in ("previous-day LOW", "rising call OI", "LONG_PUT", "double rejection",
                   "debit spread", "skipped by a hard risk gate", "Long Buildup"):
         assert words.lower() in text.lower(), words
+
+
+def test_the_sweep_and_execution_rules_are_on_the_page(cfg):
+    """The PD sweep, the sweep confluence, single-leg grace, the 0.25 floor —
+    and, on India, the 12% opening allowance and premium x lot."""
+    import json
+
+    from panaoptions.config import Config
+    doc = rules.build(cfg, capital=4000)
+    rows = {r["setting"]: r for s in doc["sections"] for r in s.get("rules", [])}
+    assert rows["fno.confluence.mode / proximity_pct / touch_atr"]["value"] == "sweep"
+    assert "0.25%" in rows["fno.confluence.mode / proximity_pct / touch_atr"]["text"]
+    assert rows["contracts.single_leg_grace"]["value"] == "100%"
+    assert rows["contracts.fallback_order / debit_spread / liquidity"]["value"] == "0.25"
+    text = json.dumps(doc)
+    assert "Previous Day Liquidity Sweep" in text or "PD Liquidity Sweep" in text
+
+    india = Config(market="IN")
+    doc = rules.build(india, capital=350000)
+    rows = {r["setting"]: r for s in doc["sections"] for r in s.get("rules", [])}
+    opening = rows["contracts.opening_spread"]
+    assert opening["value"] == "12%"
+    assert "09:15" in opening["text"] and "10:00" in opening["text"]
+    assert "HDFCBANK 650" in rows["data.lot_sizes"]["value"]
+    assert "INFY 400" in rows["data.lot_sizes"]["value"]

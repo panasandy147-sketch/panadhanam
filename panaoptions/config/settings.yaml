@@ -122,6 +122,7 @@ fno:
   # PDC from the tape, total call and put open interest and their change, and
   # the build-up (Long Buildup, Short Buildup, Short Covering, Long Unwinding).
   ingest: true
+  ingest_from: "09:00"      # before the 09:30 open (ET)
   confluence:
     # Reversal setups (Tweezer Bottom / swing-low reversals for calls, and the
     # mirror for puts) are taken ONLY where:
@@ -130,8 +131,14 @@ fno:
     #   LONG_PUT   the pattern tested the previous-day HIGH and closed back
     #              below it, with put open interest rising.
     enabled: true
-    strategies: ["candlestick_at_level", "liquidity_sweep"]
-    touch_atr: 0.15          # "at the level": within this x ATR
+    strategies: ["pd_liquidity_sweep", "candlestick_at_level", "liquidity_sweep"]
+    # sweep: a candle swept the PDL (calls) / PDH (puts) by no more than
+    # proximity_pct and the NEXT candle closed back inside yesterday's range.
+    # touch: the pattern's extreme within touch_atr of the level (the old test).
+    mode: "sweep"
+    proximity_pct: 0.25
+    lookback_bars: 3
+    touch_atr: 0.15          # "at the level" in touch mode: within this x ATR
     # A chain with no open interest (India on estimated prices) cannot show
     # rising OI. block = skip the setup (strict); allow = judge the level alone.
     when_oi_unknown: "block"
@@ -187,8 +194,9 @@ contracts:
   # When the setup's delta band is over budget, buy the highest-delta contract
   # that fits instead of skipping the trade — but never below this delta.
   # 0 switches the fallback off. With the primary band at 0.40-0.50, this is
-  # the secondary tier: 0.30-0.39 delta, and only if liquid (below).
-  budget_fallback_min_delta: 0.30
+  # the secondary tier: 0.25-0.39 delta, and only if liquid (below) and
+  # inside the spread limit.
+  budget_fallback_min_delta: 0.25
 
   # What to try, in order, when the setup's own contract is over the per-trade
   # budget or the per-contract price ceiling. Anything still unfunded is a
@@ -203,6 +211,23 @@ contracts:
     enabled: true
     min_reward_risk: 0.8     # (width - debit) / debit
     min_net_debit: 0.10      # per share
+
+  # When a debit spread cannot be built because no short leg is liquid or
+  # priced, buy the long (0.40-0.50 delta) leg outright if its whole lot
+  # premium (premium x lot) fits within this share of the per-trade budget.
+  single_leg_grace:
+    enabled: true
+    max_budget_pct: 100
+
+  # A wider bid-ask allowance in the opening minutes, for 0-4 DTE contracts
+  # only. Off in the US by default; the India overlay switches it on for
+  # 09:15-10:00 IST at 12%.
+  opening_spread:
+    enabled: false
+    from: "09:30"
+    to: "10:15"
+    max_dte: 4
+    max_spread_pct: 12.0
 
   # Liquid enough for a believable fill at the mid: open interest OR volume.
   # Applied to the 0.30-0.39 tier and to both legs of a debit spread.
@@ -247,6 +272,22 @@ strategies:
   # them avoid 09:30-09:45, where spreads are widest and the first prints are
   # noise, and all hunt until 15:45 — the last entry that still leaves the
   # trade ten minutes before the 15:55 square-off.
+  # The Previous Day Liquidity Sweep (failed breakout), first in line: a 5m
+  # candle sweeps the previous-day LOW (calls) / HIGH (puts) by no more than
+  # proximity_pct, and the NEXT candle closes back inside yesterday's range,
+  # as a tweezer or swing low/high. Stop: stop_ticks beyond the sweep wick.
+  # Target: VWAP or min_reward_risk (3R), whichever is further. Rising call /
+  # put open interest is required by fno.confluence.
+  pd_liquidity_sweep:
+    enabled: true
+    from: "09:45"
+    to: "15:00"
+    proximity_pct: 0.25
+    lookback_bars: 3
+    require_pattern: true      # a tweezer or swing low/high at the sweep
+    tick: 0.01                 # $0.01 (the India overlay: ₹0.05)
+    stop_ticks: 2
+    min_reward_risk: 3.0
   orb_vwap:
     enabled: true
     from: "09:45"        # the 15m opening range is not final until 09:45
@@ -569,6 +610,7 @@ agents:
 # reflection writes its adjustments to config/learned.yaml, which is merged
 # over this file and never committed — so `git pull` cannot conflict with it.
 strategy_weights:
+  pd_liquidity_sweep: 1.0
   orb_vwap: 1.0
   vwap_ema_pullback: 1.0
   liquidity_sweep: 1.0

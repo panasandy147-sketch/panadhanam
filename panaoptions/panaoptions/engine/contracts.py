@@ -15,7 +15,7 @@ every rejection by cause and keeps the nearest miss on price.
 """
 from __future__ import annotations
 
-from panaoptions.engine.liquidity import liquidity_problem
+from panaoptions.engine.liquidity import liquidity_problem, spread_limit
 from panaoptions.models import ContractSearch, Direction, OptionContract, OptionRight
 
 # What the desk tries, in order, when the setup's own contract is over the
@@ -29,7 +29,8 @@ DEFAULT_FALLBACK_ORDER = ("shorter_expiry", "debit_spread", "secondary_delta")
 
 
 def choose(symbol: str, chain: list[OptionContract], direction: Direction,
-           cfg, setup=None, budget: float | None = None) -> ContractSearch:
+           cfg, setup=None, budget: float | None = None,
+           now=None) -> ContractSearch:
     """The cheapest qualifying contract, or a full account of why there is none.
 
     A setup may ask for its own delta band and expiry window: a hammer off
@@ -47,6 +48,11 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
     min_delta = float(band[0]) if band else float(cfg.get("contracts.min_delta", 0.45))
     max_delta = float(band[1]) if band else float(cfg.get("contracts.max_delta", 0.60))
     max_spread = float(cfg.get("contracts.max_spread_pct_of_mid", 5.0))
+
+    def wide(c) -> bool:
+        """Wider than allowed — 7%, or 12% on a 0-4 DTE contract in the
+        opening window (engine/liquidity.spread_limit)."""
+        return c.effective_spread_pct > spread_limit(cfg, c, now, max_spread)
     min_price = float(cfg.get("contracts.min_contract_price", 0.60))
     max_price = float(cfg.get("contracts.max_contract_price", 1.00))
     # The index ETFs' near-the-money contracts cost more per share than the
@@ -81,8 +87,8 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         if not (min_delta <= abs(c.delta) <= max_delta):
             reject(f"delta outside {min_delta}-{max_delta}")
             continue
-        if c.effective_spread_pct > max_spread:
-            reject(f"spread wider than {max_spread}% of mid")
+        if wide(c):
+            reject(f"spread wider than {spread_limit(cfg, c, now, max_spread):g}% of mid")
             continue
 
         if c.mid < min_price:
@@ -108,7 +114,7 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
                 f"${budget:,.0f} budget")
         found, tier, how, misses = _fallback(
             symbol, chain, want, min_dte, max_dte, min_delta, max_delta, max_spread,
-            min_price, max_price, budget, multiplier, cfg)
+            min_price, max_price, budget, multiplier, cfg, wide)
         if found is not None:
             search.chosen = found
             search.budget_fallback = True
@@ -158,7 +164,7 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
 
 
 def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
-              max_spread, min_price, max_price, budget, multiplier, cfg):
+              max_spread, min_price, max_price, budget, multiplier, cfg, wide=None):
     """Walk the fallback ladder. Returns (contract, tier, how, misses).
 
     `misses` says, rung by rung, why each found nothing — the text of a
@@ -169,10 +175,10 @@ def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
     order = [str(x) for x in (cfg.get("contracts.fallback_order")
                               or DEFAULT_FALLBACK_ORDER)]
     misses: list[str] = []
+    wide = wide or (lambda c: c.effective_spread_pct > max_spread)
 
     def ok(c) -> bool:
-        return (c.right is want and c.mid > 0
-                and c.effective_spread_pct <= max_spread
+        return (c.right is want and c.mid > 0 and not wide(c)
                 and min_price <= c.mid <= max_price
                 and c.cost(multiplier) <= budget)
 
@@ -194,7 +200,7 @@ def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
                 continue
             spread, why = build_debit_spread(
                 chain, want, min_delta, max_delta, shortest, max_dte, max_spread,
-                max_price, budget, multiplier, cfg)
+                max_price, budget, multiplier, cfg, wide)
             if spread is not None:
                 kind = "bull call" if want is OptionRight.CALL else "bear put"
                 net = spread.mid
@@ -209,6 +215,30 @@ def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
                     f"${(spread.width - net) * (spread.multiplier or multiplier):,.0f}, "
                     f"reward:risk {rr:.2f}."), misses
             misses.append(f"debit spread: {why}")
+            # Single-leg grace: the spread failed for want of a liquid, priced
+            # SHORT leg — take the long leg outright when its whole lot premium
+            # (premium x lot) fits the budget, the per-share ceiling aside.
+            grace = cfg.get("contracts.single_leg_grace") or {}
+            if grace.get("enabled", True) and "short" in why:
+                cap = budget * float(grace.get("max_budget_pct", 100.0)) / 100.0
+                wide_ok = wide or (lambda c: c.effective_spread_pct > max_spread)
+                longs = [c for c in chain if c.right is want and c.mid > 0
+                         and bool(c.bid and c.ask) and not wide_ok(c)
+                         and not liquidity_problem(c, cfg)
+                         and shortest <= c.dte <= max_dte
+                         and min_delta <= abs(c.delta) <= max_delta
+                         and c.cost(multiplier) <= cap]
+                if longs:
+                    centre = (min_delta + max_delta) / 2
+                    c = min(longs, key=lambda c: (c.dte, abs(abs(c.delta) - centre)))
+                    lot = c.multiplier or multiplier
+                    return c, "single_leg_grace", (
+                        f"no liquid short leg for a spread — SINGLE-LEG GRACE: bought "
+                        f"{c.label} outright ({abs(c.delta):.2f} delta), premium "
+                        f"{c.mid:.2f} x lot {lot} = {c.cost(multiplier):,.0f}, within "
+                        f"the {cap:,.0f} budget."), misses
+                misses.append("single-leg grace: the long leg's lot premium does not "
+                              "fit the budget either")
         elif rung == "secondary_delta":
             if floor <= 0:
                 continue
@@ -274,7 +304,7 @@ def make_spread(long_leg: OptionContract, short_leg: OptionContract) -> OptionCo
 
 
 def build_debit_spread(chain, want, min_delta, max_delta, min_dte, max_dte,
-                       max_spread, max_price, budget, multiplier, cfg):
+                       max_spread, max_price, budget, multiplier, cfg, wide=None):
     """The debit spread that keeps the setup's delta and fits the budget.
 
     Long leg: the setup's delta band (0.40-0.50), liquid, spread within the
@@ -291,10 +321,11 @@ def build_debit_spread(chain, want, min_delta, max_delta, min_dte, max_dte,
     min_net = float(cfg.get("contracts.debit_spread.min_net_debit", 0.10))
     centre = (min_delta + max_delta) / 2
 
+    wide = wide or (lambda c: c.effective_spread_pct > max_spread)
+
     def usable(c) -> bool:
         return (c.right is want and c.mid > 0 and bool(c.bid and c.ask)
-                and c.effective_spread_pct <= max_spread
-                and not liquidity_problem(c, cfg))
+                and not wide(c) and not liquidity_problem(c, cfg))
 
     longs = [c for c in chain if usable(c) and min_dte <= c.dte <= max_dte
              and min_delta <= abs(c.delta) <= max_delta]
@@ -323,7 +354,7 @@ def build_debit_spread(chain, want, min_delta, max_delta, min_dte, max_dte,
     if not fits:
         return None, (f"{len(longs)} long leg(s) in band; "
                       + (f"{over} spread(s) still over ${budget:,.0f}" if over else
-                         "no liquid short strike further out")
+                         "no liquid, priced short strike further out")
                       + (f", {poor} under {min_rr:g} reward:risk" if poor else ""))
     if bool(cfg.get("contracts.prefer_nearest_expiry", False)):
         nearest = min(s.dte for s in fits)

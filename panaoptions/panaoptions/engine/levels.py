@@ -61,6 +61,25 @@ def compute(candles: list[Candle], tz: str = "America/New_York",
         return levels
 
     day = session_date or df.index[-1].date()
+    # The previous session first: it is known before today's first bar —
+    # which is exactly when it is needed (the pre-open F&O map).
+    earlier = df[df.index.date < day]
+    if not earlier.empty:
+        levels.previous_close = float(earlier["close"].iloc[-1])
+        # The previous SESSION's regular hours: PDH, PDL (and the close
+        # before it, for the day's change). Pre/post prints are not the day.
+        prev_day = earlier.index[-1].date()
+        prev = earlier[earlier.index.date == prev_day]
+        ptimes = prev.index.time
+        prev_regular = prev[(ptimes >= market_open) & (ptimes < market_close)]
+        prev_regular = prev_regular if not prev_regular.empty else prev
+        levels.previous_high = float(prev_regular["high"].max())
+        levels.previous_low = float(prev_regular["low"].min())
+        levels.previous_close = float(prev_regular["close"].iloc[-1])
+        before = earlier[earlier.index.date < prev_day]
+        if not before.empty:
+            levels.close_before = float(before["close"].iloc[-1])
+
     today = df[df.index.date == day]
     if today.empty:
         return levels
@@ -78,23 +97,6 @@ def compute(candles: list[Candle], tz: str = "America/New_York",
         window = regular.iloc[:_OR_BARS]
         levels.opening_range_high = float(window["high"].max())
         levels.opening_range_low = float(window["low"].min())
-
-    earlier = df[df.index.date < day]
-    if not earlier.empty:
-        levels.previous_close = float(earlier["close"].iloc[-1])
-        # The previous SESSION's regular hours: PDH, PDL (and the close
-        # before it, for the day's change). Pre/post prints are not the day.
-        prev_day = earlier.index[-1].date()
-        prev = earlier[earlier.index.date == prev_day]
-        ptimes = prev.index.time
-        prev_regular = prev[(ptimes >= market_open) & (ptimes < market_close)]
-        prev_regular = prev_regular if not prev_regular.empty else prev
-        levels.previous_high = float(prev_regular["high"].max())
-        levels.previous_low = float(prev_regular["low"].min())
-        levels.previous_close = float(prev_regular["close"].iloc[-1])
-        before = earlier[earlier.index.date < prev_day]
-        if not before.empty:
-            levels.close_before = float(before["close"].iloc[-1])
 
     return levels
 

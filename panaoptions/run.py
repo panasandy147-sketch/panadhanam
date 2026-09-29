@@ -633,8 +633,8 @@ async def _screen() -> None:
             print(f"          {reason}")
 
 
-def _backtest_cfg(market: str | None):
-    """The config for a backtest: the desk's own, or `--market US|IN`'s."""
+def _backtest_cfg(market: str | None, doing: str = "Backtesting"):
+    """The config for a backtest or check: the desk's own, or `--market US|IN`'s."""
     cfg = get_config()
     code = (market or "").upper()
     if code and code != cfg.market:
@@ -643,7 +643,7 @@ def _backtest_cfg(market: str | None):
 
         cfg = Config(profile=cfg.profile or None, market=code)
         markets.activate(code)
-    print(f"Backtesting on {cfg.market_name} ({cfg.market}) — "
+    print(f"{doing} on {cfg.market_name} ({cfg.market}) — "
           f"{'--market US or --market IN to change' if not code else 'as asked'}")
     return cfg
 
@@ -711,6 +711,80 @@ async def _backtest_signals(symbols: str | None, days: int, only: str | None,
     print(bt.to_markdown(results, summary, cfg, title=title))
     saved = bt.save(results, summary, cfg, now, kind="signals", title=title)
     print(f"Saved: {saved['markdown']}")
+    return 0
+
+
+def _dry_fire_lots(symbols: str, premium: float, market: str | None) -> int:
+    """Premium x NSE lot through the desk's own cost, cap and sizing code."""
+    from panaoptions import verify
+
+    cfg = _backtest_cfg(market or "IN", "Dry-firing lots")
+    names = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    rows = verify.lot_dry_fire(cfg, names, premium)
+    print(f"\n=== LOT DRY-FIRE ({cfg.market_name}, premium {premium:g} a share) ===")
+    print(verify.lot_table(rows, cfg.currency))
+    bad = [r for r in rows if abs(r["cost_per_lot"] - r["expected"]) >= 0.01]
+    print("\n  All totals are premium x lot." if not bad else
+          f"\n  {len(bad)} total(s) did NOT multiply by the lot.")
+    return 1 if bad else 0
+
+
+async def _check_pdh(market: str | None) -> int:
+    """Is the previous session's high and low cached before the open?"""
+    from panaoptions import verify
+    from panaoptions.data.provider import make_feed
+    from panaoptions.engine import levels as levels_mod
+
+    cfg = _backtest_cfg(market, "Checking the previous-day cache")
+    now = clock.now(cfg.timezone)
+    day = now.date().isoformat()
+    open_at = str(cfg.get("session.market_open", "09:30"))
+    pics, problems = verify.pdh_report(cfg, day, open_at)
+    print(f"\n=== PREVIOUS-DAY CACHE, {day} ({cfg.market_name}, open {open_at}) ===")
+    for p in pics:
+        print(f"  {p['symbol']:10s} PDH {p.get('pdh') or 0:>10,.2f}  PDL {p.get('pdl') or 0:>10,.2f}"
+              f"  PDC {p.get('pdc') or 0:>10,.2f}  {p.get('bias', ''):15s} cached "
+              f"{str(p.get('ingested_at') or '?')[11:16]}")
+    if not pics:
+        print("  Nothing cached yet — reading the tape now to show what the desk will cache:")
+        async with make_feed(cfg) as feed:
+            if await feed.connect():
+                for sym in cfg.symbols:
+                    bars = await feed.candles(sym, "5m", include_prepost=True)
+                    lv = levels_mod.compute(bars, cfg.timezone, now.date(), open_at,
+                                            str(cfg.get("session.market_close", "16:00")))
+                    print(f"  {sym:10s} PDH {lv.previous_high:>10,.2f}  PDL "
+                          f"{lv.previous_low:>10,.2f}  PDC {lv.previous_close:>10,.2f}"
+                          + ("" if lv.previous_high else "   <- no previous session"))
+    for p in problems:
+        print(f"  ! {p}")
+    return 0 if pics and not problems else 1
+
+
+async def _backtest_compare(symbols: str | None, days: int, market: str | None) -> int:
+    """The same sessions under the old and the new rule book."""
+    from panaoptions import backtest_spreads as bt
+    from panaoptions.data.provider import make_feed
+
+    cfg = _backtest_cfg(market)
+    now = clock.now(cfg.timezone)
+    names = ([s.strip().upper() for s in symbols.split(",") if s.strip()]
+             if symbols else list(cfg.symbols))
+    async with make_feed(cfg) as feed:
+        if not await feed.connect():
+            print("Could not reach the chart feed for historical prices.")
+            return 1
+        runs = await bt.compare(names, days, feed, cfg, now)
+    title = (f"Rule books compared — {', '.join(names)}, last {days} session(s), "
+             f"{cfg.market_name}")
+    text = bt.compare_markdown(runs, cfg, title)
+    print(text.split("\n## ")[0])
+    from panaoptions.journal import store as journal_store
+    folder = journal_store.JOURNAL_DIR / "backtest"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"compare-{now:%Y-%m-%d-%H%M}.md"
+    path.write_text(text, encoding="utf-8")
+    print(f"Saved (every setup, both books): {path}")
     return 0
 
 
@@ -835,6 +909,15 @@ def main() -> None:
     parser.add_argument("--backtest-spreads", action="store_true",
                         help="replay blocked setups through the debit-spread "
                              "fallback on historical prices")
+    parser.add_argument("--dry-fire-lots", metavar="SYMBOLS", default=None,
+                        help="premium x NSE lot through the desk's cost and sizing, "
+                             "e.g. HDFCBANK,INFY (India unless --market US)")
+    parser.add_argument("--premium", type=float, default=20.0,
+                        help="with --dry-fire-lots: the premium a share (default 20)")
+    parser.add_argument("--check-pdh", action="store_true",
+                        help="is the previous session's high/low cached before the open?")
+    parser.add_argument("--backtest-compare", action="store_true",
+                        help="the same sessions under the old and the new rules")
     parser.add_argument("--backtest-signals", action="store_true",
                         help="replay recent sessions bar by bar through the "
                              "scanner (calls and puts) and the contract ladder")
@@ -944,6 +1027,13 @@ def main() -> None:
     if args.screen:
         asyncio.run(_screen())
         return
+    if args.dry_fire_lots:
+        raise SystemExit(_dry_fire_lots(args.dry_fire_lots, args.premium, args.market))
+    if args.check_pdh:
+        raise SystemExit(asyncio.run(_check_pdh(args.market)))
+    if args.backtest_compare:
+        raise SystemExit(asyncio.run(_backtest_compare(args.symbols, args.days,
+                                                       args.market)))
     if args.backtest_signals:
         raise SystemExit(asyncio.run(_backtest_signals(args.symbols, args.days,
                                                        args.only, args.market)))

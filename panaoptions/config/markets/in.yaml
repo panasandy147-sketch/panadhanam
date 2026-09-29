@@ -56,7 +56,7 @@ data:
     BANKNIFTY: 30
     FINNIFTY: 65
     RELIANCE: 500
-    HDFCBANK: 550
+    HDFCBANK: 650
     ICICIBANK: 700
     INFY: 400
     TCS: 175
@@ -100,6 +100,9 @@ auto_watchlist:
   min_market_cap: 0
   liquidity_full: 10000000
 
+fno:
+  ingest_from: "09:00"        # the previous session's map, cached before 09:15
+
 premarket:
   # The pre-open auction ends 09:08; screen from 09:10 on the gap it set.
   screen_from: "09:10"
@@ -114,9 +117,17 @@ contracts:
   min_contract_price: 5.0          # ₹5 a share
   max_contract_price: 400.0        # ₹400 a share — a ceiling, not a target
   index_max_contract_price: 600.0
-  budget_fallback_min_delta: 0.30
+  budget_fallback_min_delta: 0.25
+  # 09:15-10:00 IST: a 0-4 DTE contract may quote up to 12% wide (7% after).
+  opening_spread:
+    enabled: true
+    from: "09:15"
+    to: "10:00"
+    max_dte: 4
+    max_spread_pct: 12.0
 
 strategies:
+  pd_liquidity_sweep:   { from: "09:25", to: "14:45", tick: 0.05 }
   orb_vwap:             { from: "09:30", to: "14:45" }
   vwap_ema_pullback:    { from: "09:45", to: "14:45" }
   liquidity_sweep:      { from: "09:30", to: "14:30" }

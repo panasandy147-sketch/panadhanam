@@ -334,6 +334,9 @@ def test_the_history_backtest_finds_calls_and_puts_and_how_each_executes(scan_cf
 
     scan_cfg.data["contracts"].update(min_dte=0, max_dte=4, max_contract_price=10.0,
                                       index_max_contract_price=10.0)
+    # The scanner's mechanics; the PDH/PDL and 1:3 gates have their own tests.
+    scan_cfg.data["fno"]["confluence"]["enabled"] = False
+    scan_cfg.data["risk"]["min_reward_risk"] = 0
     now = datetime(2026, 9, 24, 9, 0, tzinfo=ET)
     items = asyncio.run(bt.scan_history(["SPY", "MIRR"], 1, TwoWayHistory(), scan_cfg, now))
     sides = {(b.symbol, option_side(Direction.LONG if b.direction == "LONG"

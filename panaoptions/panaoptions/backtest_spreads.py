@@ -69,6 +69,8 @@ class Blocked:
     source: str = "log"
     pattern: str = ""
     strategy: str = ""
+    stop: float = 0.0          # underlying invalidation (scan: the setup's)
+    target: float = 0.0        # underlying target
 
 
 @dataclass
@@ -89,6 +91,8 @@ class Result:
     pnl: float | None = None
     exit_at: str = ""                  # HH:MM the P&L was measured at
     session_over: bool = True          # False: measured mid-session, "so far"
+    exit_reason: str = ""              # STOP / TARGET / SQUARE_OFF (scan replays)
+    r_multiple: float | None = None
     note: str = ""
     was_blocked: str = ""
     legs: list[str] = field(default_factory=list)
@@ -204,20 +208,64 @@ def expiries(symbol: str, day: date, horizon: int) -> list[date]:
     return out
 
 
+def opening_widen(cfg: Any, when: datetime) -> float:
+    """How much wider quotes are than usual at `when`: `backtest.opening_widen`
+    (2.5x) at the open, easing to 1x by the end of the opening window
+    (contracts.opening_spread, else the first 45 minutes). Real opening
+    candles quote wide; a model with one flat spread could never show what
+    the 12% opening allowance changes."""
+    peak = float(cfg.get("backtest.opening_widen", 2.5))
+    if peak <= 1:
+        return 1.0
+    opening = cfg.get("contracts.opening_spread") or {}
+    start = str(cfg.get("session.market_open", "09:30"))
+    sh, sm = (int(x) for x in start.split(":"))
+    end = str(opening.get("to") or "")
+    if end:
+        eh, em = (int(x) for x in end.split(":"))
+    else:
+        eh, em = divmod(sh * 60 + sm + 45, 60)
+    t = when.hour * 60 + when.minute
+    a, b = sh * 60 + sm, eh * 60 + em
+    if t < a or t >= b or b <= a:
+        return 1.0
+    return peak - (peak - 1.0) * (t - a) / (b - a)
+
+
+def _grid(symbol: str, spot: float, when: datetime, cfg: Any, max_dte: int):
+    """(expiry dates, strike step, spread %) for the market."""
+    if str(getattr(cfg, "market", "US")).upper() == "IN":
+        from panaoptions.data import nse
+        est = cfg.get("data.estimated") or {}
+        index = symbol.upper() in {str(x).upper() for x in cfg.get("data.index_symbols") or []}
+        exps = nse.expiries(symbol, when.date(),
+                            {str(x).upper() for x in est.get("weekly_symbols") or ["NIFTY"]},
+                            int(est.get("expiry_weekday", 1)), max_dte + 7)
+        step = nse.strike_step(symbol, spot, {str(k).upper(): float(v) for k, v in
+                                              (est.get("strike_steps") or {}).items()})
+        spread = float(est.get("index_spread_pct" if index else "stock_spread_pct",
+                               1.5 if index else 3.0))
+        return exps, step, spread
+    index = symbol.upper() in DAILY_EXPIRY
+    spread = float(cfg.get("backtest.index_spread_pct" if index
+                           else "backtest.stock_spread_pct", 3.0 if index else 5.0))
+    return expiries(symbol, when.date(), max_dte), strike_step(symbol, spot), spread
+
+
 def model_chain(symbol: str, spot: float, iv: float, when: datetime, cfg: Any,
                 lot: int, strikes_each_side: int = 30) -> list[OptionContract]:
-    """Every strike and expiry in the desk's window, priced by Black-Scholes."""
+    """Every strike and expiry in the desk's window, priced by Black-Scholes,
+    on the market's own expiry calendar and strike grid, with quotes widened
+    in the opening minutes (opening_widen)."""
     min_dte = int(cfg.get("contracts.min_dte", 0))
     max_dte = int(cfg.get("contracts.max_dte", 14))
-    index = symbol.upper() in DAILY_EXPIRY
-    spread_pct = float(cfg.get("backtest.index_spread_pct" if index
-                               else "backtest.stock_spread_pct", 3.0 if index else 5.0))
-    step = strike_step(symbol, spot)
+    exps, step, spread_pct = _grid(symbol, spot, when, cfg, max_dte)
+    spread_pct *= opening_widen(cfg, when)
     atm = round(spot / step) * step
     close = cfg.get("session.market_close", "16:00")
     ch, cm = (int(x) for x in str(close).split(":"))
     out = []
-    for exp in expiries(symbol, when.date(), max_dte):
+    for exp in exps:
         dte = (exp - when.date()).days
         if not min_dte <= dte <= max_dte:
             continue
@@ -272,6 +320,29 @@ def _exit_bar(bars: list[Any], when: datetime, cfg: Any) -> Any | None:
     same_day = [b for b in bars if b.ts.astimezone(tz).date() == when.date()
                 and when < b.ts <= last]
     return same_day[-1] if same_day else None
+
+
+def _walk(bars: list[Any], when: datetime, cfg: Any, direction: Direction,
+          stop: float, target: float) -> tuple[datetime, float, str] | None:
+    """(time, underlying price, STOP|TARGET|SQUARE_OFF|LAST_BAR) — the first
+    level the day's later bars touch. A bar touching both counts as the stop."""
+    tz = when.tzinfo
+    hh, mm = (int(x) for x in str(cfg.get("session.force_exit_at", "15:45")).split(":"))
+    last = datetime.combine(when.date(), time(hh, mm), tzinfo=tz)
+    path = [b for b in bars if b.ts.astimezone(tz).date() == when.date()
+            and when <= b.ts.astimezone(tz) + timedelta(minutes=5) and b.ts.astimezone(tz) < last]
+    long = direction is Direction.LONG
+    for b in path:
+        at = b.ts.astimezone(tz)
+        if (b.low <= stop) if long else (b.high >= stop):
+            return at, stop, "STOP"
+        if (b.high >= target) if long else (b.low <= target):
+            return at, target, "TARGET"
+    if not path:
+        return None
+    b = path[-1]
+    over = (b.ts.astimezone(tz) + timedelta(minutes=10)) >= last
+    return b.ts.astimezone(tz), float(b.close), "SQUARE_OFF" if over else "LAST_BAR"
 
 
 async def replay(items: list[Blocked], feed: Any, cfg: Any,
@@ -333,7 +404,7 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
         if naked:
             n = min(naked, key=lambda c: (c.dte, abs(abs(c.delta) - (lo + hi) / 2)))
             r.naked, r.naked_cost = n.label, n.cost(lot)
-        search = contracts.choose(b.symbol, chain, direction, cfg, budget=r.budget)
+        search = contracts.choose(b.symbol, chain, direction, cfg, budget=r.budget, now=when)
         if search.chosen is None:
             r.note = search.note[:300]
             r.execution = "SKIPPED_HARD_RISK"
@@ -347,6 +418,22 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
             r.legs = [f"BUY {c.long_leg.label} ({abs(c.long_leg.delta):.2f}Δ)",
                       f"SELL {c.short_leg.label} ({abs(c.short_leg.delta):.2f}Δ)"]
             r.max_profit = round((c.width - c.mid) * (c.multiplier or lot), 2)
+        # With the setup's own stop and target, walk the tape: out at the
+        # first one touched, else at the square-off.
+        if b.stop and b.target:
+            hit = _walk(intraday, when, cfg, direction, b.stop, b.target)
+            if hit is not None:
+                at, price, reason = hit
+                value = value_at(c, price, iv, at, cfg)
+                r.exit_value = round(value, 4)
+                lot_n = c.multiplier or lot
+                r.pnl = round((value - c.mid) * lot_n, 2)
+                r.r_multiple = round((value - c.mid) / c.mid, 2) if c.mid else None
+                r.exit_at, r.exit_reason = (at + timedelta(minutes=5)).strftime("%H:%M"), reason
+                r.session_over = reason != "LAST_BAR"
+                r.note = search.note[:300]
+                out.append(r)
+                continue
         exit_bar = _exit_bar(intraday, when, cfg)
         if exit_bar is not None:
             at = exit_bar.ts.astimezone(tz)
@@ -387,6 +474,7 @@ async def scan_history(symbols: list[str], days: int, feed: Any, cfg: Any,
             wanted_days.append(day)
     found: list[Blocked] = []
     missing.clear()
+    refused.clear()
     for symbol in symbols:
         try:
             bars = await feed.candles(symbol, str(cfg.get("technical.timeframe", "5m")))
@@ -417,13 +505,56 @@ async def scan_history(symbols: list[str], days: int, feed: Any, cfg: Any,
                 if key in last_at and (at - last_at[key]).total_seconds() < cooldown_minutes * 60:
                     continue
                 last_at[key] = at
+                why = _gate(winner, session, tape, cfg)
+                if why:
+                    refused.append({"symbol": symbol, "ts": at.isoformat(timespec="minutes"),
+                                    "side": option_side(winner.direction),
+                                    "pattern": winner.pattern or winner.strategy.value,
+                                    "why": why})
+                    continue
                 found.append(Blocked(
                     symbol=symbol, ts=at, direction=winner.direction.value,
                     reason=f"{option_side(winner.direction)} {winner.pattern or ''} "
                            f"{winner.key_level_source or ''}".strip(),
                     source="scan", pattern=winner.pattern,
-                    strategy=winner.strategy.value))
+                    strategy=winner.strategy.value,
+                    stop=float(winner.underlying_support or 0.0),
+                    target=float(winner.underlying_target or 0.0)))
     return sorted(found, key=lambda b: (b.ts, b.symbol))
+
+
+# Setups the desk's gates refused during the last scan_history call.
+refused: list[dict[str, Any]] = []
+
+
+def _gate(setup: Any, session: Any, tape: list[Any], cfg: Any) -> str:
+    """The desk's pre-contract gates on a historical setup: the two-candle
+    PDH/PDL sweep (open interest is not in the history, so only the price
+    half of the F&O confluence rule can be checked) and the 1:3 projection.
+    Sets the setup's stop/target as the desk would. '' when it passes."""
+    from panaoptions.engine import confluence, reward
+    from panaoptions.engine import indicators as ta
+    from panaoptions.engine.strategies import localise
+    from panaoptions.models import SetupType
+    is_sweep = setup.strategy is SetupType.PD_LIQUIDITY_SWEEP
+    if confluence.applies(setup, cfg) and str(cfg.get("fno.confluence.mode", "sweep")) == "sweep":
+        frame = localise(ta.to_frame(tape), cfg.timezone)
+        why, found = confluence.sweep_check(setup, session, frame, cfg)
+        if why:
+            return f"F&O confluence: {why}"
+        is_sweep = True
+        tick = float(cfg.get("strategies.pd_liquidity_sweep.tick", 0.01))
+        ticks = int(cfg.get("strategies.pd_liquidity_sweep.stop_ticks", 2))
+        long = setup.direction is Direction.LONG
+        beyond = found["wick"] - ticks * tick if long else found["wick"] + ticks * tick
+        setup.underlying_support = (min(setup.underlying_support or beyond, beyond) if long
+                                    else max(setup.underlying_support or beyond, beyond))
+    target, _, why, _ = reward.project(setup, session, cfg, sweep=is_sweep)
+    if why:
+        return f"reward:risk: {why}"
+    if target:
+        setup.underlying_target = target
+    return ""
 
 
 def summarise(results: list[Result]) -> dict[str, Any]:
@@ -451,7 +582,19 @@ def summarise(results: list[Result]) -> dict[str, Any]:
         if r.spot:
             by_execution[r.execution or "SKIPPED_HARD_RISK"] = (
                 by_execution.get(r.execution or "SKIPPED_HARD_RISK", 0) + 1)
-    return {"setups": len(results), "priced": len(priced),
+    closed = [r for r in results if r.filled and r.pnl is not None]
+    winners = [r for r in closed if (r.pnl or 0) > 0]
+    by_exit: dict[str, int] = {}
+    for r in closed:
+        if r.exit_reason:
+            by_exit[r.exit_reason] = by_exit.get(r.exit_reason, 0) + 1
+    extra = {"closed": len(closed), "winners": len(winners),
+             "win_rate": round(len(winners) / len(closed) * 100, 1) if closed else 0.0,
+             "avg_win": round(sum(r.pnl for r in winners) / len(winners), 2) if winners else 0.0,
+             "avg_loss": round(sum(r.pnl for r in closed if r.pnl <= 0)
+                               / max(1, len(closed) - len(winners)), 2),
+             "by_exit": by_exit, "refused_by_gates": len(refused)}
+    return {**extra, "setups": len(results), "priced": len(priced),
             "filled": sum(1 for r in results if r.filled),
             "as_debit_spread": len(spreads), "by_tier": by_tier,
             "by_side": by_side, "by_execution": by_execution,
@@ -510,3 +653,77 @@ def save(results: list[Result], summary: dict[str, Any], cfg: Any,
                               "results": [asdict(r) for r in results]},
                              indent=2, default=str), encoding="utf-8")
     return {"markdown": str(md), "json": str(js)}
+
+
+# --------------------------------------------------------------------------- #
+# Old rules against new: the same history, two rule books
+# --------------------------------------------------------------------------- #
+# What each rule book changes, as dotted config overrides on top of the desk's
+# config. "new" is the desk as configured now.
+RULE_BOOKS: dict[str, dict[str, Any]] = {
+    "before": {
+        "strategies.pd_liquidity_sweep.enabled": False,
+        "contracts.opening_spread.enabled": False,
+        "contracts.budget_fallback_min_delta": 0.30,
+        "contracts.single_leg_grace.enabled": False,
+        "fno.confluence.mode": "touch",
+    },
+    "after": {},
+}
+
+
+def with_overrides(cfg: Any, overrides: dict[str, Any]) -> Any:
+    """A copy of `cfg` with dotted keys set."""
+    import copy
+    out = copy.deepcopy(cfg)
+    for dotted, value in overrides.items():
+        node = out.data
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return out
+
+
+async def compare(symbols: list[str], days: int, feed: Any, cfg: Any, now: datetime,
+                  books: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Run the scanner and the contract ladder over the same sessions under
+    each rule book. Returns {book: {"summary", "results", "refused"}}."""
+    out: dict[str, Any] = {}
+    for name, overrides in (books or RULE_BOOKS).items():
+        book_cfg = with_overrides(cfg, overrides)
+        items = await scan_history(symbols, days, feed, book_cfg, now)
+        gated = list(refused)
+        results = await replay(items, feed, book_cfg)
+        out[name] = {"summary": summarise(results), "results": results, "refused": gated}
+    return out
+
+
+def compare_markdown(runs: dict[str, Any], cfg: Any, title: str) -> str:
+    cur = getattr(cfg, "currency", "$")
+    rows = ["# " + title, "",
+            "| Rule book | Setups | Filled | Outright | Debit spread | Grace | Skipped | "
+            "Refused by gates | Win rate | Avg win | Avg loss | Total P&L |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for name, run in runs.items():
+        sm = run["summary"]
+        tiers = sm.get("by_tier") or {}
+        outright = sum(v for k, v in tiers.items()
+                       if k in {"primary", "shorter_expiry", "secondary_delta"})
+        rows.append(
+            f"| {name} | {sm['setups']} | {sm['filled']} | {outright} | "
+            f"{tiers.get('debit_spread', 0)} | {tiers.get('single_leg_grace', 0)} | "
+            f"{tiers.get('skipped', 0)} | {sm.get('refused_by_gates', 0)} | "
+            f"{sm['win_rate']}% | {cur}{sm['avg_win']:,.2f} | {cur}{sm['avg_loss']:,.2f} | "
+            f"{cur}{sm['total_pnl']:+,.2f} |")
+    rows += ["", "_Same sessions, same model chain, same exits (stop, target or square-off). "
+                 "Open interest is not in the history, so the confluence rule is tested on "
+                 "price only. Model prices, not historical quotes._", ""]
+    for name, run in runs.items():
+        rows += [f"## {name}", ""]
+        rows += [f"- refused: {g['ts']} {g['symbol']} {g['side']} {g['pattern']} — {g['why'][:160]}"
+                 for g in run["refused"][:30]]
+        rows.append("")
+        rows.append(to_markdown(run["results"], run["summary"], cfg,
+                                title=f"{name}: every setup").split("\n", 2)[2])
+    return "\n".join(rows)

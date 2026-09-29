@@ -61,6 +61,8 @@ class SetupType(str, Enum):
     VA_REJECTION = "Value Area Rejection"
     LVN_ACCELERATION = "LVN Pocket Acceleration"
     POC_BOUNCE = "POC Magnet / Bounce"
+    # The previous session's high / low swept and reclaimed (a failed breakout).
+    PD_LIQUIDITY_SWEEP = "PD Liquidity Sweep"
     OTHER = "Other"
 
 
@@ -143,6 +145,9 @@ class OptionContract(BaseModel):
     delta: float = 0.0
     implied_volatility: float = 0.0
     open_interest: int = 0
+    # Change in open interest since the previous close, when the exchange
+    # publishes it (NSE's changeinOpenInterest); 0 when unknown.
+    oi_change: int = 0
     volume: int = 0
     # Units one contract controls: 100 in the US, the NSE lot in India
     # (NIFTY 75, BANKNIFTY 30 ...). 0 means "the market default".

@@ -590,7 +590,8 @@ default profile's rules assume:
 
 ## The strategies
 
-Seven, in the order they are asked: the four below, then the volume-profile
+Eight, in the order they are asked: the Previous Day Liquidity Sweep first,
+then the four below, then the volume-profile
 family (`strategies/volume_profile_strategies.py`, built on
 `indicators/volume_profile.py` — each session's POC, 70% value area and
 low/high volume nodes, RTH 09:30–16:00 ET):
@@ -615,6 +616,23 @@ shuts** — not until `session.entry_close`, which is only the floor. Closing th
 window earlier than a strategy's own window would leave that strategy enabled,
 in window by its own reckoning, and never once asked. `--check-config` warns if
 a window runs past the square-off, where it would be clipped.
+
+### 0. Previous Day Liquidity Sweep — 09:45 to 15:00 ET (09:25 to 14:45 IST)
+
+The institutional failed breakout, asked first.
+- **LONG_CALL:** a 5-minute candle (a Tweezer Bottom or a swing low) within
+  **0.25%** of the previous day's low **sweeps below the PDL**, and the very
+  next candle **closes back inside** yesterday's range, with **call open
+  interest rising**.
+- **LONG_PUT:** the mirror at the previous day's high, with **put open
+  interest rising**.
+
+*Entry:* the reclaim candle's close. *Stop:* 2 ticks beyond the sweep
+candle's extreme wick. *Target:* VWAP when that is at least 3R away,
+otherwise 3R. The setup is queued only at **1:3 or better**, measured from
+the entry to that wick. The PDH, PDL and change in open interest are cached
+before the open (`fno.ingest_from`, 09:00), so they are ready at 09:15 IST /
+09:30 ET.
 
 ### 1. Opening Range Breakout + VWAP — 09:45 to 11:00
 
@@ -883,7 +901,15 @@ Candlestick-at-a-Level and Liquidity Sweep strategies, are taken only here:
 - **LONG_PUT:** the pattern's high tested the **PDH** and price closed back
   below it, with **put open interest rising**.
 
-"At" the level means within 0.15 ATR. With no open interest in the chain
+How "at" the level is judged is `fno.confluence.mode`:
+- **`sweep`** (the default): a 5-minute candle sweeps through the level by no
+  more than 0.25% (`proximity_pct`), and the next candle closes back inside
+  yesterday's range. The stop then moves to that candle's wick (plus 2
+  ticks), and 1:3 is measured from there.
+- **`touch`** (the old rule): the pattern's extreme within 0.15 ATR.
+
+NSE chains carry each strike's change in open interest since the previous
+close, which is used directly. With no open interest in the chain
 (India on estimated prices), `when_oi_unknown: block` skips the setup;
 `allow` judges it on the level alone and says so.
 
@@ -909,10 +935,22 @@ refused. The desk tries, in order (`contracts.fallback_order`):
    its net debit and re-priced from both legs. The most it can lose is the
    debit; the most it can make is the width minus the debit, so profit
    targets are capped below the width. Slippage is charged on both legs.
-3. **The secondary tier: 0.30-0.39 delta**, and only a liquid contract (open
-   interest ≥ 100 or volume ≥ 50).
+   **Single-leg grace:** if the spread fails only because the short leg has
+   no liquid, priced strike, the long leg is bought on its own, provided
+   its premium × lot fits the risk budget (`contracts.single_leg_grace`).
+3. **The secondary tier: 0.25-0.39 delta**, and only a liquid contract that
+   passes the spread check (open interest ≥ 100 or volume ≥ 50).
 4. **Skip.** The log says `SKIPPED — hard risk failure` and why each rung
    failed.
+
+**India: premium × lot.** One NSE contract is one lot (HDFCBANK 650, INFY
+400, NIFTY 75 …, `data.lot_sizes`). Every budget, cap and fallback is judged
+on premium × lot, never on the premium alone. A ₹20 premium on HDFCBANK is
+₹13,000 a contract.
+
+**The opening spread allowance** (India, `contracts.opening_spread`). From
+09:15 to 10:00 IST, contracts with 0-4 days to expiry may quote up to **12%**
+bid-ask instead of 7%. After 10:00 the normal limit applies.
 
 Both legs of a spread must pass the liquidity and bid-ask checks. The bid-ask
 check itself uses the **1-minute volume-weighted average spread**, not one
@@ -938,6 +976,30 @@ marks the result again at the square-off. The report is saved to
 `journal/backtest/`. The prices are a Black-Scholes model, because no free
 source keeps historical option quotes. That makes it a test of whether the
 ladder finds a tradeable structure, not a fill report.
+
+### Pre-flight checks and the before/after backtest
+
+These are the Windows (Git Bash) forms. On Mac or Linux use
+`../.venv/bin/python`.
+
+    ../.venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY          # premium x lot, cap, sizing
+    ../.venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY --premium 35
+    ../.venv/Scripts/python.exe run.py --check-pdh --market IN                # PDH/PDL cached before 09:15?
+    ../.venv/Scripts/python.exe run.py --backtest-compare --market IN --symbols HDFCBANK,INFY,RELIANCE --days 10
+    ../.venv/Scripts/python.exe run.py --backtest-compare --market US --symbols SPY,QQQ,NVDA --days 10
+
+`--backtest-compare` replays the same history twice. **before** runs the
+rule book without the sweep strategy, the opening allowance, the 0.25 floor
+and single-leg grace, with the touch confluence. **after** runs today's
+rules. Each fired setup goes through the gates (sweep geometry, the wick
+stop, 1:3) and the contract picker. It is then walked bar by bar to STOP,
+TARGET or the square-off. The report gives trades, win rate, average win and
+loss, P&L and exits, and is saved to `journal/backtest/`.
+
+Two limits apply. The option prices are Black-Scholes, with opening quotes
+modelled wider. Historical open interest isn't available free, so the
+backtest judges the price rule and says so. Treat it as a comparison of the
+rule books, not a fill report.
 
 ## One contract cannot be halved
 

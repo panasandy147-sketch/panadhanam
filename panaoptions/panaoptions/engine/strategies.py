@@ -610,6 +610,143 @@ class CandlestickAtLevel(Strategy):
 ALL.append(CandlestickAtLevel)
 
 
+# --------------------------------------------------------------------------- #
+def sweep_of_previous_day(df5: pd.DataFrame, levels: SessionLevels, band_pct: float,
+                          lookback: int = 3) -> dict | None:
+    """The two-candle Previous Day Liquidity Sweep, if the tape shows one.
+
+    LONG:  a candle's low sweeps BELOW the previous-day low (PDL), no more than
+           `band_pct` % beyond it, and the IMMEDIATELY NEXT candle closes back
+           inside yesterday's range (PDL < close < PDH).
+    SHORT: a candle's high sweeps ABOVE the previous-day high (PDH) within
+           `band_pct` %, and the next candle closes back inside.
+    The sweep candle is one of the last `lookback` completed bars, the reclaim
+    the one after it. Returns {"direction", "level", "wick", "sweep_i", ...}.
+    """
+    pdh, pdl = float(levels.previous_high or 0), float(levels.previous_low or 0)
+    if not pdh or not pdl or pdh <= pdl or len(df5) < 2:
+        return None
+    today = df5[df5.index.date == df5.index[-1].date()]
+    n = len(today)
+    for back in range(1, min(lookback, n - 1) + 1):
+        i = n - 1 - back                              # the sweep candle
+        sweep, nxt = today.iloc[i], today.iloc[i + 1]
+        close = float(nxt["close"])
+        inside = pdl < close < pdh
+        low, high = float(sweep["low"]), float(sweep["high"])
+        if low < pdl and (pdl - low) / pdl * 100 <= band_pct and inside:
+            return {"direction": 1, "level": pdl, "wick": low, "reclaim": close,
+                    "sweep_ts": today.index[i], "bars_after": back - 1,
+                    "tweezer": abs(float(nxt["low"]) - low) <= max(pdl * 0.0015, 0.0),
+                    "swing": float(nxt["low"]) >= low
+                    and all(float(today.iloc[j]["low"]) >= low for j in range(max(0, i - 2), i))}
+        if high > pdh and (high - pdh) / pdh * 100 <= band_pct and inside:
+            return {"direction": -1, "level": pdh, "wick": high, "reclaim": close,
+                    "sweep_ts": today.index[i], "bars_after": back - 1,
+                    "tweezer": abs(float(nxt["high"]) - high) <= max(pdh * 0.0015, 0.0),
+                    "swing": float(nxt["high"]) <= high
+                    and all(float(today.iloc[j]["high"]) <= high for j in range(max(0, i - 2), i))}
+    return None
+
+
+class PdLiquiditySweep(Strategy):
+    """The Previous Day Liquidity Sweep (failed breakout) — calls and puts.
+
+    Stops rest just beyond yesterday's high and low. When a 5-minute candle
+    runs them — by no more than `proximity_pct` (0.25%) — and the very next
+    candle closes back inside yesterday's range, the breakout traders are
+    trapped and their exits fuel the move back:
+
+        LONG_CALL  a Tweezer Bottom / swing low that swept the PDL
+        LONG_PUT   a Tweezer Top / swing high that swept the PDH
+
+    Stop: the sweep candle's extreme wick, `stop_ticks` beyond it. Target: the
+    day's VWAP or `min_reward_risk` (3R) from the entry, whichever is further —
+    so the trade is 1:3 or better by construction, and the risk desk checks it
+    again. Rising call (PDL) / put (PDH) open interest is required by the F&O
+    confluence filter (fno.confluence).
+    """
+
+    name = SetupType.PD_LIQUIDITY_SWEEP
+    window = ("09:45", "15:00")
+
+    def evaluate(self, symbol, df5, df15, levels) -> Setup:
+        setup = _base(symbol, df5, self.name)
+        key = "strategies.pd_liquidity_sweep"
+        if not (levels.previous_high and levels.previous_low):
+            setup.blockers.append("no previous-day high and low on the tape")
+            return setup
+        band = float(self.cfg.get(f"{key}.proximity_pct", 0.25))
+        found = sweep_of_previous_day(df5, levels, band,
+                                      int(self.cfg.get(f"{key}.lookback_bars", 3)))
+        if found is None:
+            setup.blockers.append(
+                f"no sweep of the previous-day high {levels.previous_high:.2f} / low "
+                f"{levels.previous_low:.2f} within {band:g}% with the next candle "
+                f"closing back inside")
+            return setup
+        long = found["direction"] > 0
+        shape = ("Tweezer Bottom" if long else "Tweezer Top") if found["tweezer"] else (
+            "Swing Low" if long else "Swing High") if found["swing"] else ""
+        if not shape and bool(self.cfg.get(f"{key}.require_pattern", True)):
+            setup.blockers.append(
+                f"swept the previous-day {'low' if long else 'high'} {found['level']:.2f} "
+                f"and closed back inside, but the candles are neither a tweezer nor a "
+                f"swing {'low' if long else 'high'}")
+            return setup
+
+        snapshot = ta.compute(df5, self.cfg)
+        setup.indicators = snapshot
+        tick = float(self.cfg.get(f"{key}.tick", 0.01))
+        ticks = int(self.cfg.get(f"{key}.stop_ticks", 2))
+        stop = found["wick"] - ticks * tick if long else found["wick"] + ticks * tick
+        entry = float(found["reclaim"]) if found["bars_after"] == 0 else snapshot.close
+        risk = abs(entry - stop)
+        if risk <= 0 or (long and entry <= stop) or (not long and entry >= stop):
+            setup.blockers.append("price is back through the sweep wick — the trap failed")
+            return setup
+        need = float(self.cfg.get(f"{key}.min_reward_risk", 3.0))
+        three_r = entry + need * risk if long else entry - need * risk
+        vwap = float(snapshot.vwap or 0.0)
+        vwap_r = ((vwap - entry) if long else (entry - vwap)) / risk if vwap else 0.0
+        target = vwap if vwap_r >= need else three_r
+
+        what = "low (PDL)" if long else "high (PDH)"
+        setup.direction = Direction.LONG if long else Direction.SHORT
+        setup.pattern = f"{'PDL' if long else 'PDH'} Sweep — {shape or 'reclaim'}"
+        setup.entry_trigger = entry
+        setup.key_level = found["level"]
+        setup.key_level_source = f"previous day {'low' if long else 'high'}"
+        setup.underlying_support = round(stop, 4)
+        setup.underlying_target = round(target, 4)
+        setup.trend_aligned = True
+        setup.delta_band = contract_prefs.delta_band(self.cfg, setup.pattern)
+        setup.invalidation_note = (f"a trade through the sweep wick {found['wick']:.2f} "
+                                   f"({ticks} ticks beyond: {stop:.2f})")
+        depth = abs(found["wick"] - found["level"]) / found["level"] * 100
+        setup.confirmations = [
+            f"swept the previous-day {what} {found['level']:.2f} by {depth:.2f}% "
+            f"(wick {found['wick']:.2f}, inside the {band:g}% band)",
+            f"the next 5m candle closed back inside yesterday's range at "
+            f"{found['reclaim']:.2f}",
+            f"{shape or 'reclaim'} at the level",
+            f"target {'VWAP' if vwap_r >= need else f'{need:g}R'} {target:.2f} "
+            f"= {max(vwap_r, need):.1f}R on a {risk:.2f} risk",
+        ]
+        setup.reasoning = [
+            f"**The trap.** Stops beyond the previous-day {what} were run and price "
+            f"closed back inside — whoever chased the breakout is offside.",
+            f"**Wrong if** price trades through the sweep wick {found['wick']:.2f}.",
+            f"**Target** {target:.2f} ({'VWAP' if vwap_r >= need else f'{need:g}R'}); no "
+            f"time stop — it runs to the target, the stop or the square-off.",
+        ]
+        return setup
+
+
+# First in line: when a sweep of yesterday's level prints, it is the trade.
+ALL.insert(0, PdLiquiditySweep)
+
+
 def _register_volume_profile() -> None:
     """Add the volume-profile family after the core four.
 

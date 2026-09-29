@@ -41,7 +41,7 @@ contracts:
   # SPY/QQQ/DIA: up to $10.00 ($1,000), so an at- or near-the-money index
   # contract reaches the 25% index cap instead of stopping at $350.
   index_max_contract_price: 10.00
-  budget_fallback_min_delta: 0.30
+  budget_fallback_min_delta: 0.25
 
 strategies:
   orb_vwap:

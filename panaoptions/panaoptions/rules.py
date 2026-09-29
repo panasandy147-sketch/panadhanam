@@ -167,7 +167,29 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     within = g("strategies.candlestick_at_level.trigger_within_bars", 2)
     tf = g("strategies.candlestick_at_level.timeframe", "15m")
     allowed_patterns = list(g("strategies.candlestick_at_level.allowed_patterns") or [])
+    sw = "strategies.pd_liquidity_sweep"
     strategies = [
+        {
+            "key": "pd_liquidity_sweep",
+            "name": "0 · Previous Day Liquidity Sweep (failed breakout) — first in line",
+            "window": window("pd_liquidity_sweep"), "enabled": enabled("pd_liquidity_sweep"),
+            "buy": [
+                f"LONG_CALL: a 5m candle sweeps BELOW the previous-day low (PDL) by no "
+                f"more than {g(f'{sw}.proximity_pct', 0.25)}%, and the very next "
+                "candle closes back inside yesterday's range — a tweezer bottom or "
+                "swing low at the PDL.",
+                f"LONG_PUT: the mirror — a sweep ABOVE the previous-day high (PDH) "
+                f"within {g(f'{sw}.proximity_pct', 0.25)}% and the next candle closes "
+                "back inside, as a tweezer top or swing high.",
+                "Call open interest rising (a PDL sweep) / put open interest rising "
+                "(a PDH sweep) — the F&O confluence filter.",
+                f"The target must be at least 1:{g(f'{sw}.min_reward_risk', 3.0):g} "
+                "against the stop at the sweep wick — checked before the order.",
+            ],
+            "wrong": (f"A trade through the sweep candle's wick — the stop sits "
+                      f"{g(f'{sw}.stop_ticks', 2)} ticks beyond it."),
+            "target": "The day's VWAP or 3R, whichever is further. No time stop.",
+        },
         {
             "key": "orb_vwap", "name": "1 · Opening Range Breakout + VWAP",
             "window": window("orb_vwap"), "enabled": enabled("orb_vwap"),
@@ -348,8 +370,19 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                                          ["candlestick_at_level"]) or []))
                   if g("fno.confluence.enabled", False) else "off",
                   "fno.confluence.enabled / strategies"),
-            _rule("'At' the PDH / PDL means within",
-                  f"{g('fno.confluence.touch_atr', 0.15)} ATR", "fno.confluence.touch_atr"),
+            _rule("Cached before the open, from",
+                  f"{g('fno.ingest_from', g('premarket.screen_from', '09:00'))} "
+                  f"({'ET' if cfg.market == 'US' else 'IST'})", "fno.ingest_from"),
+            _rule("How a PDH / PDL is judged"
+                  + (": a 5-minute candle sweeps through the level by no more "
+                     f"than {g('fno.confluence.proximity_pct', 0.25)}% and the "
+                     "very next candle closes back inside yesterday's range (the "
+                     "stop goes beyond that candle's wick)"
+                     if str(g("fno.confluence.mode", "sweep")) == "sweep"
+                     else f": the pattern's extreme within "
+                          f"{g('fno.confluence.touch_atr', 0.15)} ATR of the level"),
+                  str(g("fno.confluence.mode", "sweep")),
+                  "fno.confluence.mode / proximity_pct / touch_atr"),
             _rule("When the chain carries no open interest",
                   g("fno.confluence.when_oi_unknown", "block"),
                   "fno.confluence.when_oi_unknown"),
@@ -387,6 +420,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                      if g("contracts.rolling_spread.enabled", True) else "") + ")",
                   f"{_pct(g('contracts.max_spread_pct_of_mid', 7.0))} of the mid price",
                   "contracts.max_spread_pct_of_mid / rolling_spread"),
+            _rule("Opening window: for expiries within "
+                  f"{g('contracts.opening_spread.max_dte', 4)} days, the spread "
+                  "allowance widens from "
+                  f"{g('contracts.opening_spread.from', '09:15')} to "
+                  f"{g('contracts.opening_spread.to', '10:00')} "
+                  "(opening quotes are wide; after that, the normal limit)",
+                  f"{_pct(g('contracts.opening_spread.max_spread_pct', 12.0))}"
+                  if g("contracts.opening_spread.enabled", False) else "off",
+                  "contracts.opening_spread"),
             _rule("Over budget, in order: the same delta with less time; a "
                   "debit spread (buy the primary-tier option, sell a strike "
                   "further out, reward:risk ≥ "
@@ -397,6 +439,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "Nothing funded = skipped as a hard risk failure",
                   g("contracts.budget_fallback_min_delta", 0.30) or "off",
                   "contracts.fallback_order / debit_spread / liquidity"),
+            _rule("Single-leg grace: when the debit spread fails only because "
+                  "the short leg has no liquid, priced strike, buy the long leg "
+                  "outright if premium x lot fits this share of the budget",
+                  f"{_pct(g('contracts.single_leg_grace.max_budget_pct', 100))}"
+                  if g("contracts.single_leg_grace.enabled", True) else "off",
+                  "contracts.single_leg_grace"),
             _rule("Unusual options flow (volume ≥ "
                   f"{g('flow.min_volume_to_oi', 3.0)}x open interest, ≥ "
                   f"{g('flow.min_volume', 1000)} contracts) passes the screen "
@@ -404,10 +452,16 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "on" if g("flow.pass_screen", True) else "off",
                   "flow.pass_screen / min_volume_to_oi"),
             _rule("Contract price between",
-                  f"${g('contracts.min_contract_price', 0.10)} and "
-                  f"${g('contracts.max_contract_price', 20.0)} "
+                  f"{cur}{g('contracts.min_contract_price', 0.10)} and "
+                  f"{cur}{g('contracts.max_contract_price', 20.0)} "
                   f"(×{g('contracts.contract_multiplier', 100)} per contract)",
                   "contracts.min_contract_price / max_contract_price"),
+            *([_rule("One contract is one exchange lot: its cost is premium x "
+                     "lot, and that total is what the per-trade cap, the budget "
+                     "and every fallback are judged on",
+                     ", ".join(f"{k} {v}" for k, v in list(
+                         (g("data.lot_sizes") or {}).items())[:8]) + " …",
+                     "data.lot_sizes")] if g("data.lot_sizes") else []),
         ],
         "patterns": pattern_rows,
     })

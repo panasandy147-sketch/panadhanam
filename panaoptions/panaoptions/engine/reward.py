@@ -26,8 +26,13 @@ _ROOM = {
 }
 
 
-def project(setup: Any, levels: Any, cfg: Any) -> tuple[float, float, str, str]:
-    """(target, reward:risk, why not, note). `why not` is '' when it passes."""
+def project(setup: Any, levels: Any, cfg: Any,
+            sweep: bool = False) -> tuple[float, float, str, str]:
+    """(target, reward:risk, why not, note). `why not` is '' when it passes.
+
+    `sweep`: a Previous Day Liquidity Sweep. Its stop is the sweep wick and
+    its target VWAP or 3R; the far side of yesterday's range is where a
+    failed breakout rotates to, so the room check does not apply."""
     need = float(cfg.get("risk.min_reward_risk", 3.0) or 0.0)
     entry = float(setup.entry_trigger or setup.indicators.close)
     stop = float(setup.underlying_support or 0.0)
@@ -49,7 +54,8 @@ def project(setup: Any, levels: Any, cfg: Any) -> tuple[float, float, str, str]:
             price = float(getattr(levels, attr, 0.0) or 0.0)
             if price and ((price > entry + risk * 0.25) if long else (price < entry - risk * 0.25)):
                 blockers.append((abs(price - entry), f"{label} {price:,.2f}"))
-    room_r = min((d / risk for d, _ in blockers), default=float("inf"))
+    room_r = (float("inf") if sweep
+              else min((d / risk for d, _ in blockers), default=float("inf")))
     if room_r < need:
         where = min(blockers)[1]
         return 0.0, room_r, (f"only {room_r:.1f}R of room before the {where} — the "

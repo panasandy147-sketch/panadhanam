@@ -78,6 +78,7 @@ class DayPicture:
     put_oi_change: int | None = None
     price_change_pct: float | None = None
     bias: str = "unknown"
+    ingested_at: str = ""                # when it was cached (before the open)
 
     def line(self) -> str:
         pc = "" if self.price_change_pct is None else f", {self.price_change_pct:+.2f}%"
@@ -120,6 +121,10 @@ def record_oi(symbol: str, now: datetime, chain: list[Any],
 
     call_oi, put_oi = oi_totals(chain, max_dte)
     day = now.date().isoformat()
+    # NSE publishes each strike's change in OI since the previous close:
+    # the exact "rising call / put OI" when the chain carries it.
+    exchange = [c for c in chain or [] if getattr(c, "oi_change", 0)
+                and (max_dte is None or c.dte <= max_dte)]
     if call_oi or put_oi:
         try:
             conn = store.get_conn()
@@ -133,6 +138,10 @@ def record_oi(symbol: str, now: datetime, chain: list[Any],
             conn.commit()
         except Exception as exc:                        # noqa: BLE001
             log.warning("could not record OI for %s: %s", symbol, exc)
+    if exchange:
+        calls = sum(int(c.oi_change) for c in exchange if c.right.value == "CALL")
+        puts = sum(int(c.oi_change) for c in exchange if c.right.value == "PUT")
+        return OiRead(call_oi, put_oi, calls, puts, "since the previous close (exchange)")
     return read_oi(symbol, now)
 
 

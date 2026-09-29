@@ -227,10 +227,11 @@ class RiskManager:
 
         deployed = signal.cost(multiplier)
         at_risk = signal.risk_at_stop(multiplier)
-        log.info("%s | %s | deploying $%.2f (%.1f%% of account); backstop at "
-                 "$%.2f (%.1f%%) — real exit: %s",
-                 signal.alert_line(), setup.strategy.value, deployed,
-                 deployed / self.capital * 100, at_risk,
+        cur = str(self.cfg.get("account.currency", "$") or "$")
+        log.info("%s | %s | deploying %s%.2f (%.1f%% of account); backstop at "
+                 "%s%.2f (%.1f%%) — real exit: %s",
+                 signal.alert_line(), setup.strategy.value, cur, deployed,
+                 deployed / self.capital * 100, cur, at_risk,
                  at_risk / self.capital * 100,
                  setup.invalidation_note or "the underlying level")
         return signal, ""

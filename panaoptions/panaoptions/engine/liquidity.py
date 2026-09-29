@@ -27,6 +27,29 @@ from typing import Any
 from panaoptions.models import OptionContract
 
 
+def spread_limit(cfg: Any, c: OptionContract, now: datetime | None = None,
+                 base: float | None = None) -> float:
+    """The widest bid-ask spread (% of mid) this contract may have, now.
+
+    `contracts.max_spread_pct_of_mid` (7%), except inside the opening window
+    (`contracts.opening_spread`: 09:15-10:00 IST on NSE) where a 0-4 DTE
+    contract may be up to `max_spread_pct` (12%) wide — the first candles
+    quote wide for minutes, and a 7% gate refused every valid opening entry.
+    """
+    limit = float(base if base is not None
+                  else cfg.get("contracts.max_spread_pct_of_mid", 7.0))
+    opening = cfg.get("contracts.opening_spread") or {}
+    if not opening or not opening.get("enabled"):
+        return limit
+    from panaoptions import clock
+    now = now or clock.now(cfg.timezone)
+    start, end = str(opening.get("from", "09:15")), str(opening.get("to", "10:00"))
+    if (clock.within(cfg.timezone, start, end, now)
+            and c.dte <= int(opening.get("max_dte", 4))):
+        return max(limit, float(opening.get("max_spread_pct", 12.0)))
+    return limit
+
+
 def liquidity_problem(c: OptionContract, cfg: Any) -> str:
     """'' when the contract is liquid enough, else why not.
 

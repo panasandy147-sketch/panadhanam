@@ -189,13 +189,17 @@ class RiskGatekeeper:
         spread = contract.effective_spread_pct
         rolling = any(leg.rolling_spread_pct is not None for leg in legs)
         how = " (1-min volume-weighted)" if rolling else ""
+        # 7%, or 12% for a 0-4 DTE contract in the opening window.
+        from panaoptions.engine.liquidity import spread_limit
+        limit = spread_limit(self.cfg, legs[0], None, self.max_spread_pct)
+        opening = " (opening window)" if limit > self.max_spread_pct else ""
         if mid <= 0 or one_sided:
             no(f"{', '.join(one_sided) or contract.label} has no two-sided market")
-        elif spread > self.max_spread_pct:
+        elif spread > limit:
             no(f"spread {spread:.1f}% of mid{how} is wider than "
-               f"{self.max_spread_pct:g}%" + (" on a leg" if contract.is_spread else ""))
+               f"{limit:g}%{opening}" + (" on a leg" if contract.is_spread else ""))
         else:
-            ok(f"spread {spread:.1f}%{how} ≤ {self.max_spread_pct:g}%"
+            ok(f"spread {spread:.1f}%{how} ≤ {limit:g}%{opening}"
                + (" on both legs" if contract.is_spread else ""))
         if contract.is_spread:
             if contract.width <= mid:

@@ -2,6 +2,10 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/*.csv
+# Per-market stores (data/in/ for India).
+data/*/*.db
+data/*/*.db-wal
+data/*/*.db-shm
 data/models/
 # Whoever is running the desk picked these; they are not the project's.
 data/watchlist.json

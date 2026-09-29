@@ -112,6 +112,7 @@ def parse_chain(payload: dict[str, Any] | None, symbol: str, lot: int,
                                risk_free_rate=0.065),
                 implied_volatility=iv,
                 open_interest=int(_num(leg.get("openInterest"))),
+                oi_change=int(_num(leg.get("changeinOpenInterest"))),
                 volume=int(_num(leg.get("totalTradedVolume"))),
                 multiplier=int(lot)))
     return out

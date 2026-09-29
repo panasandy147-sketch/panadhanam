@@ -211,6 +211,10 @@ def desk(cfg, monkeypatch, tmp_path):
     cfg.data["strategies"]["candlestick_at_level"].update(
         {"enabled": True, "from": "09:45", "to": "15:00", "timeframe": "5m"})
     cfg.data["agents"]["enabled"] = False
+    # These two test the "touch" form of the rule (the pattern AT the PDH);
+    # the default two-candle sweep form has its own tests (test_pd_sweep.py).
+    cfg.data["fno"]["confluence"]["mode"] = "touch"
+    cfg.data["strategies"]["pd_liquidity_sweep"]["enabled"] = False
     cfg.data["contracts"].update(min_dte=0, max_dte=4, max_contract_price=5.0,
                                  min_contract_price=0.10)
     cfg.data["universe"]["symbols"] = ["SPY"]

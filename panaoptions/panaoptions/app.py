@@ -487,6 +487,9 @@ class OptionsDesk:
         # 2. The auto watchlist: built before the open, re-checked hourly.
         await self._maybe_refresh_watchlist(now)
 
+        # 2b. The previous day's F&O picture, once a day before the open.
+        await self._maybe_ingest_fno(now)
+
         # 3. The pre-market screen.
         if self._should_screen(phase, today, now):
             self.screened = await screen(self.feed, self.cfg, now)
@@ -496,9 +499,6 @@ class OptionsDesk:
             self.activity.add(
                 "screen.done", self._screen_summary(passed),
                 level="good" if passed else "info", ts=now)
-
-        # 3b. The previous day's F&O picture, once a day after the screen.
-        await self._maybe_ingest_fno(now)
 
         # 4. Tightening is a clock event, not a phase one. The entry window now
         # runs to the last strategy's close, which is well past the tighten
@@ -656,9 +656,12 @@ class OptionsDesk:
             # rising call OI, or a PDH test with rising put OI.
             from panaoptions import fno
             from panaoptions.engine import confluence, reward
+            from panaoptions.models import SetupType
+            is_sweep = setup.strategy is SetupType.PD_LIQUIDITY_SWEEP
             if confluence.applies(setup, self.cfg):
+                frame = strategies.localise(ta.to_frame(candles), self.cfg.timezone)
                 why, notes = confluence.check(setup, session_levels,
-                                              fno.read_oi(symbol, now), self.cfg)
+                                              fno.read_oi(symbol, now), self.cfg, frame)
                 if why:
                     self._candidate_refused(symbol, why)
                     store.save_signal_seen(signal_id, now, symbol, setup.direction.value,
@@ -668,13 +671,31 @@ class OptionsDesk:
                     self.activity.add("confluence.refused", f"{symbol} {side} — {why}",
                                       level="warn", ts=now)
                     continue
+                # A reversal confirmed by the sweep: the stop moves to the sweep
+                # candle's extreme wick, and 1:3 is measured from there.
+                wick = next((float(n.split("sweep wick ")[1]) for n in notes
+                             if n.startswith("sweep wick ")), None)
+                notes = [n for n in notes if not n.startswith("sweep wick ")]
+                if wick is not None:
+                    is_sweep = True
+                    tick = float(self.cfg.get("strategies.pd_liquidity_sweep.tick", 0.01))
+                    ticks = int(self.cfg.get("strategies.pd_liquidity_sweep.stop_ticks", 2))
+                    beyond = (wick - ticks * tick if setup.direction is Direction.LONG
+                              else wick + ticks * tick)
+                    setup.underlying_support = (min(setup.underlying_support or beyond, beyond)
+                                                if setup.direction is Direction.LONG
+                                                else max(setup.underlying_support or beyond,
+                                                         beyond))
+                    signal_a = replace(signal_a,
+                                       invalidation_level=float(setup.underlying_support))
                 setup.confirmations.extend(notes)
                 self.activity.add("confluence.ok", f"{symbol} {side} — {'; '.join(notes)}",
                                   level="good", ts=now)
 
             # The 1:3 gate: a projected target at least 3x the distance to the
             # invalidation, with open road to it.
-            target, rr, why, note = reward.project(setup, session_levels, self.cfg)
+            target, rr, why, note = reward.project(setup, session_levels, self.cfg,
+                                                   sweep=is_sweep)
             if why:
                 self._candidate_refused(symbol, f"reward:risk — {why}")
                 store.save_signal_seen(signal_id, now, symbol, setup.direction.value,
@@ -798,11 +819,15 @@ class OptionsDesk:
 
     async def _maybe_ingest_fno(self, now: datetime) -> None:
         """Map PDH/PDL/PDC, open interest and the build-up for every watched
-        symbol — once a day, after the screen has run."""
+        symbol — once a day, BEFORE the open (from `fno.ingest_from`), so the
+        previous session's levels are cached when the first candle prints."""
         if not bool(self.cfg.get("fno.ingest", True)):
             return
         today = now.date().isoformat()
-        if getattr(self, "_fno_on", "") == today or self._screened_on != today:
+        start = str(self.cfg.get("fno.ingest_from")
+                    or self.cfg.get("premarket.screen_from", "09:00"))
+        if getattr(self, "_fno_on", "") == today or not clock.at_or_after(
+                self.cfg.timezone, start, now):
             return
         self._fno_on = today
         from panaoptions import fno
@@ -815,6 +840,7 @@ class OptionsDesk:
                 chain = await self.feed.chain_for_window(symbol, spot, 0, max_dte)
                 fno.record_oi(symbol, now, chain, max_dte)
                 pic = fno.picture(symbol, now, levels)
+                pic.ingested_at = now.isoformat(timespec="minutes")
                 fno.save_picture(pic)
                 lines.append(pic.line())
             except Exception as exc:                   # noqa: BLE001
@@ -1043,7 +1069,7 @@ class OptionsDesk:
             self.spreads.annotate(chain, now)
         budget = self.gatekeeper.budget_for(symbol)
         search = contract_filter.choose(symbol, chain, setup.direction,
-                                        self.cfg, setup=setup, budget=budget)
+                                        self.cfg, setup=setup, budget=budget, now=now)
         # A contract refused only on its spread may have hit a momentary
         # spike (the open, a news print). Sample the chain again inside the
         # minute and judge the volume-weighted average, not the one quote.
@@ -1061,7 +1087,7 @@ class OptionsDesk:
                 chain = again
             before = search
             search = contract_filter.choose(symbol, chain, setup.direction,
-                                            self.cfg, setup=setup, budget=budget)
+                                            self.cfg, setup=setup, budget=budget, now=now)
             if (search.chosen is not None
                     and (before.chosen is None
                          or (search.tier == "primary" and before.tier != "primary"))):
