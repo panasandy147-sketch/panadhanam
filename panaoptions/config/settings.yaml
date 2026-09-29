@@ -416,7 +416,11 @@ strategies:
   # the 70% value area (VAL-VAH) and the low/high volume nodes. See
   # strategies/volume_profile_strategies.py and the volume_profile block.
   va_rejection:            # failed auction at the VAH (put) / VAL (call) → POC
-    enabled: true
+    # OFF: lost in every run on 29 Sept — US -1.08R/-1.23R a trade in the
+    # walk-forward test half (0% winners), India -0.55R edge. With it off,
+    # the US went from -$88 to +$71 on the same fills. Re-enable with true and
+    # re-run `python run.py --backtest` to see whether it earns back.
+    enabled: false
     from: "09:45"
     to:   "15:45"
     lookback_bars: 2       # the poke/test may be this many bars back

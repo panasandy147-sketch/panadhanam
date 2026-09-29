@@ -60,7 +60,7 @@ strategies:
     to:   "14:30"
     volume_multiple: 1.5
   va_rejection:
-    enabled: true
+    enabled: false              # off everywhere: see settings.yaml
     from: "09:45"
     to:   "15:00"
   lvn_acceleration:

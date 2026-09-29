@@ -957,9 +957,13 @@ strategy's expectancy over every fill in the last `run.py --backtest`. Before
 any validation exists, `ranking.priority` decides: the sweep and the ORB.
 When several symbols fire in the same cycle, the best edge is taken first.
 
-**POC Magnet / Bounce is off.** It was the worst strategy in every run on
-29 Sept (US −1.08R a trade at a 10% win rate, India −0.32R). Set
-`strategies.poc_bounce.enabled: true` and re-validate to test it again.
+**POC Magnet / Bounce and Value Area Rejection are off.** They were the
+worst strategies in the 29 Sept runs:
+- POC Magnet / Bounce: US −1.08R a trade at a 10% win rate, India −0.32R.
+- Value Area Rejection: −1.23R a trade in the US test half, −0.55R India
+  edge. Turning it off took the US from −$88 to +$71 on the same fills.
+
+Set `strategies.<name>.enabled: true` and re-validate to test either again.
 
 **Verified 1:3.** The Previous Day Liquidity Sweep and Value Area Rejection
 must reach 1:3 with their own target: VWAP-or-3R for the sweep, the POC for

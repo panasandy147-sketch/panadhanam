@@ -270,11 +270,12 @@ def test_poc_bounce_is_off_on_every_desk():
     from panaoptions.config import Config
     for cfg in (Config(), Config(profile="zerodte"), Config(profile="scalp")):
         assert cfg.get("strategies.poc_bounce.enabled") is False
+        assert cfg.get("strategies.va_rejection.enabled") is False
     from panaoptions.engine.strategies import ALL
     from panaoptions.models import SetupType as ST
     cfg = Config()
     enabled = {cls(cfg).name for cls in ALL if cls(cfg).enabled}
-    assert ST.POC_BOUNCE not in enabled
+    assert ST.POC_BOUNCE not in enabled and ST.VA_REJECTION not in enabled
 
 
 def test_without_a_validation_the_priority_list_decides(shipped):
