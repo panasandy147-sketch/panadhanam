@@ -160,6 +160,12 @@ async def test_replay_produces_graded_trades(engine):
             assert trade["outcome"] in {"TARGET", "STOP"}
         for trade in out["worst_trades"]:
             assert trade["r_multiple"] <= 0
+        # The same trades intraday, plain vs the Standard Pyramid.
+        plain, pyr = out["compare"]["plain_intraday"], out["compare"]["pyramid"]
+        assert plain["trades"] == pyr["trades"] == t["trades"]
+        assert {"expectancy_r", "max_drawdown_r", "exits"} <= set(pyr)
+        for trade in out["best_trades"]:
+            assert "r_pyramid" in trade and trade["pyramid_adds"] in (0, 1, 2)
 
 
 @pytest.mark.asyncio

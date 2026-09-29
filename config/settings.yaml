@@ -103,8 +103,23 @@ risk:
   # Setups that are NEVER time-stopped: they run to the target, the stop or
   # the intraday square-off.
   no_time_stop_setups: ["PD Liquidity Sweep"]
-  # Trailing
-  trail_after_r: 1.0             # start trailing once trade is +1R
+  # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
+  # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
+  # At +1.0R open: ADD 50% of the base, and the stop for the WHOLE position
+  # moves to the base entry. At +2.0R: ADD 25% of the base, stop to the Level 1
+  # fill. One take-profit at +3.0R from the base entry closes the full 175%.
+  # Worst case after Level 1: -0.5R; after Level 2: +0.75R locked. An add is
+  # refused while the position is in a drawdown (no averaging down), when the
+  # desk is halted, past the entry cutoff, or over the exposure cap — the stop
+  # still steps up. See app/agents/pyramid.py.
+  pyramid:
+    enabled: true
+    target_r: 3.0
+    levels:
+      - {at_r: 1.0, size: 0.50, stop: "base"}
+      - {at_r: 2.0, size: 0.25, stop: "level1"}
+  # (Unused: the pyramid's stop steps replace a separate trail.)
+  trail_after_r: 1.0
   trail_step_r: 0.5
   # Options-specific. Premium per trade is capped at max_capital_deployed_pct
   # of capital (20% = $800), flexed for the high-notional index ETFs to

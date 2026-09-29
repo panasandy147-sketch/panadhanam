@@ -37,6 +37,9 @@ async def engine(cfg, monkeypatch):
     cfg.settings["system"]["square_off_time"] = "23:59"
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
     cfg.settings["execution"]["auto_place_orders"] = True
+    # The plain entry -> stop / target flow; the pyramid (adds, the stop steps,
+    # the single 3R target) has its own end-to-end tests in test_pyramid.py.
+    cfg.settings["risk"].setdefault("pyramid", {})["enabled"] = False
     # A known policy, so each case below meets or misses it exactly. The
     # shipped high-risk profile has its own tests at the end of this file.
     cfg.settings["consensus"].update({"min_confirmations": 2,

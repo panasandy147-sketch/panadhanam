@@ -152,6 +152,20 @@ def record_sell(cfg: Any, row: dict[str, Any], *, exit_price: float, pnl: float,
     })
 
 
+def record_add(cfg: Any, row: dict[str, Any], *, level: int, quantity: int, price: float,
+               new_stop: float, avg_entry: float, total_qty: int, open_r: float,
+               note: str, refused: str = "") -> dict[str, Any]:
+    """A pyramid add to a winning position (or the stop step alone)."""
+    return _write(cfg, {
+        "event": "ADD", "signal_id": row.get("id"), "symbol": row.get("symbol"),
+        "tradingsymbol": row.get("tradingsymbol"), "side": row.get("side"),
+        "level": level, "quantity": quantity, "price": round(float(price), 4),
+        "stop_loss": round(float(new_stop), 4), "avg_entry": round(float(avg_entry), 4),
+        "total_quantity": total_qty, "open_r": open_r, "note": note,
+        "refused": refused or None,
+    })
+
+
 # --------------------------------------------------------------------------- #
 def entries(day: date | None = None, since: date | None = None,
             until: date | None = None, market: str | None = None) -> list[dict[str, Any]]:

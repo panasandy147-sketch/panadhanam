@@ -426,6 +426,35 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     })
 
     # ------------------------------------------------------------------ #
+    if g("risk.pyramid.enabled", False):
+        steps = g("risk.pyramid.levels") or []
+        rows = [_rule("No averaging down: any add, or any new order on a symbol "
+                      "already held, is refused while that position is in a drawdown",
+                      "always", "risk desk (app/agents/risk.py)")]
+        for i, step in enumerate(steps, 1):
+            stop = ("the base entry price" if str(step.get("stop")) == "base"
+                    else "the Level 1 fill price")
+            rows.append(_rule(
+                f"Level {i}: at +{float(step.get('at_r', i)):g}R open profit, ADD "
+                f"{float(step.get('size', 0)):.0%} of the base quantity, and move the "
+                f"stop for the WHOLE position to {stop}",
+                f"+{float(step.get('at_r', i)):g}R → +{float(step.get('size', 0)):.0%}",
+                "risk.pyramid.levels"))
+        rows.append(_rule("One take-profit for the whole (175%) position, from the "
+                          "BASE entry; the average entry is re-blended after each add",
+                          f"+{g('risk.pyramid.target_r', 3.0):g}R", "risk.pyramid.target_r"))
+        sections.append({
+            "title": "The Standard Pyramid (Base-50-25)",
+            "intro": ("Add to winners, never to losers. The base is sized at 1R "
+                      "(risk per trade / stop distance). After Level 1 the worst "
+                      "case is -0.5R; after Level 2 +0.75R is locked. An add is "
+                      "also refused when the desk is halted, past the entry "
+                      "cutoff or over the exposure cap — the stop still steps up. "
+                      "Results are measured in the BASE trade's R."),
+            "rules": rows,
+        })
+
+    # ------------------------------------------------------------------ #
     setups = ", ".join(g("risk.time_stop_setups") or ["Mean Reversion"])
     sections.append({
         "title": "When it sells",
@@ -433,8 +462,14 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         "rules": [
             _rule("Stop hit: sold at the stop (a planned loss of 1R)", "−1R",
                   "set per trade, above"),
-            _rule("Target hit: sold at the target",
-                  f"+{g('risk.min_risk_reward', 2.0)}R or more", "set per trade, above"),
+            _rule("Target hit: sold at the target"
+                  + (" — the pyramid's single target, the whole position"
+                     if g("risk.pyramid.enabled", False) else ""),
+                  (f"+{g('risk.pyramid.target_r', 3.0):g}R from the base entry"
+                   if g("risk.pyramid.enabled", False)
+                   else f"+{g('risk.min_risk_reward', 2.0)}R or more"),
+                  "risk.pyramid.target_r" if g("risk.pyramid.enabled", False)
+                  else "set per trade, above"),
             _rule(f"Time stop, for {setups} setups only: no bounce within",
                   f"{g('risk.time_stop_minutes', 30)} min",
                   "risk.time_stop_minutes / time_stop_setups"),

@@ -28,6 +28,9 @@ class OutcomeTracker:
         self.cfg = cfg or get_config()
         self.broker = broker
         self.risk = risk_manager
+        # Set by the engine: pyramid adds go to the broker through the same
+        # gate as entries (armed trading day, paper or live switches).
+        self.dispatcher: Any = None
 
     async def poll(self) -> list[dict[str, Any]]:
         """Mark open signals to market and close the ones that resolved."""
@@ -39,11 +42,15 @@ class OutcomeTracker:
         unrealised = 0.0
         still_open: list[tuple[dict[str, Any], float]] = []
 
+        from app.agents import pyramid
+        pyramiding = pyramid.enabled(self.cfg)
         for row in open_rows:
             marks = await self._marks(row)
             if marks is None:
                 continue
             price, spot = marks
+            if pyramiding:
+                row = self._pyramid_start(row)
 
             entry = row["entry"]
             stop = row["stop_loss"]
@@ -83,6 +90,12 @@ class OutcomeTracker:
                     "square_off" if timed_out else "time_stop"))
             else:
                 direction = 1 if is_long else -1
+                if self.risk is not None:
+                    self.risk.position_pnl[str(row["symbol"]).upper()] = round(
+                        (price - entry) * qty * direction, 2)
+                if pyramiding:
+                    row = await self._pyramid_step(row, price, spot)
+                    entry, qty = row["entry"], row["quantity"] or 0
                 unrealised += (price - entry) * qty * direction
                 still_open.append((row, price))
 
@@ -132,6 +145,14 @@ class OutcomeTracker:
         risk_per_unit = abs(entry - row["stop_loss"]) or 1.0
         pnl = (exit_price - entry) * qty * direction
         r_multiple = (exit_price - entry) * direction / risk_per_unit
+        # A pyramided position is measured against the BASE trade's risk:
+        # after the stop moves, entry-to-stop is no longer what was risked.
+        state = self._pyramid_state(row)
+        if state is not None:
+            from app.agents import pyramid
+            r_multiple = pyramid.base_r_multiple(state, pnl)
+        if self.risk is not None:
+            self.risk.position_pnl.pop(str(row["symbol"]).upper(), None)
 
         db.update_outcome(row["id"], round(exit_price, 2), round(pnl, 2),
                           round(r_multiple, 3), status.value)
@@ -236,6 +257,132 @@ class OutcomeTracker:
                      card.verdict.value, card.execution_score)
         except Exception as exc:
             log.warning("could not journal %s: %s", row.get("id"), exc)
+
+    # ------------------------------------------------------------------ #
+    # The Standard Pyramid (agents/pyramid.py)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _payload(row: dict[str, Any]) -> dict[str, Any]:
+        import json
+        try:
+            return json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+    def _pyramid_state(self, row: dict[str, Any]) -> Any:
+        from app.agents import pyramid
+        saved = self._payload(row).get("pyramid")
+        if not saved:
+            return None
+        try:
+            return pyramid.PyramidState(**saved)
+        except TypeError:
+            return None
+
+    def _pyramid_start(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Level 0 for a position seen for the first time: remember the base,
+        and set the single take-profit at +target_r (3R) from the base entry."""
+        import json
+
+        from app.agents import pyramid
+        if self._pyramid_state(row) is not None or not row.get("quantity"):
+            return row
+        state = pyramid.start(self.cfg, row)
+        payload = self._payload(row)
+        payload["pyramid"] = state.to_dict()
+        row = {**row, "target": state.target, "payload": json.dumps(payload, default=str)}
+        db.update_position(row["id"], quantity=int(row["quantity"]), entry=float(row["entry"]),
+                           stop_loss=float(row["stop_loss"]), target=state.target,
+                           payload=row["payload"],
+                           notional=float(row.get("notional") or 0.0),
+                           total_risk=float(row.get("total_risk") or 0.0))
+        return row
+
+    async def _pyramid_step(self, row: dict[str, Any], price: float,
+                            spot: float | None) -> dict[str, Any]:
+        """Take the next level when the trade has earned it: add the size (the
+        risk desk approving), and move the stop for the WHOLE position."""
+        import json
+
+        from app.agents import pyramid
+        from app.core import audit
+        state = self._pyramid_state(row)
+        if state is None:
+            return row
+        payload = self._payload(row)
+        is_long = row["side"] == "BUY"
+        unit = int(payload.get("unit_size") or 1)
+        add = pyramid.plan(self.cfg, state, price, spot, is_long, unit)
+        if add is None:
+            return row
+
+        sign = 1 if is_long else -1
+        open_pnl = (price - float(row["entry"])) * int(row["quantity"] or 0) * sign
+        notional = add.quantity * price
+        refused: list[str] = []
+        if add.quantity:
+            refused = (self.risk.approve_add(row["symbol"], open_pnl, notional)
+                       if self.risk is not None
+                       else ([] if open_pnl >= 0 else ["No averaging down"]))
+        if refused:
+            # The size is refused; the protective stop step is still taken.
+            add = pyramid.Add(level=add.level, quantity=0, price=add.price, spot=add.spot,
+                              new_stop=add.new_stop,
+                              new_underlying_stop=add.new_underlying_stop,
+                              avg_entry=state.avg_entry, total_qty=state.qty,
+                              open_r=add.open_r,
+                              note=f"Level {add.level} at {add.open_r:+.2f}R: add refused "
+                                   f"({refused[0]}); stop moved to {add.new_stop:,.2f}")
+        if add.quantity:
+            await self._send_add(row, payload, add)
+
+        risk_before = max(0.0, (state.avg_entry - float(row["stop_loss"])) * sign * state.qty)
+        state = pyramid.apply(state, add)
+        risk_after = max(0.0, (state.avg_entry - add.new_stop) * sign * state.qty)
+        payload["pyramid"] = state.to_dict()
+        if row.get("instrument_type") in {"CE", "PE"} and add.new_underlying_stop:
+            payload["underlying_stop"] = add.new_underlying_stop
+        row = {**row, "quantity": state.qty, "entry": state.avg_entry,
+               "stop_loss": add.new_stop, "target": state.target,
+               "payload": json.dumps(payload, default=str)}
+        db.update_position(row["id"], quantity=state.qty, entry=state.avg_entry,
+                           stop_loss=add.new_stop, target=state.target,
+                           payload=row["payload"],
+                           notional=round(state.avg_entry * state.qty, 2),
+                           total_risk=round(risk_after, 2))
+        if self.risk is not None:
+            self.risk.register_add(notional if add.quantity else 0.0, risk_after - risk_before)
+        audit.record_add(self.cfg, row, level=add.level, quantity=add.quantity,
+                         price=add.price, new_stop=add.new_stop, avg_entry=state.avg_entry,
+                         total_qty=state.qty, open_r=add.open_r, note=add.note,
+                         refused=refused[0] if refused else "")
+        log.info("PYRAMID %s — %s", row["symbol"], add.note)
+        await bus.publish(Topic.POSITION_UPDATE, {
+            "event": "pyramid_add", "signal_id": row["id"], "symbol": row["symbol"],
+            "side": row["side"], "level": add.level, "quantity": add.quantity,
+            "price": add.price, "stop_loss": add.new_stop, "avg_entry": state.avg_entry,
+            "total_quantity": state.qty, "target": state.target, "note": add.note})
+        return row
+
+    async def _send_add(self, row: dict[str, Any], payload: dict[str, Any], add: Any) -> None:
+        """The add goes to the broker through the dispatcher's own gate (an
+        armed trading day; paper, or all three live switches). Alert-only
+        desks track the add on the record, as they do the entry."""
+        disp = self.dispatcher
+        if disp is None or not disp._live_allowed():
+            return
+        try:
+            from app.core.models import Side, TradeSignal
+            sig = TradeSignal.model_validate(payload)
+            side = Side.BUY if row["side"] == "BUY" else Side.SELL
+            order = await self.broker.place_order(
+                sig.instrument, side, int(add.quantity), float(add.price),
+                order_type="MARKET", product=self.cfg.get("execution.product", "MIS"),
+                stop_loss=add.new_stop, tag=f"pyramid-L{add.level}")
+            log.info("pyramid add order %s: %s", "placed" if order.ok else "FAILED",
+                     order.message or order.order_id)
+        except Exception as exc:                        # noqa: BLE001 - never breaks polling
+            log.warning("pyramid add order for %s failed: %s", row.get("symbol"), exc)
 
     @staticmethod
     def _infer_setup(row: dict[str, Any]) -> Any:

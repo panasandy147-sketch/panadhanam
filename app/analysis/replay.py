@@ -73,6 +73,7 @@ class WeeklyReplay:
 
         total_r = sum(t["r_multiple"] for t in all_trades)
         wins = len(winners)
+        ordered = sorted(all_trades, key=lambda t: t.get("entry_ts", ""))
 
         self.last_result = {
             "ts": datetime.now().isoformat(),
@@ -89,6 +90,9 @@ class WeeklyReplay:
                 "avg_r": round(total_r / len(all_trades), 3) if all_trades else 0.0,
                 "expectancy": "positive" if total_r > 0 else "negative",
             },
+            # The same trades intraday, plain vs the Standard Pyramid.
+            "compare": {"plain_intraday": self._book(ordered, "r_intraday", "outcome_intraday"),
+                        "pyramid": self._book(ordered, "r_pyramid", "outcome_pyramid")},
             "best_trades": winners[:10],
             "worst_trades": losers[:5],
             "by_symbol": sorted(per_symbol, key=lambda s: s["total_r"], reverse=True),
@@ -198,6 +202,21 @@ class WeeklyReplay:
                 "lot_size": meta.get("lot_size", 1),
             }
 
+        # Every trade again, intraday (out by the square-off), two ways on the
+        # same bars: plain (stop / target / square-off) and the Standard
+        # Pyramid (Base-50-25). Results in the BASE trade's R.
+        from app.agents import pyramid
+        for t in trades:
+            start = t.get("_i")
+            if start is None:
+                continue
+            session = self._session_bars(candles, start)
+            long = t["side"] == "BUY"
+            plain = pyramid.walk(session, long, t["entry"], t["stop"], self.cfg, False)
+            pyr = pyramid.walk(session, long, t["entry"], t["stop"], self.cfg, True)
+            t["r_intraday"], t["outcome_intraday"] = plain["r"], plain["outcome"]
+            t["r_pyramid"], t["outcome_pyramid"] = pyr["r"], pyr["outcome"]
+            t["pyramid_adds"] = pyr["adds"]
         for t in trades:
             t.pop("_i", None)
 
@@ -214,6 +233,49 @@ class WeeklyReplay:
                 "avg_r": round(total_r / len(trades), 3) if trades else 0.0,
             },
         }
+
+    def _session_bars(self, candles: list[Candle], entry_i: int) -> list[Candle]:
+        """The bars after the entry bar up to the square-off, same market day."""
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(str(self.cfg.get("system.timezone", "Asia/Kolkata")))
+        hh, _, mm = str(self.cfg.get("system.square_off_time", "15:15")).partition(":")
+        cutoff = int(hh) * 60 + int(mm or 0)
+
+        def local(c: Candle) -> datetime:
+            ts = c.ts if c.ts.tzinfo else c.ts.replace(tzinfo=ZoneInfo("UTC"))
+            return ts.astimezone(tz)
+
+        day = local(candles[entry_i]).date()
+        out = []
+        for c in candles[entry_i + 1:]:
+            at = local(c)
+            if at.date() != day or at.hour * 60 + at.minute >= cutoff:
+                break
+            out.append(c)
+        return out
+
+    @staticmethod
+    def _book(trades: list[dict[str, Any]], key: str, outcome: str) -> dict[str, Any]:
+        """Trades, win rate, expectancy and the worst peak-to-trough, in R."""
+        rs = [float(t[key]) for t in trades if key in t]
+        if not rs:
+            return {"trades": 0}
+        equity = peak = drawdown = 0.0
+        for r in rs:
+            equity += r
+            peak = max(peak, equity)
+            drawdown = max(drawdown, peak - equity)
+        wins = [r for r in rs if r > 0]
+        exits: dict[str, int] = {}
+        for t in trades:
+            if key in t:
+                exits[t[outcome]] = exits.get(t[outcome], 0) + 1
+        return {"trades": len(rs), "win_rate": round(len(wins) / len(rs) * 100, 1),
+                "total_r": round(sum(rs), 2), "expectancy_r": round(sum(rs) / len(rs), 3),
+                "avg_win_r": round(sum(wins) / len(wins), 2) if wins else 0.0,
+                "avg_loss_r": round(sum(r for r in rs if r <= 0)
+                                    / max(1, len(rs) - len(wins)), 2),
+                "max_drawdown_r": round(drawdown, 2), "exits": exits}
 
     def _provenance(self) -> dict[str, Any]:
         from app.data.feeds.stack import describe_data_source

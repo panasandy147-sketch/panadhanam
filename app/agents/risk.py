@@ -66,6 +66,9 @@ class RiskManager:
         # Set each cycle by the engine from the news blackout rules; while it
         # holds, no new entry is allowed anywhere.
         self.blackout_reason: str = ""
+        # Open P&L of each held position, by symbol — set by the outcome
+        # tracker every poll. The "no averaging down" mandate reads it.
+        self.position_pnl: dict[str, float] = {}
         self._day = clock.market_now(
             str(self.cfg.get("system.timezone", "Asia/Kolkata"))).date()
 
@@ -100,8 +103,16 @@ class RiskManager:
         from app.storage import db
 
         reasons: list[str] = []
+        held = [r for r in db.open_signals() if r["symbol"] == symbol]
+        # No averaging down: adding size to a position that is losing is
+        # refused outright, whatever the per-symbol setting says.
+        losing = self.position_pnl.get(symbol.upper())
+        if held and losing is not None and losing < 0:
+            cur = self.cfg.market.currency_symbol
+            reasons.append(f"No averaging down: {symbol} is held in a drawdown "
+                           f"({cur}{losing:,.2f} open) — size is never added to a loser")
         if bool(self.cfg.get("risk.one_position_per_symbol", True)):
-            if any(r["symbol"] == symbol for r in db.open_signals()):
+            if held:
                 reasons.append(f"Already holding {symbol} — one position per symbol")
         # The configured minutes are read each time, so a live config change
         # (or a test) takes effect without rebuilding the blacklist.
@@ -110,6 +121,36 @@ class RiskManager:
         if blocked:
             reasons.append(blocked)
         return reasons
+
+    def approve_add(self, symbol: str, open_pnl: float, add_notional: float,
+                    add_risk: float = 0.0) -> list[str]:
+        """Reasons a pyramid ADD to a held position is refused ([] = approved).
+
+        The mandate first: never add to a position in a drawdown. Then the
+        desk's own limits still hold — a halted desk, the entry cutoff and
+        the exposure ceiling apply to an add exactly as to a new trade.
+        """
+        self.roll_day_if_needed()
+        reasons: list[str] = []
+        cur = self.cfg.market.currency_symbol
+        if open_pnl < 0:
+            reasons.append(f"No averaging down: {symbol} is in a drawdown "
+                           f"({cur}{open_pnl:,.2f} open) — the add is refused")
+        if self.state.halted:
+            reasons.append(f"Desk halted: {self.state.halt_reason}")
+        if self._past_entry_cutoff():
+            reasons.append(f"Past the no-new-entry cutoff "
+                           f"({self.cfg.get('system.no_new_entry_after', '15:00')})")
+        room = self._max_exposure() - self.state.exposure
+        if add_notional > room:
+            reasons.append(f"Exposure cap: the add needs {cur}{add_notional:,.0f}, "
+                           f"{cur}{max(room, 0):,.0f} of room left")
+        return reasons
+
+    def register_add(self, add_notional: float, risk_change: float) -> None:
+        """Book a pyramid add: more exposure; the open risk follows the stop."""
+        self.state.exposure += add_notional
+        self.state.open_risk = max(0.0, self.state.open_risk + risk_change)
 
     @staticmethod
     def _last_exit(symbol: str) -> str | None:

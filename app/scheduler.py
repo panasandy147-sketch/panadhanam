@@ -52,6 +52,7 @@ class TradingEngine:
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
         self.outcomes.trading_day = self.trading_day
+        self.outcomes.dispatcher = self.desk.dispatcher
 
         self.running = False
         self.paused = False
@@ -138,6 +139,7 @@ class TradingEngine:
         self.trading_day = TradingDay(self, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
         self.outcomes.trading_day = self.trading_day
+        self.outcomes.dispatcher = self.desk.dispatcher
         self._fundamentals.clear()
         self._premarket_done_on = None
 

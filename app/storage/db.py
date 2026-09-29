@@ -284,6 +284,18 @@ def update_outcome(signal_id: str, exit_price: float, pnl: float,
         """, (exit_price, datetime.now().isoformat(), pnl, r_multiple, status, signal_id))
 
 
+def update_position(signal_id: str, *, quantity: int, entry: float, stop_loss: float,
+                    target: float, payload: str, notional: float, total_risk: float) -> None:
+    """A pyramid add: the held position's size, blended entry, the stop for the
+    whole position, the target, and the pyramid state in the payload."""
+    with transaction() as conn:
+        conn.execute("""
+            UPDATE signals SET quantity=?, entry=?, stop_loss=?, target=?, payload=?,
+                   notional=?, total_risk=?
+            WHERE id=?
+        """, (quantity, entry, stop_loss, target, payload, notional, total_risk, signal_id))
+
+
 def get_signal(signal_id: str) -> dict[str, Any] | None:
     row = get_conn().execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
     return dict(row) if row else None
