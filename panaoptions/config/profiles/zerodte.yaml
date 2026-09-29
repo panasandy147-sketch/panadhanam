@@ -68,7 +68,7 @@ strategies:
     from: "09:45"
     to:   "15:00"
   poc_bounce:
-    enabled: true
+    enabled: false              # off everywhere: see settings.yaml
     from: "10:00"
     to:   "15:00"
   candlestick_at_level:

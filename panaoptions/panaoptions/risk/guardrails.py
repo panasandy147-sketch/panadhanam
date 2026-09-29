@@ -178,6 +178,11 @@ class RiskManager:
                 f"Daily trade limit: {self.state.trades_taken} of {max_daily} "
                 f"taken today. No more entries until tomorrow — over-trading is "
                 f"how a good morning is given back.")
+        from panaoptions import ranking
+        held_back = ranking.slot_refusal(self.cfg, setup.strategy, self.state.trades_taken,
+                                         ranking.live_edge(self.cfg))
+        if held_back:
+            return self._reject(f"Reserved slots: {setup.strategy.value} — {held_back}.")
 
         entry = contract.mid
         if entry <= 0:

@@ -245,6 +245,7 @@ def test_the_value_area_strategy_fires_in_the_pipeline(cfg):
     signal = alpha.from_setup(setup)                          # a valid five-key signal
     assert signal is not None and alpha.validate(signal.to_dict()) == []
 
+    cfg.data["strategies"]["poc_bounce"]["enabled"] = True     # off by default since 29 Sept
     _, attempts = evaluate_all("SPY", tape, SessionLevels(), cfg)
     assert {a.strategy for a in attempts} >= {SetupType.VA_REJECTION,
                                               SetupType.LVN_ACCELERATION,

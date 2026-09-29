@@ -626,6 +626,7 @@ class OptionsDesk:
         # Said once per cycle, not once per symbol: the window is the same for
         # all of them, and five copies of it would bury everything else.
         window_reported = False
+        judged = []
         for symbol, tape in zip(candidates, tapes, strict=False):
             if isinstance(tape, Exception):
                 log.warning("could not read %s this cycle: %s", symbol, tape)
@@ -635,7 +636,16 @@ class OptionsDesk:
             candles, session_levels = tape
             if not candles:
                 continue
+            judged.append((symbol, candles, session_levels, *strategies.evaluate_all(
+                symbol, candles, session_levels, self.cfg)))
+        # The best backtested edge first: when two symbols fire in the same
+        # cycle and there is room for one, the better strategy gets it.
+        from panaoptions import ranking
+        edge = ranking.live_edge(self.cfg)
+        judged.sort(key=lambda j: -ranking.score(self.cfg, j[3].strategy, edge)
+                    if j[3] is not None else float("inf"))
 
+        for symbol, candles, session_levels, setup, attempts in judged:
             # Room can run out part-way through: three slots and four setups
             # means the fourth is refused, and that refusal belongs in the log
             # rather than being silently skipped.
@@ -651,8 +661,6 @@ class OptionsDesk:
                 self.activity.add("hunt.skip", f"{symbol} — {busy}", ts=now)
                 continue
 
-            setup, attempts = strategies.evaluate_all(
-                symbol, candles, session_levels, self.cfg)
             signal_id = f"SIG-{now:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4].upper()}"
 
             # No attempts at all means no strategy was even asked — every one

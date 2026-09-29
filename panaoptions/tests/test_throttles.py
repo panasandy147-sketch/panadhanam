@@ -4,7 +4,7 @@ validation that has to pass before the rule book is trusted."""
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -196,7 +196,8 @@ def test_a_value_area_rejection_needs_its_own_target_at_3r(shipped):
 # --------------------------------------------------------------------------- #
 def _fill(hh, mm, pnl, symbol="SPY", out_hh=None, strategy="ORB + VWAP", day=23):
     t = datetime(2026, 9, day, hh, mm, tzinfo=ET)
-    end = datetime(2026, 9, day, out_hh or hh, mm + 30 if not out_hh else mm, tzinfo=ET)
+    end = (datetime(2026, 9, day, out_hh, mm, tzinfo=ET) if out_hh
+           else t + timedelta(minutes=30))
     return Result(symbol=symbol, ts=t.isoformat(timespec="minutes"), direction="LONG",
                   tier="primary", contract=f"{symbol} C", cost=100.0, pnl=pnl, mid=1.00,
                   delta=0.45, lot=100, spot=500.0, stop=499.0, strategy=strategy,
@@ -260,3 +261,81 @@ def test_the_start_check_shows_the_last_verdict(shipped):
         {"verdict": "PASS", "reasons": [], "at": "2026-09-29T10:00:00"}), encoding="utf-8")
     assert finding() is None
     assert validate.latest()["verdict"] == "PASS"
+
+
+# --------------------------------------------------------------------------- #
+# Ranking the day's slots; POC off; walk-forward
+# --------------------------------------------------------------------------- #
+def test_poc_bounce_is_off_on_every_desk():
+    from panaoptions.config import Config
+    for cfg in (Config(), Config(profile="zerodte"), Config(profile="scalp")):
+        assert cfg.get("strategies.poc_bounce.enabled") is False
+    from panaoptions.engine.strategies import ALL
+    from panaoptions.models import SetupType as ST
+    cfg = Config()
+    enabled = {cls(cfg).name for cls in ALL if cls(cfg).enabled}
+    assert ST.POC_BOUNCE not in enabled
+
+
+def test_without_a_validation_the_priority_list_decides(shipped):
+    from panaoptions import ranking
+    assert ranking.key(SetupType.ORB_VWAP) == "orb_vwap" == ranking.key("ORB + VWAP")
+    assert ranking.preferred(shipped, SetupType.PD_LIQUIDITY_SWEEP)
+    assert ranking.preferred(shipped, SetupType.ORB_VWAP)
+    assert not ranking.preferred(shipped, SetupType.VWAP_EMA_PULLBACK)
+    # 4 a day, 2 reserved: a non-preferred strategy may take the first two only.
+    assert ranking.slot_refusal(shipped, SetupType.VWAP_EMA_PULLBACK, 1) == ""
+    assert "kept for the strategies" in ranking.slot_refusal(
+        shipped, SetupType.VWAP_EMA_PULLBACK, 2)
+    assert ranking.slot_refusal(shipped, SetupType.ORB_VWAP, 3) == ""
+
+
+def test_a_validated_edge_overrides_the_list(shipped):
+    from panaoptions import ranking
+    edge = {"vwap_ema_pullback": 0.6, "orb_vwap": -0.2}
+    assert ranking.preferred(shipped, SetupType.VWAP_EMA_PULLBACK, edge)
+    assert not ranking.preferred(shipped, SetupType.ORB_VWAP, edge)
+    assert (ranking.score(shipped, SetupType.VWAP_EMA_PULLBACK, edge)
+            > ranking.score(shipped, SetupType.ORB_VWAP, edge))
+    # Too few fills to count as known.
+    raw = {"orb_vwap": {"fills": 3, "expectancy_r": 2.0},
+           "va_rejection": {"fills": 9, "expectancy_r": 0.7}}
+    assert ranking.edge_from(raw, shipped) == {"va_rejection": 0.7}
+
+
+def test_the_desk_refuses_a_weak_strategy_the_reserved_slots(shipped):
+    risk = RiskManager(shipped)
+    risk.roll_day("2026-09-23")
+    risk.state.trades_taken = 2
+    weak = _setup(strategy=SetupType.VWAP_EMA_PULLBACK)
+    signal, why = risk.size(weak, _contract(), "S", NOW)
+    assert signal is None and "Reserved slots" in why
+    signal, why = risk.size(_setup(strategy=SetupType.ORB_VWAP), _contract(), "S", NOW)
+    assert signal is not None, why
+
+
+def test_the_simulation_keeps_the_last_slots_for_the_better_strategies(shipped):
+    from panaoptions import validate
+    shipped.data["risk"]["slippage_per_contract"] = 0.0
+    pull = "VWAP / 9-EMA Pullback"
+    fills = [_fill(10, 0, 45, "SPY", strategy=pull), _fill(10, 40, 45, "QQQ", strategy=pull),
+             _fill(11, 20, 45, "AAPL", strategy=pull),          # 3rd weak one: held back
+             _fill(12, 0, 90, "NVDA"), _fill(12, 50, 90, "AMD")]  # ORB: the reserved slots
+    taken, skipped, _, _ = validate.simulate(fills, shipped)
+    assert [t.symbol for t in taken] == ["SPY", "QQQ", "NVDA", "AMD"]
+    assert skipped["reserved slots (kept for the better strategies)"] == 1
+
+
+def test_the_walk_forward_ranks_on_the_first_half_and_judges_the_second(shipped):
+    from panaoptions import validate
+    shipped.data["risk"]["slippage_per_contract"] = 0.0
+    pull = "VWAP / 9-EMA Pullback"
+    early = [_fill(10, 0, 90, "SPY", strategy=pull, day=d) for d in (1, 2, 3, 4, 5, 6)]
+    late = [_fill(10, 0, -45, "SPY", strategy=pull, day=d) for d in (7, 8, 9, 10, 11, 12)]
+    v = validate.judge_results(early + late, shipped, ["SPY"], 12)
+    assert "walk-forward" in v.period and "judged on 2026-09-07" in v.period
+    # Ranked as a winner on days 1-6, judged on days 7-12 where it lost.
+    assert v.trades == 6 and v.expectancy_r == -1.0
+    # The saved edge covers the whole period (what the live desk ranks by).
+    assert v.edge["vwap_ema_pullback"]["fills"] == 12
+    assert "Strategy edge" in validate.markdown(v)

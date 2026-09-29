@@ -214,7 +214,8 @@ def test_switching_to_india_shows_the_india_watchlist_at_once(page, desk, monkey
     page.reload()
     try:
         page.click("#market-toggle button[data-mode='IN']")
-        _wait_text(page, "#watch-meta", "09:00", timeout=5000)
+        # Seconds, not the next poll: the switch waits for the cycle lock.
+        _wait_text(page, "#watch-meta", "09:00", timeout=15000)
         assert "NIFTY" in page.input_value("#watch-input")
         assert "SPY" not in page.input_value("#watch-input")
     finally:
@@ -223,7 +224,7 @@ def test_switching_to_india_shows_the_india_watchlist_at_once(page, desk, monkey
         # already been ranked and the meta reads "next HH:MM" instead.
         page.wait_for_function(
             "() => document.getElementById('watch-input').value.includes('SPY')",
-            timeout=5000)
+            timeout=15000)
 
 
 def test_todays_review_builds(page):

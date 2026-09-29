@@ -950,6 +950,17 @@ be $80, which buys no at-the-money SPY contract, so the desk would never trade.
 A restart the same day restores the day's loss, its trade count and the
 lockout. The next day starts clean.
 
+**The best 4, not the first 4.** Taking whatever fires first fills the day
+with the earliest setups. So the last `risk.reserved_slots` (2) of the day's
+4 are kept for strategies with a positive backtested edge. The edge is each
+strategy's expectancy over every fill in the last `run.py --backtest`. Before
+any validation exists, `ranking.priority` decides: the sweep and the ORB.
+When several symbols fire in the same cycle, the best edge is taken first.
+
+**POC Magnet / Bounce is off.** It was the worst strategy in every run on
+29 Sept (US −1.08R a trade at a 10% win rate, India −0.32R). Set
+`strategies.poc_bounce.enabled: true` and re-validate to test it again.
+
 **Verified 1:3.** The Previous Day Liquidity Sweep and Value Area Rejection
 must reach 1:3 with their own target: VWAP-or-3R for the sweep, the POC for
 the rejection. A projected 3R past a nearer POC is refused
@@ -957,7 +968,7 @@ the rejection. A projected 3R past a nearer POC is refused
 
 ### Validate the rule book on history
 
-    ../.venv/Scripts/python.exe run.py --backtest                       # the watchlist, last 10 sessions
+    ../.venv/Scripts/python.exe run.py --backtest                       # the watchlist, last 20 sessions
     ../.venv/Scripts/python.exe run.py --backtest --market IN --symbols NIFTY,BANKNIFTY,HDFCBANK,INFY
     ../.venv/Scripts/python.exe run.py --backtest --days 20
 
@@ -969,6 +980,10 @@ the 3% lockout. It reports:
 - **Max drawdown:** % of the account's peak.
 - A per-strategy table.
 - The setups the rules did not take, and why.
+
+**Walk-forward.** The strategy ranking is learned on the first half of the
+sessions, and the verdict is judged on the second half only. A rule book is
+never graded on the days it was tuned on.
 
 **PASS** needs expectancy ≥ **0.5R** and max drawdown ≤ **5%** over at least
 20 trades. Fewer than 20 trades is **INCONCLUSIVE**

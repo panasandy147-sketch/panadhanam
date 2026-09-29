@@ -82,6 +82,11 @@ class Verdict:
     skipped: dict[str, int] = field(default_factory=dict)
     locked_days: list[str] = field(default_factory=list)
     trades_list: list[dict[str, Any]] = field(default_factory=list)
+    # Each strategy's expectancy over EVERY fill of the whole period (before
+    # the throttles): what the live desk ranks its daily slots by.
+    edge: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The sessions the verdict is judged on (walk-forward: the second half).
+    period: str = ""
     at: str = ""
 
 
@@ -92,9 +97,32 @@ def _when(text: str) -> datetime | None:
         return None
 
 
-def simulate(results: list[Any], cfg: Any) -> tuple[list[Taken], Counter, set[str], float]:
+def edge_of(results: list[Any], cfg: Any) -> dict[str, dict[str, Any]]:
+    """Each strategy's expectancy over every fill, one contract each: R = the
+    fill's P&L / the loss planned at its stop. Before any throttle, so it
+    measures the strategy rather than which setups happened to fire first."""
+    from panaoptions import ranking
+    from panaoptions.risk.guardrails import planned_loss
+    rows: dict[str, list[float]] = defaultdict(list)
+    for r in results:
+        if not (r.filled and r.pnl is not None and r.mid > 0):
+            continue
+        per = planned_loss(cfg, r.mid, r.delta, int(r.lot or cfg.multiplier), r.spot,
+                           r.stop, r.tier == "debit_spread")
+        if per > 0:
+            rows[ranking.key(r.strategy)].append(r.pnl / per)
+    return {k: {"fills": len(v), "expectancy_r": round(sum(v) / len(v), 2),
+                "win_rate": round(sum(1 for x in v if x > 0) / len(v) * 100, 1)}
+            for k, v in sorted(rows.items(), key=lambda kv: -sum(kv[1]) / len(kv[1]))}
+
+
+def simulate(results: list[Any], cfg: Any, edge: dict[str, float] | None = None
+             ) -> tuple[list[Taken], Counter, set[str], float]:
     """The fills, in time order, through sizing, throttles and the breaker.
-    Returns (trades taken, skips by reason, locked-out days, max drawdown %)."""
+    `edge` ranks the strategies for the reserved slots and for fills at the
+    same moment (ranking.py). Returns (trades taken, skips by reason,
+    locked-out days, max drawdown %)."""
+    from panaoptions import ranking
     from panaoptions.risk.gatekeeper import cap_pct
     from panaoptions.risk.guardrails import planned_loss
 
@@ -113,7 +141,7 @@ def simulate(results: list[Any], cfg: Any) -> tuple[list[Taken], Counter, set[st
 
     fills = [r for r in results if r.filled and r.pnl is not None and r.mid > 0
              and _when(r.ts) and _when(r.exit_ts)]
-    fills.sort(key=lambda r: (_when(r.ts), r.symbol))
+    fills.sort(key=lambda r: (_when(r.ts), -ranking.score(cfg, r.strategy, edge), r.symbol))
 
     taken: list[Taken] = []
     skipped: Counter = Counter()
@@ -146,6 +174,9 @@ def simulate(results: list[Any], cfg: Any) -> tuple[list[Taken], Counter, set[st
             continue
         if max_daily and count[day] >= max_daily:
             skipped[f"daily trade limit ({max_daily})"] += 1
+            continue
+        if ranking.slot_refusal(cfg, r.strategy, count[day], edge):
+            skipped["reserved slots (kept for the better strategies)"] += 1
             continue
         if len(open_pos) >= max_open:
             skipped[f"max open trades ({max_open})"] += 1
@@ -263,12 +294,37 @@ def judge(taken: list[Taken], skipped: Counter, locked: set[str], max_dd: float,
 
 
 async def run(symbols: list[str], days: int, feed: Any, cfg: Any,
-              now: datetime) -> Verdict:
+              now: datetime, walk_forward: bool | None = None) -> Verdict:
+    """Scan, replay and judge. Walk-forward (the default): the strategy
+    ranking is learned on the first half of the sessions and the verdict is
+    judged on the second half only — never on the days it was tuned on."""
     from panaoptions import backtest_spreads as bt
     items = await bt.scan_history(symbols, days, feed, cfg, now)
     results = await bt.replay(items, feed, cfg)
-    taken, skipped, locked, max_dd = simulate(results, cfg)
-    return judge(taken, skipped, locked, max_dd, cfg, symbols, days)
+    return judge_results(results, cfg, symbols, days, walk_forward)
+
+
+def judge_results(results: list[Any], cfg: Any, symbols: list[str], days: int,
+                  walk_forward: bool | None = None) -> Verdict:
+    from panaoptions import ranking
+    if walk_forward is None:
+        walk_forward = bool(cfg.get("backtest.validation.walk_forward", True))
+    dates = sorted({r.ts[:10] for r in results if r.ts})
+    period = f"{dates[0]} → {dates[-1]}" if dates else ""
+    tested = results
+    edge = ranking.edge_from(edge_of(results, cfg), cfg)
+    if walk_forward and len(dates) >= 4:
+        cut = dates[len(dates) // 2]
+        learn = [r for r in results if r.ts[:10] < cut]
+        tested = [r for r in results if r.ts[:10] >= cut]
+        edge = ranking.edge_from(edge_of(learn, cfg), cfg)
+        period = (f"judged on {cut} → {dates[-1]} ({len(dates) - len(dates) // 2} sessions), "
+                  f"ranked on {dates[0]} → {dates[len(dates) // 2 - 1]} (walk-forward)")
+    taken, skipped, locked, max_dd = simulate(tested, cfg, edge)
+    verdict = judge(taken, skipped, locked, max_dd, cfg, symbols, days)
+    verdict.edge = edge_of(results, cfg)
+    verdict.period = period
+    return verdict
 
 
 def markdown(v: Verdict, currency: str = "$") -> str:
@@ -279,6 +335,7 @@ def markdown(v: Verdict, currency: str = "$") -> str:
         f"{', '.join(v.symbols)} · last {v.days} session(s) · {v.market} · capital "
         f"{currency}{v.capital:,.0f}",
         "",
+        *([f"_{v.period}_", ""] if v.period else []),
         *[f"- {r}" for r in v.reasons],
         "",
         "| Trades | Win rate | Expectancy | Avg win | Avg loss | Profit factor | P&L | "
@@ -300,6 +357,11 @@ def markdown(v: Verdict, currency: str = "$") -> str:
         mark = " ✓" if s["expectancy_r"] >= th["min_expectancy_r"] else ""
         lines.append(f"| {name} | {s['trades']} | {s['win_rate']:.1f}% | "
                      f"{s['expectancy_r']:+.2f}R{mark} | {currency}{s['pnl']:+,.2f} |")
+    if v.edge:
+        lines += ["", "## Strategy edge — every fill, before the throttles (the live ranking)",
+                  "", "| Strategy | Fills | Win rate | Expectancy |", "|---|---|---|---|"]
+        lines += [f"| {k} | {e['fills']} | {e['win_rate']:.1f}% | {e['expectancy_r']:+.2f}R |"
+                  for k, e in v.edge.items()]
     lines += ["", "## By day", "", "| Day | Trades | P&L | |", "|---|---|---|---|"]
     for day, d in v.by_day.items():
         lines.append(f"| {day} | {d['trades']} | {currency}{d['pnl']:+,.2f} | "

@@ -427,7 +427,10 @@ strategies:
     min_rvol: 1.5
     shelf_bars: 3
   poc_bounce:              # ≥ 1 ATR away, back to the POC, rejected there
-    enabled: true
+    # OFF: the worst strategy in every backtest run — US -1.08R a trade at a
+    # 10% win rate, India -0.32R (validation, 29 Sept 2026). Re-enable with
+    # true and re-run `python run.py --backtest` to see whether it earns back.
+    enabled: false
     from: "10:00"
     to:   "15:45"
     away_atr: 1.0
@@ -465,6 +468,10 @@ risk:
   # with no throttle, and the extra trades were the losing ones.
   max_open_trades: 2
   max_daily_trades: 4
+  # Of those four, the last two are kept for the strategies with the best
+  # backtested edge (ranking, below): first-come-first-served handed the day
+  # to whatever fired earliest — mostly the weaker morning setups.
+  reserved_slots: 2
   # The most one trade may LOSE at its first stop, as a share of capital:
   # 2% = $80 on $4,000. max_capital_deployed_pct (below) still caps the
   # PREMIUM; this caps the loss, and whichever is tighter sizes the trade.
@@ -557,6 +564,19 @@ risk:
   # Simulated fill cost per contract, per side.
   slippage_per_contract: 0.02
 
+ranking:
+  # How the day's scarce slots are ranked: each strategy's expectancy (R per
+  # fill, before the throttles) from the last `run.py --backtest` on this
+  # market, needing min_fills fills to count. PREFERRED = an edge above
+  # min_edge_r. Before any validation exists, this priority order decides and
+  # the first preferred_top are preferred (from the 29 Sept backtests: the
+  # opening-range breakout and the previous-day sweep earned in both runs).
+  min_fills: 5
+  min_edge_r: 0.0
+  preferred_top: 2
+  priority: ["pd_liquidity_sweep", "orb_vwap", "candlestick_at_level", "liquidity_sweep",
+             "vwap_ema_pullback", "va_rejection", "lvn_acceleration", "poc_bounce"]
+
 backtest:
   # `python run.py --backtest` — the rule book must earn its keep on history
   # before it trades: expectancy per trade (P&L / the loss planned at the stop)
@@ -566,7 +586,11 @@ backtest:
     min_expectancy_r: 0.5
     max_drawdown_pct: 5.0
     min_trades: 20
-    days: 10
+    # 20 sessions, walked forward: the strategy ranking is learned on the
+    # first half and the verdict is judged on the second half only, so the
+    # rule book is never graded on the days it was tuned on.
+    days: 20
+    walk_forward: true
 
 journal:
   # Grade every closed trade the moment it closes, and write a card to

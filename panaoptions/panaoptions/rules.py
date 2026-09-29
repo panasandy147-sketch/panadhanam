@@ -506,6 +506,14 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "risk.max_open_trades"),
             _rule("Trades a day, at most (no over-trading)",
                   g("risk.max_daily_trades") or "no limit", "risk.max_daily_trades"),
+            _rule("Of those, the last ones are kept for the strategies with the best "
+                  "backtested edge (the last `run.py --backtest`, else the priority "
+                  "list: " + ", ".join(str(s).replace("_", " ") for s in
+                                       (g("ranking.priority") or [])[:int(
+                                           g("ranking.preferred_top", 2))]) + "); "
+                  "setups firing together are taken best edge first",
+                  g("risk.reserved_slots") or "none",
+                  "risk.reserved_slots / ranking"),
             _rule("Circuit breaker: once the day's loss, closed plus open, "
                   "reaches this, pending signals are cancelled, everything is sold, "
                   "orders are refused and the desk is LOCKED OUT for the rest of "
