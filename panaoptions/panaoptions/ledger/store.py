@@ -92,6 +92,17 @@ CREATE TABLE IF NOT EXISTS fno_daily (
     PRIMARY KEY (symbol, day)
 );
 
+-- Every strategy check the desk makes, tallied per day: fired or not, and
+-- the reason when not (numbers stripped, so the same rule groups together).
+CREATE TABLE IF NOT EXISTS strategy_checks (
+    day TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    outcome TEXT NOT NULL,          -- fired / not_fired
+    reason TEXT NOT NULL,
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, strategy, outcome, reason)
+);
+
 CREATE TABLE IF NOT EXISTS signals_seen (
     id TEXT PRIMARY KEY,
     ts TEXT,
@@ -223,6 +234,38 @@ def load_session(date_iso: str) -> dict[str, Any] | None:
     row = get_conn().execute("SELECT * FROM sessions WHERE session_date = ?",
                              (date_iso,)).fetchone()
     return dict(row) if row else None
+
+
+def _generic(reason: str) -> str:
+    """'volume 1.2x below 1.5x at 101.35' -> 'volume #x below #x at #': the
+    same rule groups together whatever the numbers were that cycle."""
+    import re
+    text = re.sub(r"[-+]?\$?₹?\d[\d,]*(\.\d+)?", "#", str(reason or "no setup"))
+    return re.sub(r"\s+", " ", text).strip()[:160]
+
+
+def tally_checks(day: str, attempts: list[Any]) -> None:
+    """Count one cycle's strategy checks for one symbol."""
+    rows: dict[tuple[str, str, str], int] = {}
+    for a in attempts:
+        fired = bool(getattr(a, "triggered", False))
+        key = (a.strategy.value, "fired" if fired else "not_fired",
+               "" if fired else _generic((a.blockers or ["no setup"])[0]))
+        rows[key] = rows.get(key, 0) + 1
+    if not rows:
+        return
+    conn = get_conn()
+    conn.executemany(
+        "INSERT INTO strategy_checks (day, strategy, outcome, reason, n) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(day, strategy, outcome, reason) DO UPDATE SET n = n + excluded.n",
+        [(day, *k, n) for k, n in rows.items()])
+    conn.commit()
+
+
+def checks(day: str) -> list[dict[str, Any]]:
+    return [dict(r) for r in get_conn().execute(
+        "SELECT strategy, outcome, reason, n FROM strategy_checks WHERE day = ? "
+        "ORDER BY n DESC", (day,)).fetchall()]
 
 
 def save_lockout(date_iso: str, reason: str, at: datetime) -> None:

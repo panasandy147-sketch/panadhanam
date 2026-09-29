@@ -532,7 +532,19 @@ profile in force is printed by `--check-config` and shown on the dashboard.
 
 ### If the desk took nothing today
 
-Work down the gates in order; each one is visible somewhere:
+Start with one command. It covers both markets, or one with `--market US|IN`:
+
+    ../.venv/Scripts/python.exe run.py --why
+
+For each market it prints two things:
+- **Every strategy's day:** how many times it was checked (one symbol, one
+  cycle), how often it fired, and its two most common reasons for not firing,
+  for example "no #m close beyond the opening range". Strategies that are
+  switched off, or whose window hasn't opened yet, are named as such.
+- **The setups that did fire** and the rule that refused each one: F&O
+  confluence, reward:risk, the contract ladder, the risk limits.
+
+Then work down the gates in order; each one is visible somewhere:
 
 0. **The clock.** Every strategy skips **09:30–09:45**, where spreads are
    widest and the first prints are noise, so nothing can trade before 09:45

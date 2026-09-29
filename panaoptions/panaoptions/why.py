@@ -40,6 +40,10 @@ def report(cfg: Any, budget: float) -> dict[str, Any]:
     taken = [r for r in fired if r[3]]
     refused = [r for r in fired if not r[3]]
     return {
+        "market": getattr(cfg, "market_name", "") or getattr(cfg, "market", ""),
+        "currency": getattr(cfg, "currency", "$"),
+        "day": today,
+        "strategies": strategy_table(cfg, today),
         "version": code_version(),
         "capital": cfg.capital,
         "budget": round(budget, 2),
@@ -53,6 +57,34 @@ def report(cfg: Any, budget: float) -> dict[str, Any]:
         "latest": [{"time": str(r[0])[11:16], "symbol": r[1], "direction": r[2],
                     "reason": r[4]} for r in refused[-6:]][::-1],
     }
+
+
+def strategy_table(cfg: Any, day: str) -> list[dict[str, Any]]:
+    """Each strategy today: how often it was checked, how often it fired, and
+    its most common reasons for NOT firing — or why it was never asked."""
+    from panaoptions.engine.strategies import ALL
+    from panaoptions.ledger import store
+    try:
+        rows = store.checks(day)
+    except Exception:                                   # noqa: BLE001
+        rows = []
+    out = []
+    for cls in ALL:
+        s = cls(cfg)
+        name = s.name.value
+        mine = [r for r in rows if r["strategy"] == name]
+        checked = sum(r["n"] for r in mine)
+        fired = sum(r["n"] for r in mine if r["outcome"] == "fired")
+        misses = sorted(((r["reason"], r["n"]) for r in mine if r["outcome"] == "not_fired"),
+                        key=lambda x: -x[1])
+        window = (f"{cfg.get(f'strategies.{s.key}.from', '?')}–"
+                  f"{cfg.get(f'strategies.{s.key}.to', '?')}")
+        note = ("switched off" if not s.enabled
+                else f"never asked yet — its window is {window}" if not checked else "")
+        out.append({"strategy": name, "enabled": s.enabled, "window": window,
+                    "checked": checked, "fired": fired, "note": note,
+                    "not_fired": [{"reason": r, "count": n} for r, n in misses[:2]]})
+    return out
 
 
 def _fired(row) -> bool:
@@ -73,16 +105,24 @@ def _fired(row) -> bool:
 
 
 def render(r: dict[str, Any]) -> str:
+    cur = r.get("currency") or "$"
     lines = [
         "",
+        f"  ===== {r.get('market', '')} — {r.get('day', '')} =====",
         f"  Code version      {r['version']}   (the desk must be RESTARTED after a git pull)",
-        f"  Capital           ${r['capital']:,.0f}",
-        f"  Budget per trade  ${r['budget']:,.0f}",
+        f"  Capital           {cur}{r['capital']:,.0f}",
+        f"  Budget per trade  {cur}{r['budget']:,.0f}",
         f"  Data provider     {r['provider']}",
     ]
+    lines += _strategy_lines(r.get("strategies") or [])
+    looked = sum(t["checked"] for t in r.get("strategies") or []) or r["strategies_looked"]
+    if not r["setups_fired"] and not looked:
+        lines += ["", "  The desk has not hunted yet today — before the first strategy's "
+                      "window opens, or the desk was not running."]
+        return "\n".join(lines) + "\n"
     if not r["setups_fired"]:
         lines += ["", "  No setup has fired today — every strategy looked and passed "
-                      f"({r['strategies_looked']} checks). Nothing reached the contract step."]
+                      f"({looked} checks). Nothing reached the contract step."]
         return "\n".join(lines) + "\n"
     lines += ["", f"  Setups fired today {r['setups_fired']}   bought {r['bought']}   "
                   f"not bought {r['not_bought']}"]
@@ -90,3 +130,18 @@ def render(r: dict[str, Any]) -> str:
         lines += ["", "  Why not, most common first:"]
         lines += [f"    {x['count']:>3}x  {x['reason']}" for x in r["reasons"]]
     return "\n".join(lines) + "\n"
+
+
+def _strategy_lines(table: list[dict[str, Any]]) -> list[str]:
+    if not table:
+        return []
+    lines = ["", "  By strategy (every check today; a check = one symbol, one cycle):"]
+    for t in table:
+        head = f"    {t['strategy']:<28s}"
+        if t["note"]:
+            lines.append(f"{head} {t['note']}")
+            continue
+        lines.append(f"{head} checked {t['checked']:>5}   fired {t['fired']:>4}")
+        for m in t["not_fired"]:
+            lines.append(f"        not fired {m['count']:>4}x  {m['reason']}")
+    return lines

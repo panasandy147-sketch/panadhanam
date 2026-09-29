@@ -346,13 +346,19 @@ def _reflect() -> int:
     return 0
 
 
-def _why() -> int:
-    """Why today's setups were, or were not, bought. See panaoptions/why.py."""
-    from panaoptions import why
+def _why(market: str | None = None) -> int:
+    """Why today's setups were, or were not, bought — for both markets, or the
+    one asked for with --market. See panaoptions/why.py."""
+    from panaoptions import markets, why
     from panaoptions.risk.guardrails import RiskManager
 
-    cfg = get_config()
-    print(why.render(why.report(cfg, RiskManager(cfg).budget_room())))
+    home = get_config().market
+    try:
+        for code in ([market.upper()] if market else ["US", "IN"]):
+            cfg = _backtest_cfg(code, "Why")
+            print(why.render(why.report(cfg, RiskManager(cfg).budget_room())))
+    finally:
+        markets.activate(home)
     return 0
 
 
@@ -1041,7 +1047,7 @@ def main() -> None:
     if args.reflect:
         raise SystemExit(_reflect())
     if args.why:
-        raise SystemExit(_why())
+        raise SystemExit(_why(args.market))
     if args.ensure_capital:
         raise SystemExit(_ensure_capital())
     if args.suggest_fix:

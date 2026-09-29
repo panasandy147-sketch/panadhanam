@@ -638,6 +638,12 @@ class OptionsDesk:
                 continue
             judged.append((symbol, candles, session_levels, *strategies.evaluate_all(
                 symbol, candles, session_levels, self.cfg)))
+            # Every strategy's check, tallied for `run.py --why`: which ones
+            # looked, how often they fired, and why not when they did not.
+            try:
+                store.tally_checks(now.date().isoformat(), judged[-1][4])
+            except Exception as exc:                    # noqa: BLE001
+                log.debug("could not tally the strategy checks: %s", exc)
         # The best backtested edge first: when two symbols fire in the same
         # cycle and there is room for one, the better strategy gets it.
         from panaoptions import ranking
