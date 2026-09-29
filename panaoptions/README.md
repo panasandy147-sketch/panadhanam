@@ -1076,6 +1076,31 @@ modelled wider. Historical open interest isn't available free, so the
 backtest judges the price rule and says so. Treat it as a comparison of the
 rule books, not a fill report.
 
+## How it exits: the R-multiple plan (the default)
+
+`risk.exit_style: r_multiple` judges the exit on the underlying, in units of
+the trade's own risk. 1R is the distance from the entry to the stop.
+
+1. **The stop.** The strategy's invalidation level, with the 45% premium
+   backstop behind it.
+2. **+1.5R** (`scale_out_r`). Sell half, and move the stop to breakeven on
+   the underlying. One contract can't be halved, so then only the stop moves.
+3. **Trail the rest 1R** (`runner_trail_r`) behind the best level the
+   underlying has reached. Anything left goes at the 15:45 square-off.
+
+Why: the backtests showed wins averaging about 1.2R against 3R targets,
+because most trades were squared off before the target. On the same 20
+sessions (walk-forward, same fills):
+
+| | Stop / 3R target / 15:45 | R plan | R plan, VA Rejection off |
+|---|---|---|---|
+| India expectancy | −0.07R | **+0.23R** | +0.23R |
+| India P&L | +₹7,090 | **+₹30,883 (+8.8%)** | +₹30,883 |
+| US expectancy | −0.23R | −0.30R | **−0.11R** |
+| US P&L | −$138 | −$88 | **+$71** |
+
+The plan is set back to the premium targets below with `exit_style: auto`.
+
 ## One contract cannot be halved
 
 `risk.exit_style: auto` notices when a position is a single contract, where

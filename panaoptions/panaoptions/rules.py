@@ -546,6 +546,18 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     else:
         exits.append(_rule("Stop: the option falls by",
                            _pct(g("risk.stop_loss_pct", 20.0)), "risk.stop_loss_pct"))
+    if exit_style == "r_multiple":
+        exits.append(_rule(
+            "Scale out at this multiple of the trade's risk, measured on the "
+            "UNDERLYING: sell half and move the stop to breakeven (one contract "
+            "cannot be halved — then only the stop moves)",
+            f"+{g('risk.scale_out_r', 1.5)}R, sell "
+            f"{_pct(g('risk.take_profit_1_size_pct', 50.0))}",
+            "risk.exit_style / risk.scale_out_r"))
+        exits.append(_rule(
+            "Then trail the rest this far behind the best level the underlying "
+            "has reached; whatever is left goes at the square-off",
+            f"{g('risk.runner_trail_r', 1.0)}R", "risk.runner_trail_r"))
     if exit_style in {"auto", "trail"}:
         exits.append(_rule(
             "Single contract (or exit_style 'trail'): at this gain the stop "
@@ -553,14 +565,17 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             "beyond the 9 EMA",
             _pct(g("risk.breakeven_trigger_pct", 35.0)), "risk.exit_style / "
             "risk.breakeven_trigger_pct"))
+    if exit_style != "r_multiple":
+        exits += [
+            _rule("Two or more contracts: first target. Sell this share of the "
+                  "position and move the stop to breakeven",
+                  f"+{_pct(g('risk.take_profit_1_pct', 40.0))}, sell "
+                  f"{_pct(g('risk.take_profit_1_size_pct', 50.0))}",
+                  "risk.take_profit_1_pct"),
+            _rule("Second target (or the 9-EMA trail, whichever comes first)",
+                  f"+{_pct(g('risk.take_profit_2_pct', 70.0))}", "risk.take_profit_2_pct"),
+        ]
     exits += [
-        _rule("Two or more contracts: first target. Sell this share of the "
-              "position and move the stop to breakeven",
-              f"+{_pct(g('risk.take_profit_1_pct', 40.0))}, sell "
-              f"{_pct(g('risk.take_profit_1_size_pct', 50.0))}",
-              "risk.take_profit_1_pct"),
-        _rule("Second target (or the 9-EMA trail, whichever comes first)",
-              f"+{_pct(g('risk.take_profit_2_pct', 70.0))}", "risk.take_profit_2_pct"),
         _rule("Morning trades that are green at this time get their stop "
               "moved to breakeven before the lunch slump",
               g("session.tighten_stops_at", "10:45"), "session.tighten_stops_at"),

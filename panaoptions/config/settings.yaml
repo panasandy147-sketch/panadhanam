@@ -503,11 +503,22 @@ risk:
   # trail     at breakeven_trigger_pct move the stop to breakeven, then hold
   #           until a 5m candle closes on the far side of the 9 EMA.
   # auto      trail when the position is a single contract, scale otherwise.
+  # r_multiple  judged on the UNDERLYING in units of the trade's risk: at
+  #           +scale_out_r sell take_profit_1_size_pct (half) and move the stop
+  #           to breakeven (one contract: only the stop moves), then trail the
+  #           rest runner_trail_r behind the best level reached.
   #
   # auto exists because a $400 budget buys one contract, and "exit 50% at
   # +40%" on one contract silently becomes "exit everything at +40%" — the
   # runner the strategy depends on never exists.
-  exit_style: "auto"
+  #
+  # r_multiple since 29 Sept 2026: wins averaged ~1.2R against 3R targets
+  # (most trades squared off first). The 20-session walk-forward backtest on
+  # the same fills: India expectancy -0.07R -> +0.23R, P&L +₹7,090 -> +₹30,883
+  # (+8.8%); US P&L -$138 -> -$88 (+$71 with Value Area Rejection off).
+  exit_style: "r_multiple"
+  scale_out_r: 1.5
+  runner_trail_r: 1.0
   breakeven_trigger_pct: 35.0
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.

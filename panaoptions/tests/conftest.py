@@ -78,7 +78,10 @@ def cfg(tmp_path, monkeypatch):
     # rules (2% risk a trade, 2 open, 4 a day, 3% breaker) and assert figures
     # under the old ones. tests/test_throttles.py tests the shipped rules.
     cfg.data["risk"].update({"max_risk_per_trade_pct": 0, "max_daily_trades": 0,
-                             "max_open_trades": 3, "daily_loss_limit_pct": 10.0})
+                             "max_open_trades": 3, "daily_loss_limit_pct": 10.0,
+                             # the premium targets the ledger tests are written
+                             # against; tests/test_exit_plan.py tests r_multiple
+                             "exit_style": "auto"})
     return cfg
 
 

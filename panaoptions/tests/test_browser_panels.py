@@ -95,6 +95,9 @@ def desk(tmp_path_factory):
 
     cfg = config_mod.Config()
     cfg.data["contracts"]["max_contract_price"] = 2.00     # FakeFeed's $0.80 chain
+    # The exit test moves the option's price, not the underlying's: judge it
+    # on the premium targets (the R plan is tested in test_exit_plan.py).
+    cfg.data["risk"]["exit_style"] = "auto"
     mp.setattr(config_mod, "_config", cfg)
     feed = FakeFeed()
     desk = OptionsDesk(cfg=cfg, feed=feed)
