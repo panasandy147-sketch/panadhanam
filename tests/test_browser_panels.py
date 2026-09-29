@@ -29,7 +29,10 @@ import pytest
 playwright_api = pytest.importorskip("playwright.sync_api")
 
 ET = ZoneInfo("America/New_York")
-MARKET_TIME = datetime(2026, 9, 28, 10, 30, tzinfo=ET)       # US session, open
+# The US session, open — on TODAY's date. Trades are stamped with the real
+# date, and a fixed date here made "today's" record empty from the next day
+# on (these tests passed on 28 Sept and failed from 29 Sept, 00:00 ET).
+MARKET_TIME = datetime.now(ET).replace(hour=10, minute=30, second=0, microsecond=0)
 
 VOTES: dict[str, dict[str, tuple[float, float]]] = {}
 PRICES: dict[str, float] = {}
@@ -96,6 +99,8 @@ def desk():
     cfg = get_config()
     cfg.reload()
     cfg.switch_market("US")
+    # Every day is a session here, so the suite also runs at the weekend.
+    cfg.settings.setdefault("system", {})["trading_days"] = [0, 1, 2, 3, 4, 5, 6]
     cfg.settings.setdefault("data", {})["use_real_data"] = False
     cfg.settings["consensus"]["trend_filter"] = False       # votes are scripted
     cfg.settings["risk"]["reentry_cooldown_minutes"] = 0

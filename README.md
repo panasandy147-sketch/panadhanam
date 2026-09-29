@@ -115,6 +115,26 @@ buy and sell with its reason, Monday to today. The week so far is saved to
 `journal/weekly/<week>-<us|in>.md` after every session, so US and India each
 have their own file.
 
+**Previous-day F&O and 1:3.** Each symbol's previous session is mapped
+every cycle and stored once a day (`fno_daily`):
+- **Levels:** high (PDH), low (PDL) and close (PDC).
+- **Open interest:** call and put open interest, and its change since the
+  previous close.
+- **Build-up:** Long Buildup, Short Buildup, Short Covering or Long
+  Unwinding.
+
+A trade driven by a reversal pattern (tweezer bottom or top, double
+rejection, hammer, engulfing, star) is taken only at the previous day's
+level:
+- **Bullish:** after the PDL is swept and rejected, with call open interest
+  rising.
+- **Bearish:** after the PDH is tested and rejected, with put open interest
+  rising.
+
+With no real chain, `fno_confluence.when_oi_unknown: block` refuses it. The
+target is set at **1:3** (`risk.min_reward_risk`). A trade is refused when
+the previous-day high (long) or low (short) sits inside that target.
+
 See [docs/PAPER-TRADING.md](docs/PAPER-TRADING.md).
 
 ---

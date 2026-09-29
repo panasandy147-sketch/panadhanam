@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS agent_performance (
     PRIMARY KEY (agent_id, regime)
 );
 
+-- The previous day's F&O picture per symbol: PDH/PDL/PDC, call/put open
+-- interest and its change, the build-up. Written the first time each day.
+CREATE TABLE IF NOT EXISTS fno_daily (
+    symbol TEXT NOT NULL,
+    day TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
 CREATE TABLE IF NOT EXISTS iv_history (
     symbol TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -189,6 +198,21 @@ def record_iv(symbol: str, day: str, atm_iv: float) -> None:
     with transaction() as conn:
         conn.execute("INSERT OR REPLACE INTO iv_history (symbol, day, atm_iv) "
                      "VALUES (?,?,?)", (symbol, day, float(atm_iv)))
+
+
+def record_fno_day(symbol: str, day: str, payload: dict[str, Any]) -> None:
+    """The day's F&O picture for `symbol` (the latest reading of the day wins)."""
+    import json
+    with transaction() as conn:
+        conn.execute("INSERT OR REPLACE INTO fno_daily (symbol, day, payload) "
+                     "VALUES (?,?,?)", (symbol, day, json.dumps(payload, default=str)))
+
+
+def fno_days(day: str) -> list[dict[str, Any]]:
+    import json
+    rows = get_conn().execute("SELECT payload FROM fno_daily WHERE day = ? "
+                              "ORDER BY symbol", (day,)).fetchall()
+    return [json.loads(r[0]) for r in rows]
 
 
 def iv_history(symbol: str, days: int = 252) -> list[float]:

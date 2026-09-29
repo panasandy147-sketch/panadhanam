@@ -112,8 +112,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                  "the reverse is -0.25.",
                  "Price above VWAP is +0.15, below is -0.15.",
                  "Candlestick patterns (engulfing, hammer, shooting star, "
-                 "morning/evening star, inside bar, flag…), each adding its "
-                 "own weight.",
+                 "morning/evening star, tweezer bottom/top, double rejection "
+                 "bottom/top, inside bar, flag…), each adding its own weight. "
+                 "A double rejection is the same high or low rejected twice, "
+                 "2–8 bars apart, with a real pullback between.",
                  "Higher timeframes agreeing adds up to ±0.2. Disagreement is "
                  "flagged as a conflict.",
                  f"Volume above {surge}x the average confirms the move. Thin "
@@ -239,6 +241,37 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("High-impact news against the trade vetoes it",
                   "yes" if g("consensus.veto_on_high_impact_news", True) else "no",
                   "consensus.veto_on_high_impact_news"),
+        ],
+    })
+
+    # ------------------------------------------------------------------ #
+    sections.append({
+        "title": "Previous-day F&O confluence",
+        "intro": ("Each symbol's previous session is mapped every day: high "
+                  "(PDH), low (PDL), close (PDC), call and put open interest and "
+                  "their change since the previous close, and the build-up — "
+                  "Long Buildup (price up, OI up), Short Buildup (down, up), "
+                  "Short Covering (up, down), Long Unwinding (down, down). It is "
+                  "stored for the review."),
+        "rules": [
+            _rule("A trade driven by a reversal pattern is taken only at the "
+                  "previous day's level: bullish after a sweep-and-reject of the "
+                  "PDL with call OI rising; bearish after a test-and-reject of "
+                  "the PDH with put OI rising",
+                  "on" if g("fno_confluence.enabled", False) else "off",
+                  "fno_confluence.enabled"),
+            _rule("'At' the PDH / PDL means within",
+                  f"{g('fno_confluence.touch_atr', 0.15)} × ATR, in the last "
+                  f"{g('fno_confluence.lookback_bars', 3)} bars",
+                  "fno_confluence.touch_atr / lookback_bars"),
+            _rule("When the chain has no real open interest",
+                  g("fno_confluence.when_oi_unknown", "block"),
+                  "fno_confluence.when_oi_unknown"),
+            _rule("The target needs open road: refused when the previous-day "
+                  "high (long) or low (short) sits inside the 1:"
+                  f"{g('risk.min_risk_reward', 3.0)} target",
+                  "on" if g("fno_confluence.room_check", True) else "off",
+                  "fno_confluence.room_check"),
         ],
     })
 

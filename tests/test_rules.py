@@ -55,3 +55,14 @@ def test_the_header_links_to_the_rules_pop_up():
     script = (STATIC / "app.js").read_text()
     assert 'fetch("/api/rules")' in script
     assert 'location.hash === "#rules"' in script
+
+
+def test_the_previous_day_fno_rules_are_written_out(cfg):
+    import json
+    doc = build(cfg)
+    section = next(s for s in doc["sections"] if s["title"] == "Previous-day F&O confluence")
+    text = json.dumps(section)
+    for words in ("PDL", "call OI rising", "PDH", "put OI rising", "Long Buildup",
+                  "fno_confluence.when_oi_unknown", "1:3"):
+        assert words in text, words
+    assert "tweezer" in json.dumps(doc).lower()

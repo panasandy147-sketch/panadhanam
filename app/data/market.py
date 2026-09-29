@@ -19,6 +19,10 @@ from app.core.models import (Fundamentals, MacroSnapshot, MarketContext,
 from app.indicators import patterns as pattern_mod
 from app.indicators import ta
 from app.indicators.derivatives import analyse as analyse_chain
+
+# (symbol, day) -> the F&O picture last stored, so it is written once a day
+# and again only when it changes.
+_FNO_SAVED: dict[tuple[str, str], dict] = {}
 from app.indicators.derivatives import enrich_chain
 
 log = get_logger("data.market")
@@ -143,6 +147,26 @@ class MarketDataService:
                     db.record_iv(symbol, day, float(atm_iv))
                 except Exception as exc:
                     log.debug("IV sample not recorded for %s: %s", symbol, exc)
+
+        # The previous day's F&O picture: PDH/PDL/PDC, OI and its change,
+        # the build-up. Stored once a day per symbol for the review.
+        try:
+            from app.agents import fno_confluence
+            from app.core import clock
+            tz = str(self.cfg.get("system.timezone", "Asia/Kolkata"))
+            today = clock.market_now(tz).date()
+            prev = fno_confluence.previous_day(candles, tz, today)
+            ctx.indicators["previous_day"] = prev
+            if prev:
+                pic = fno_confluence.picture(symbol, prev, ctx.indicators.get("derivatives"))
+                ctx.indicators["fno_picture"] = pic
+                key = (symbol, today.isoformat())
+                if _FNO_SAVED.get(key) != pic:
+                    from app.storage import db
+                    db.record_fno_day(symbol, today.isoformat(), pic)
+                    _FNO_SAVED[key] = pic
+        except Exception as exc:                        # noqa: BLE001
+            log.debug("F&O picture not built for %s: %s", symbol, exc)
         return ctx
 
     def _compute_indicators(self, candles: dict[str, list], tech: dict) -> dict[str, Any]:

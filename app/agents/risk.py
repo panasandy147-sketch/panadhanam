@@ -248,6 +248,18 @@ class RiskManager:
             elif stop_pct > max_pct:
                 reasons.append(f"Stop {stop_pct:.2f}% is too wide (max {max_pct}%) — invalidation ill-defined")
 
+        # ---- previous-day F&O confluence (reversal trades) and the 1:3 road ----
+        from app.agents import fno_confluence
+        why = fno_confluence.confluence_reason(ctx, bias, reports, self.cfg)
+        if why:
+            reasons.append(f"F&O confluence: {why}")
+        spot = ctx.quote.last_price if ctx.quote else entry
+        u_entry, u_stop = ((spot, ustop.level) if ustop and instrument.instrument_type in
+                           {InstrumentType.CALL, InstrumentType.PUT} else (entry, stop_loss))
+        why = fno_confluence.room_reason(ctx, bias, u_entry, u_stop, self.cfg)
+        if why:
+            reasons.append(f"Reward:risk — {why}")
+
         # ---- risk:reward ----
         reward_points = abs(target - entry)
         rr = reward_points / stop_points if stop_points > 0 else 0.0

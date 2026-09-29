@@ -182,6 +182,89 @@ def vwap_pullback(df: pd.DataFrame) -> tuple[bool, float, str]:
 
 
 # Registry of directional patterns: name -> (fn, direction_sign)
+def _same_level(a: float, b: float, reference: float, avg_range: float) -> bool:
+    return abs(a - b) <= max(reference * 0.0015, 0.15 * avg_range)
+
+
+def _rejects(row, top: bool) -> bool:
+    rng = _range(row)
+    if top:
+        return _upper_wick(row) >= 0.30 * rng or row["close"] <= row["low"] + rng / 2
+    return _lower_wick(row) >= 0.30 * rng or row["close"] >= row["high"] - rng / 2
+
+
+def tweezer_bottom(df: pd.DataFrame) -> tuple[bool, float, str]:
+    """Two candles rejecting the same low: red then green."""
+    if len(df) < 2:
+        return False, 0.0, ""
+    prev, cur = df.iloc[-2], df.iloc[-1]
+    avg = float((df["high"] - df["low"]).tail(20).mean())
+    ok = (not _bullish(prev) and _bullish(cur)
+          and _same_level(prev["low"], cur["low"], cur["close"], avg))
+    return (True, 0.6, f"Tweezer bottom — the low {cur['low']:.2f} rejected twice") if ok \
+        else (False, 0.0, "")
+
+
+def tweezer_top(df: pd.DataFrame) -> tuple[bool, float, str]:
+    """Two candles rejecting the same high: green then red."""
+    if len(df) < 2:
+        return False, 0.0, ""
+    prev, cur = df.iloc[-2], df.iloc[-1]
+    avg = float((df["high"] - df["low"]).tail(20).mean())
+    ok = (_bullish(prev) and not _bullish(cur)
+          and _same_level(prev["high"], cur["high"], cur["close"], avg))
+    return (True, 0.6, f"Tweezer top — the high {cur['high']:.2f} rejected twice") if ok \
+        else (False, 0.0, "")
+
+
+def _double_rejection(df: pd.DataFrame, top: bool, lookback: int = 8) -> int:
+    """The same high (top) / low (bottom) rejected again 2..lookback bars
+    later, with price leaving the level by a full average bar between."""
+    if len(df) < 4:
+        return 0
+    cur = df.iloc[-1]
+    if not _rejects(cur, top) or (_bullish(cur) if top else not _bullish(cur)):
+        return 0
+    avg = float((df["high"] - df["low"]).tail(20).mean())
+    edge = "high" if top else "low"
+    level = float(cur[edge])
+    for k in range(2, min(lookback, len(df) - 1) + 1):
+        first = df.iloc[-1 - k]
+        if not _same_level(first[edge], level, cur["close"], avg) or not _rejects(first, top):
+            continue
+        between = df.iloc[-k:-1]
+        if top:
+            ok = (between["high"].max() <= level - 0.25 * avg
+                  and between["low"].min() <= level - 1.0 * avg)
+        else:
+            ok = (between["low"].min() >= level + 0.25 * avg
+                  and between["high"].max() >= level + 1.0 * avg)
+        if ok:
+            return k
+    return 0
+
+
+def double_rejection_bottom(df: pd.DataFrame) -> tuple[bool, float, str]:
+    k = _double_rejection(df, top=False)
+    return (True, 0.7, f"Double rejection bottom — the low held twice, {k} bars apart") if k \
+        else (False, 0.0, "")
+
+
+def double_rejection_top(df: pd.DataFrame) -> tuple[bool, float, str]:
+    k = _double_rejection(df, top=True)
+    return (True, 0.7, f"Double rejection top — the high held twice, {k} bars apart") if k \
+        else (False, 0.0, "")
+
+
+# Reversal patterns, by the direction they point: a trade they drive is held
+# to the previous-day F&O confluence rule (app/agents/fno_confluence.py).
+REVERSALS = {
+    1: {"hammer", "bullish_engulfing", "morning_star", "tweezer_bottom",
+        "double_rejection_bottom"},
+    -1: {"shooting_star", "bearish_engulfing", "evening_star", "tweezer_top",
+         "double_rejection_top"},
+}
+
 _PATTERNS = {
     "bullish_engulfing": (bullish_engulfing, +1),
     "bearish_engulfing": (bearish_engulfing, -1),
@@ -191,6 +274,10 @@ _PATTERNS = {
     "morning_star": (morning_star, +1),
     "evening_star": (evening_star, -1),
     "inside_bar": (inside_bar, 0),
+    "tweezer_bottom": (tweezer_bottom, +1),
+    "tweezer_top": (tweezer_top, -1),
+    "double_rejection_bottom": (double_rejection_bottom, +1),
+    "double_rejection_top": (double_rejection_top, -1),
 }
 
 

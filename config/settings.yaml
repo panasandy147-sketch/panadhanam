@@ -77,7 +77,10 @@ risk:
   # trader) buying power; Indian MIS is typically ~5x. At 1.0 one SPY trade at
   # 2% risk used ~$88k of a $100k account, so "5 positions" was really two.
   intraday_leverage: 4.0
-  min_risk_reward: 1.5           # 1:1.5 minimum, rejected below this (was 2.0)
+  # 1:3 minimum. The target is set at this multiple of the stop distance, and
+  # the trade is refused when the previous-day high (long) or low (short) sits
+  # inside it (fno_confluence.room_check). Was 1.5.
+  min_risk_reward: 3.0
   max_risk_reward: 10.0          # sanity ceiling (implausible targets rejected)
   # Stop loss must be a real structural level, not a round number guess.
   min_stop_distance_pct: 0.15    # SL closer than this = "ill-defined", rejected
@@ -280,6 +283,32 @@ technical:
     - evening_star
     - inside_bar
     - flag
+    - tweezer_bottom
+    - tweezer_top
+    - double_rejection_bottom
+    - double_rejection_top
+
+# --------------------------------------------------------------------------
+# PREVIOUS-DAY F&O CONFLUENCE
+# --------------------------------------------------------------------------
+# Every symbol's previous session is mapped each day — PDH / PDL / PDC, call
+# and put open interest and their change since the previous close, and the
+# build-up (Long Buildup, Short Buildup, Short Covering, Long Unwinding) — and
+# stored for the review.
+#
+# A trade DRIVEN by a reversal pattern (tweezer, double rejection, hammer,
+# engulfing, star) is taken only:
+#   bullish: after a sweep-and-reject of the previous-day LOW, call OI rising
+#   bearish: after a test-and-reject of the previous-day HIGH, put OI rising
+fno_confluence:
+  enabled: true
+  touch_atr: 0.15            # "at the level": within this x ATR
+  lookback_bars: 3           # the sweep / test within the last N bars
+  # No real chain (no OI): block the reversal (strict) or allow on price alone.
+  when_oi_unknown: "block"
+  # Refuse a trade whose 1:3 target lies beyond the previous-day high (long) or
+  # low (short).
+  room_check: true
 
 # --------------------------------------------------------------------------
 # DERIVATIVES / OPTION CHAIN

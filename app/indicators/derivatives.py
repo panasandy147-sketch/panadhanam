@@ -217,8 +217,19 @@ def analyse(chain: OptionChain, spot_change_pct: float, cfg: dict[str, Any]) -> 
     else:
         pcr_signal, pcr_dir = f"PCR {pcr_val} — balanced", 0
 
+    # Call and put open interest, and their change since the previous close
+    # (NSE's changeinOpenInterest) — "rising call OI" / "rising put OI".
+    calls = [leg for leg in chain.legs if leg.option_type == "CE"]
+    puts = [leg for leg in chain.legs if leg.option_type == "PE"]
+    oi_known = any(leg.oi for leg in chain.legs) and not getattr(chain, "synthetic", False)
+
     return {
         **pcr, **ivs,
+        "call_oi": int(sum(leg.oi for leg in calls)),
+        "put_oi": int(sum(leg.oi for leg in puts)),
+        "call_oi_change": int(sum(leg.oi_change for leg in calls)),
+        "put_oi_change": int(sum(leg.oi_change for leg in puts)),
+        "oi_known": bool(oi_known),
         "max_pain": mp,
         "max_pain_distance_pct": round((chain.spot - mp) / chain.spot * 100, 2) if chain.spot else 0.0,
         "oi_walls": walls,
