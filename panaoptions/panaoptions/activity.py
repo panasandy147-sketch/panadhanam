@@ -37,7 +37,8 @@ MAX_NOTABLE = 400
 # watch to know the desk is alive, not the story of the session.
 NOTABLE_KINDS = frozenset({
     "trade.open", "trade.exit", "setup.fired", "risk.refused",
-    "contract.none", "contract.fallback", "graded", "halt", "screen.done", "error",
+    "contract.none", "contract.fallback", "contract.spread", "contract.skip",
+    "spread.rolling", "graded", "halt", "screen.done", "error",
     "restored",
 })
 

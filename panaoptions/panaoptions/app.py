@@ -59,6 +59,11 @@ class OptionsDesk:
         # One committee vote per setup per bar: a setup that stays valid for
         # several cycles is not re-argued (and Ollama not re-asked) each minute.
         self._verdicts: dict[tuple, Any] = {}
+        # Every chain read is sampled, so the spread check can use the rolling
+        # 1-minute volume-weighted spread instead of one snapshot.
+        from panaoptions.engine.liquidity import SpreadTracker
+        self.spreads = SpreadTracker(float(self.cfg.get(
+            "contracts.rolling_spread.window_seconds", 60)))
         self.notifier = Notifier(self.cfg)
         # What the desk just did, so a working desk and a hung one look
         # different from the outside.
@@ -643,7 +648,11 @@ class OptionsDesk:
             self._remember_candidate(symbol, setup, now)
 
             search, chain = await self._pick_contract(symbol, setup, now)
-            if search.chosen is not None and search.budget_fallback:
+            if search.chosen is not None and search.tier == "debit_spread":
+                self.activity.add("contract.spread",
+                                  f"{symbol} {setup.strategy.value} — {search.note}",
+                                  level="good", ts=now)
+            elif search.chosen is not None and search.budget_fallback:
                 self.activity.add("contract.fallback", f"{symbol} — {search.note}",
                                   level="warn", ts=now)
             if search.chosen is None:
@@ -651,10 +660,19 @@ class OptionsDesk:
                 store.save_signal_seen(signal_id, now, symbol,
                                        setup.direction.value, False,
                                        search.note or "no contract qualified",
-                                       {"rejected": search.rejected})
+                                       {"rejected": search.rejected,
+                                        "skipped_because": search.skipped_because,
+                                        "strategy": setup.strategy.value,
+                                        "pattern": setup.pattern,
+                                        "spot": setup.indicators.close,
+                                        "budget": self.gatekeeper.budget_for(symbol)})
                 actions.append(f"{symbol}: {search.note}")
-                self.activity.add("contract.none", f"{symbol} — {search.note}",
-                                  level="warn", ts=now)
+                hard = bool(search.skipped_because)
+                self.activity.add(
+                    "contract.skip" if hard else "contract.none",
+                    f"{symbol} {setup.strategy.value} — "
+                    + (search.note if hard else search.note or "no contract qualified"),
+                    level="bad" if hard else "warn", ts=now)
                 log.info("%s setup fired but no contract qualified. %s",
                          symbol, search.note)
                 continue
@@ -686,11 +704,13 @@ class OptionsDesk:
                 store.save_signal_seen(signal_id, now, symbol,
                                        setup.direction.value, False, refusal)
                 actions.append(f"{symbol}: {refusal}")
-                self.activity.add("risk.refused", f"{symbol} — {refusal}",
-                                  level="warn", ts=now)
+                self.activity.add("risk.refused",
+                                  f"{symbol} SKIPPED — hard risk failure: {refusal}",
+                                  level="bad", ts=now)
                 continue
 
             trade = self.ledger.open(signal, now)
+            trade.tier = search.tier
             # The audit log: the fill and the whole case for it, as known now.
             from panaoptions import audit
             audit.record_buy(self.cfg, trade, signal, setup,
@@ -923,9 +943,39 @@ class OptionsDesk:
         shortest = min(min_dte, int(self.cfg.get("contracts.min_dte", 7)))
         chain = await self.feed.chain_for_window(symbol, spot, shortest, max_dte)
         self._note_flow(symbol, setup, chain)
+        rolling = bool(self.cfg.get("contracts.rolling_spread.enabled", True))
+        if rolling:
+            self.spreads.annotate(chain, now)
+        budget = self.gatekeeper.budget_for(symbol)
         search = contract_filter.choose(symbol, chain, setup.direction,
-                                        self.cfg, setup=setup,
-                                        budget=self.gatekeeper.budget_for(symbol))
+                                        self.cfg, setup=setup, budget=budget)
+        # A contract refused only on its spread may have hit a momentary
+        # spike (the open, a news print). Sample the chain again inside the
+        # minute and judge the volume-weighted average, not the one quote.
+        spread_refused = any("spread" in k for k in search.rejected)
+        if rolling and spread_refused and search.tier != "primary":
+            resamples = int(self.cfg.get("contracts.rolling_spread.resamples", 2))
+            delay = float(self.cfg.get("contracts.rolling_spread.resample_delay_seconds", 5))
+            for i in range(resamples):
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                again = await self.feed.chain_for_window(symbol, spot, shortest, max_dte)
+                if not again:
+                    break
+                self.spreads.annotate(again, now + timedelta(seconds=delay * (i + 1)))
+                chain = again
+            before = search
+            search = contract_filter.choose(symbol, chain, setup.direction,
+                                            self.cfg, setup=setup, budget=budget)
+            if (search.chosen is not None
+                    and (before.chosen is None
+                         or (search.tier == "primary" and before.tier != "primary"))):
+                self.activity.add(
+                    "spread.rolling",
+                    f"{symbol} — a spread spike was averaged out: "
+                    f"{search.chosen.label} passes on the 1-minute volume-weighted "
+                    f"spread ({search.chosen.effective_spread_pct:.1f}%) after "
+                    f"{resamples + 1} samples", level="good", ts=now)
 
         # An empty chain has two very different causes and one useless
         # message. "No put contracts came back" reads as "the market has no
@@ -1027,9 +1077,17 @@ class OptionsDesk:
         return [f"circuit breaker: flattened {len(closed)} position(s)"]
 
     async def _contract_price(self, trade) -> float | None:
-        """Re-price the exact contract being held."""
+        """Re-price the exact contract being held — for a debit spread, the
+        long leg's mid less the short leg's."""
         chain = await self.feed.chain_for_window(
             trade.symbol, 0.0, 0, 60)
+        if getattr(trade, "short_label", ""):
+            mids = {c.label: c.mid for c in chain}
+            long_mid, short_mid = mids.get(trade.long_label), mids.get(trade.short_label)
+            if long_mid is not None and short_mid is not None:
+                return round(max(long_mid - short_mid, 0.0), 4)
+            log.debug("could not re-price both legs of %s", trade.contract_label)
+            return None
         for c in chain:
             if c.label == trade.contract_label:
                 return c.mid

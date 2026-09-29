@@ -828,6 +828,51 @@ The percentage stop survives as a **disaster backstop** (`disaster_stop_pct`,
 45%) — wide enough that the underlying level normally fires first, but still
 there for a gap or a collapse in the option itself.
 
+## Over budget: the fallback ladder
+
+The primary contract is **0.40-0.50 delta**. When it costs more than the
+per-trade budget (20% of capital, 25% on the index ETFs; ₹70,000 / ₹87,500
+on India) or the per-contract price ceiling, the setup is not simply
+refused. The desk tries, in order (`contracts.fallback_order`):
+
+1. **The same delta with less time**: a nearer expiry.
+2. **A debit spread**: a bull call spread on a long, a bear put spread on a
+   short. It buys the 0.40-0.50 delta option and sells a strike further out
+   of the money in the same expiry, taking the widest spread whose net debit
+   fits the budget (reward:risk at least 0.8). It is held as one position at
+   its net debit and re-priced from both legs. The most it can lose is the
+   debit; the most it can make is the width minus the debit, so profit
+   targets are capped below the width. Slippage is charged on both legs.
+3. **The secondary tier: 0.30-0.39 delta**, and only a liquid contract (open
+   interest ≥ 100 or volume ≥ 50).
+4. **Skip.** The log says `SKIPPED — hard risk failure` and why each rung
+   failed.
+
+Both legs of a spread must pass the liquidity and bid-ask checks. The bid-ask
+check itself uses the **1-minute volume-weighted average spread**, not one
+quote. A contract refused on a momentary spike is sampled twice more inside
+the minute before it is refused.
+
+In the activity log, `contract.spread` (green) marks a setup converted to a
+debit spread. `contract.fallback` marks the other rungs. `contract.skip` and
+`risk.refused` (red) mark hard risk failures. `spread.rolling` marks a spike
+that was averaged out. The audit log records the structure and both legs.
+
+### Backtest it on your own blocked setups
+
+    python run.py --backtest-spreads                      # last 5 blocked setups
+    python run.py --backtest-spreads --limit 20
+    python run.py --backtest-spreads --symbols SPY,QQQ,NVDA --days 5
+
+This replays setups the desk refused for price, from its own log. For each
+one it rebuilds the option chain at that moment from the historical
+5-minute bars (Yahoo keeps 60 days) and that day's implied volatility, or
+realised volatility when none was recorded. It then runs today's picker and
+marks the result again at the square-off. The report is saved to
+`journal/backtest/`. The prices are a Black-Scholes model, because no free
+source keeps historical option quotes. That makes it a test of whether the
+ladder finds a tradeable structure, not a fill report.
+
 ## One contract cannot be halved
 
 `risk.exit_style: auto` notices when a position is a single contract, where

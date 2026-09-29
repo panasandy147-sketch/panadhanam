@@ -195,6 +195,13 @@ class RiskManager:
         stop = round(entry * (1 - stop_pct / 100.0), 2)
         target_1 = round(entry * (1 + tp1_pct / 100.0), 2)
         target_2 = round(entry * (1 + tp2_pct / 100.0), 2)
+        if contract.is_spread:
+            # A debit spread is worth at most its width: a target above that
+            # can never fill. Cap the first at half the remaining room and the
+            # second at 90% of it.
+            room_up = contract.width - entry
+            target_1 = min(target_1, round(entry + room_up * 0.5, 2))
+            target_2 = min(target_2, round(entry + room_up * 0.9, 2))
 
         if stop <= 0 or stop >= entry:
             return self._reject(

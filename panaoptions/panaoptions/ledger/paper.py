@@ -37,7 +37,10 @@ class PaperLedger:
     def open(self, signal: Signal, ts: datetime | None = None) -> PaperTrade:
         """Enter at the mid plus slippage — you pay up to get filled."""
         ts = ts or signal.ts
-        fill_price = round(signal.entry_price + self.slippage, 4)
+        c = signal.contract
+        legs = 2 if c.is_spread else 1
+        # Slippage on every leg: a spread is two fills.
+        fill_price = round(signal.entry_price + self.slippage * legs, 4)
 
         trade = PaperTrade(
             id=f"PT-{uuid.uuid4().hex[:8].upper()}",
@@ -54,6 +57,10 @@ class PaperLedger:
             multiplier=signal.contract.multiplier or self.cfg.multiplier,
             market=getattr(self.cfg, "market", "US"),
             estimated=bool(getattr(signal.contract, "estimated", False)),
+            structure=c.structure, legs=legs,
+            long_label=c.long_leg.label if c.is_spread else c.label,
+            short_label=c.short_leg.label if c.is_spread else "",
+            max_value=c.width,
             remaining=signal.quantity, max_price_seen=fill_price,
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
@@ -228,7 +235,7 @@ class PaperLedger:
 
     def _reduce(self, trade: PaperTrade, quantity: int, price: float,
                 ts: datetime, reason: str) -> Fill:
-        fill_price = round(price - self.slippage, 4)
+        fill_price = round(max(price - self.slippage * (trade.legs or 1), 0.0), 4)
         pnl = round((fill_price - trade.entry_price) * quantity
                     * (trade.multiplier or self.cfg.multiplier), 2)
         trade.remaining -= quantity

@@ -8,7 +8,7 @@ from panaoptions.models import Direction, OptionContract, OptionRight
 
 
 def _chain(symbol="AAPL", dte=10, rows=None):
-    rows = rows or [(215, 0.88, 15.6), (225, 0.64, 7.4), (230, 0.52, 4.6),
+    rows = rows or [(215, 0.88, 15.6), (225, 0.64, 7.4), (230, 0.48, 4.6),
                     (240, 0.21, 1.20), (245, 0.11, 0.55)]
     return [OptionContract(symbol=symbol, right=OptionRight.CALL, strike=k,
                            expiry="2026-10-02", dte=dte,
@@ -52,7 +52,7 @@ def test_raising_the_budget_makes_the_same_chain_tradeable(cfg):
 
     result = choose("AAPL", _chain(), Direction.LONG, cfg)
     assert result.chosen is not None
-    assert 0.45 <= abs(result.chosen.delta) <= 0.60
+    assert 0.40 <= abs(result.chosen.delta) <= 0.50
     assert result.chosen.strike == 230, "the cheapest qualifying strike"
 
 
@@ -77,7 +77,7 @@ def test_a_wide_spread_is_refused_however_well_priced(cfg):
     cfg.data["contracts"]["max_contract_price"] = 8.00
     wide = [OptionContract(symbol="AAPL", right=OptionRight.CALL, strike=230,
                            expiry="2026-10-02", dte=10, bid=4.0, ask=5.2,
-                           delta=0.52)]
+                           delta=0.48)]
     result = choose("AAPL", wide, Direction.LONG, cfg)
 
     assert result.chosen is None
@@ -118,12 +118,20 @@ def test_affordable_delta_answers_what_the_budget_does_buy(cfg):
 # --------------------------------------------------------------------------- #
 # The budget fallback: take the trade at a delta the account can pay for.
 # --------------------------------------------------------------------------- #
-def _put(strike, delta, mid, dte=21, spread=0.20):
+def _put(strike, delta, mid, dte=21, spread=0.20, oi=500):
     from panaoptions.models import OptionContract, OptionRight
 
     return OptionContract(symbol="FTNT", right=OptionRight.PUT, strike=strike,
                           expiry="2026-10-16", dte=dte, bid=mid - spread / 2,
-                          ask=mid + spread / 2, delta=-delta)
+                          ask=mid + spread / 2, delta=-delta, open_interest=oi)
+
+
+@pytest.fixture
+def no_spreads(cfg):
+    """These tests are about the single-contract delta tiers."""
+    cfg.data["contracts"].setdefault("debit_spread", {})["enabled"] = False
+    yield cfg
+    cfg.data["contracts"]["debit_spread"]["enabled"] = True
 
 
 def _setup():
@@ -134,7 +142,7 @@ def _setup():
     return _S()
 
 
-def test_an_over_budget_band_falls_back_to_the_best_delta_that_fits(cfg):
+def test_an_over_budget_band_falls_back_to_the_best_delta_that_fits(cfg, no_spreads):
     """From the desk: FTNT's 0.55-0.65 put 14-30 days out is ~$900; the
     budget is $800. Every such setup fired and nothing was ever bought."""
     from panaoptions.engine import contracts
@@ -150,7 +158,7 @@ def test_an_over_budget_band_falls_back_to_the_best_delta_that_fits(cfg):
     assert "0.48 delta" in search.note
 
 
-def test_the_fallback_never_goes_below_its_delta_floor(cfg):
+def test_the_fallback_never_goes_below_its_delta_floor(cfg, no_spreads):
     from panaoptions.engine import contracts
     from panaoptions.models import Direction
 
@@ -170,7 +178,7 @@ def test_an_in_band_contract_that_fits_is_still_preferred(cfg):
     assert abs(search.chosen.delta) == 0.58 and not search.budget_fallback
 
 
-def test_the_fallback_can_be_switched_off(cfg):
+def test_the_fallback_can_be_switched_off(cfg, no_spreads):
     from panaoptions.engine import contracts
     from panaoptions.models import Direction
 
@@ -235,7 +243,7 @@ def test_same_delta_with_less_time_is_tried_before_a_lower_delta(cfg):
     assert "over the $800 budget" in search.note
 
 
-def test_when_nothing_fits_it_says_exactly_why(cfg):
+def test_when_nothing_fits_it_says_exactly_why(cfg, no_spreads):
     """"Nothing fits the $10-$2000 budget" named the price range as the
     budget and gave no reason the cheaper contracts were refused."""
     from panaoptions.engine import contracts
@@ -249,7 +257,7 @@ def test_when_nothing_fits_it_says_exactly_why(cfg):
     assert search.chosen is None
     assert "$800 budget" in search.note
     assert "spread over 7%" in search.note
-    assert "Cheapest was" in search.note
+    assert "cheapest" in search.note
     assert "$10-$2000 budget" not in search.note
 
 

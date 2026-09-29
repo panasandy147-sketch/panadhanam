@@ -254,6 +254,10 @@ def test_index_delta_fallback_reaches_down_to_030(account):
     chain = [_contract("SPY", mid=12.00, delta=0.45),      # $1,200 — over the cap
              _contract("SPY", mid=6.00, delta=0.32, strike=505),
              _contract("SPY", mid=2.00, delta=0.22, strike=512)]
+    for c in chain:
+        c.open_interest = 800                              # liquid
+    # This test is about the delta tier: no debit-spread rung before it.
+    account.data["contracts"].setdefault("debit_spread", {})["enabled"] = False
     gate = RiskGatekeeper(account)
     search = contracts.choose("SPY", chain, Direction.LONG, account,
                               setup=_setup("SPY", band=(0.40, 0.50)),

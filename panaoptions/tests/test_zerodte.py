@@ -21,7 +21,9 @@ def test_the_profile_is_same_day_with_the_asked_for_numbers(zcfg):
     g = zcfg.get
     assert (g("contracts.min_dte"), g("contracts.max_dte")) == (0, 4)
     assert g("contracts.prefer_nearest_expiry") is True
-    assert (g("contracts.min_delta"), g("contracts.max_delta")) == (0.35, 0.50)
+    # Primary tier 0.40-0.50; 0.30-0.39 (liquid) or a debit spread when over budget.
+    assert (g("contracts.min_delta"), g("contracts.max_delta")) == (0.40, 0.50)
+    assert g("contracts.budget_fallback_min_delta") == 0.30
     assert g("contracts.max_spread_pct_of_mid") == 7.0
     assert (g("contracts.min_contract_price"), g("contracts.max_contract_price")) == (0.50, 3.50)
     assert g("strategies.orb_vwap.to") == "15:00"

@@ -144,12 +144,45 @@ class OptionContract(BaseModel):
     multiplier: int = 0
     # True when the price is a model estimate (India, NSE refusing), not a quote.
     estimated: bool = False
+    # The 1-minute volume-weighted bid-ask spread (% of mid) when the rolling
+    # check has samples for this contract; None = only the snapshot is known.
+    rolling_spread_pct: float | None = None
+    # A debit spread is held as ONE position priced at its net debit: buy
+    # `long_leg`, sell `short_leg` further out of the money, same expiry.
+    # strike/delta/right above are the long leg's; bid/ask are the net.
+    long_leg: OptionContract | None = None
+    short_leg: OptionContract | None = None
+
+    @property
+    def is_spread(self) -> bool:
+        return self.long_leg is not None and self.short_leg is not None
 
     @property
     def mid(self) -> float:
+        if self.is_spread:
+            return round(max(self.long_leg.mid - self.short_leg.mid, 0.0), 4)
         if self.bid and self.ask:
             return round((self.bid + self.ask) / 2, 4)
         return self.ask or self.bid
+
+    @property
+    def width(self) -> float:
+        """A spread's most it can be worth, per share: the strike distance."""
+        if not self.is_spread:
+            return 0.0
+        return round(abs(self.short_leg.strike - self.long_leg.strike), 4)
+
+    @property
+    def effective_spread_pct(self) -> float:
+        """The bid-ask spread the risk checks use: the rolling 1-minute
+        volume-weighted figure when there is one, else the snapshot. For a
+        debit spread, the wider of its two legs'."""
+        if self.is_spread:
+            return max(self.long_leg.effective_spread_pct,
+                       self.short_leg.effective_spread_pct)
+        if self.rolling_spread_pct is not None:
+            return self.rolling_spread_pct
+        return self.spread_pct_of_mid
 
     @property
     def spread(self) -> float:
@@ -166,7 +199,19 @@ class OptionContract(BaseModel):
 
     @property
     def label(self) -> str:
+        if self.is_spread:
+            return (f"{self.symbol} {self.expiry} {self.long_leg.strike:g}/"
+                    f"{self.short_leg.strike:g}{self.right.value[0]} spread")
         return f"{self.symbol} {self.expiry} {self.strike:g}{self.right.value[0]}"
+
+    @property
+    def structure(self) -> str:
+        if not self.is_spread:
+            return "single"
+        return "bull call spread" if self.right is OptionRight.CALL else "bear put spread"
+
+
+OptionContract.model_rebuild()
 
 
 class ContractSearch(BaseModel):
@@ -185,6 +230,11 @@ class ContractSearch(BaseModel):
     # True when the setup's own delta band was over budget and the desk took
     # the highest-delta contract that fits instead of skipping the trade.
     budget_fallback: bool = False
+    # Which rung found the contract: primary, shorter_expiry, debit_spread,
+    # secondary_delta — or "" when nothing did.
+    tier: str = ""
+    # Why each fallback rung found nothing, when the setup was skipped.
+    skipped_because: list[str] = Field(default_factory=list)
 
 
 class Signal(BaseModel):
@@ -221,6 +271,13 @@ class Signal(BaseModel):
 
     def alert_line(self) -> str:
         arrow = "CALL" if self.direction is Direction.LONG else "PUT"
+        c = self.contract
+        if c.is_spread:
+            return (f"[{self.symbol} | {c.expiry} {c.long_leg.strike:g}/"
+                    f"{c.short_leg.strike:g}{arrow[0]} {c.structure.upper()}] BUY "
+                    f"[{self.entry_price:.2f} net] SL [{self.stop_price:.2f}] "
+                    f"TP1 [{self.target_1:.2f}] TP2 [{self.target_2:.2f}] "
+                    f"max [{c.width:g}]")
         return (f"[{self.symbol} | {self.contract.expiry} "
                 f"{self.contract.strike:g}{arrow[0]}] BUY "
                 f"[{self.entry_price:.2f}] "
@@ -271,6 +328,15 @@ class PaperTrade(BaseModel):
     market: str = "US"
     # Bought and marked on model prices, not market quotes.
     estimated: bool = False
+    # "single", or "bull call spread" / "bear put spread": then the position
+    # is priced at long leg minus short leg, and can be worth at most
+    # max_value a share (the strike width).
+    structure: str = "single"
+    legs: int = 1
+    long_label: str = ""
+    short_label: str = ""
+    max_value: float = 0.0
+    tier: str = ""
 
     remaining: int = 0
     fills: list[Fill] = Field(default_factory=list)

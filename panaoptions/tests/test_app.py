@@ -451,9 +451,11 @@ async def test_a_symbol_that_was_passed_over_says_why(desk, monkeypatch):
     await desk.cycle()
 
     events = desk.activity.recent(50)
-    refusals = [e for e in events if e["kind"] in {"contract.none", "risk.refused"}]
+    refusals = [e for e in events
+                if e["kind"] in {"contract.none", "contract.skip", "risk.refused"}]
     assert refusals, "an empty result must carry its reason"
-    assert refusals[0]["level"] == "warn"
+    # A setup no rung of the fallback ladder can fund is a hard risk skip.
+    assert refusals[0]["level"] in {"warn", "bad"}
     assert any(word in refusals[0]["detail"] for word in ("budget", "cost"))
 
 

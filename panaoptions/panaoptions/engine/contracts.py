@@ -15,7 +15,17 @@ every rejection by cause and keeps the nearest miss on price.
 """
 from __future__ import annotations
 
+from panaoptions.engine.liquidity import liquidity_problem
 from panaoptions.models import ContractSearch, Direction, OptionContract, OptionRight
+
+# What the desk tries, in order, when the setup's own contract is over the
+# per-trade budget (or the per-contract price ceiling):
+#   shorter_expiry   the same delta band with less time to expiry
+#   debit_spread     buy the 0.40-0.50 delta leg, sell a further out-of-the-
+#                    money strike, same expiry: less premium, same direction
+#   secondary_delta  a 0.30-0.39 delta contract, only if it is liquid
+# Anything left is a hard risk failure and the setup is skipped.
+DEFAULT_FALLBACK_ORDER = ("shorter_expiry", "debit_spread", "secondary_delta")
 
 
 def choose(symbol: str, chain: list[OptionContract], direction: Direction,
@@ -71,7 +81,7 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         if not (min_delta <= abs(c.delta) <= max_delta):
             reject(f"delta outside {min_delta}-{max_delta}")
             continue
-        if c.spread_pct_of_mid > max_spread:
+        if c.effective_spread_pct > max_spread:
             reject(f"spread wider than {max_spread}% of mid")
             continue
 
@@ -90,24 +100,25 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         survivors.append(c)
 
     if not survivors and budget is not None:
-        fallback, how, diagnosis = _within_budget(
-            chain, want, min_dte, max_dte, min_delta, max_delta, max_spread,
-            min_price, max_price, budget, multiplier, cfg)
         ideal = min(price_only_failures, key=lambda c: c.mid, default=None)
         lead = (f"The {min_delta:.2f}-{max_delta:.2f} delta, {min_dte}-{max_dte} day "
                 f"contract ({ideal.label}) costs ${ideal.cost(multiplier):,.0f}, over "
                 f"the ${budget:,.0f} budget" if ideal else
                 f"Nothing in the {min_delta:.2f}-{max_delta:.2f} delta band fits the "
                 f"${budget:,.0f} budget")
-        if fallback is not None:
-            search.chosen = fallback
+        found, tier, how, misses = _fallback(
+            symbol, chain, want, min_dte, max_dte, min_delta, max_delta, max_spread,
+            min_price, max_price, budget, multiplier, cfg)
+        if found is not None:
+            search.chosen = found
             search.budget_fallback = True
-            search.note = (f"{lead} — took {how}: {fallback.label} "
-                           f"({abs(fallback.delta):.2f} delta, {fallback.dte} days) at "
-                           f"${fallback.cost(multiplier):,.0f}.")
+            search.tier = tier
+            search.note = f"{lead} — {how}"
             return search
-        if ideal is not None or diagnosis:
-            search.note = f"{lead}. No cheaper contract qualified either: {diagnosis}"
+        search.skipped_because = misses
+        if ideal is not None or any(misses):
+            search.note = (f"{lead}. SKIPPED — hard risk failure, no fallback "
+                           f"fits: " + "; ".join(m for m in misses if m))
             return search
 
     if survivors:
@@ -119,6 +130,7 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
         # Cheapest first: on a small account the premium is the binding
         # constraint, and a cheaper contract leaves more room to be wrong.
         search.chosen = min(survivors, key=lambda c: c.mid)
+        search.tier = "primary"
         return search
 
     if price_only_failures:
@@ -145,69 +157,179 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
     return search
 
 
-def _within_budget(chain, want, min_dte, max_dte, min_delta, max_delta,
-                   max_spread, min_price, max_price, budget, multiplier, cfg):
-    """The best contract the budget can buy when the setup's own is too dear.
+def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
+              max_spread, min_price, max_price, budget, multiplier, cfg):
+    """Walk the fallback ladder. Returns (contract, tier, how, misses).
 
-    Returns (contract or None, how it was chosen, why nothing fitted).
-
-    In order of preference, all in the setup's direction:
-      1. the SAME delta band with less time — down to `contracts.min_dte`.
-         Keeps the leverage; pays for it with a shorter runway.
-      2. a lower delta in the setup's own expiry window.
-      3. a lower delta with less time.
-    Never below `contracts.budget_fallback_min_delta` (a lottery ticket
-    below that); 0 switches the fallback off.
+    `misses` says, rung by rung, why each found nothing — the text of a
+    hard-risk skip.
     """
     floor = float(cfg.get("contracts.budget_fallback_min_delta", 0.30) or 0)
-    if floor <= 0:
-        return None, "", ""
     shortest = min(int(cfg.get("contracts.min_dte", 7)), min_dte)
+    order = [str(x) for x in (cfg.get("contracts.fallback_order")
+                              or DEFAULT_FALLBACK_ORDER)]
+    misses: list[str] = []
 
     def ok(c) -> bool:
         return (c.right is want and c.mid > 0
-                and c.spread_pct_of_mid <= max_spread
+                and c.effective_spread_pct <= max_spread
                 and min_price <= c.mid <= max_price
                 and c.cost(multiplier) <= budget)
 
-    tiers = [
-        ("the same delta with less time",
-         lambda c: shortest <= c.dte < min_dte and min_delta <= abs(c.delta) <= max_delta,
-         lambda c: (c.dte, abs(c.delta))),
-        ("the highest delta that fits",
-         lambda c: min_dte <= c.dte <= max_dte and floor <= abs(c.delta) < min_delta,
-         lambda c: (abs(c.delta), c.dte)),
-        ("the highest delta that fits, with less time",
-         lambda c: shortest <= c.dte < min_dte and floor <= abs(c.delta) < min_delta,
-         lambda c: (abs(c.delta), c.dte)),
-    ]
-    for how, where, best in tiers:
-        pool = [c for c in chain if where(c) and ok(c)]
-        if pool:
-            return max(pool, key=best), how, ""
+    for rung in order:
+        if rung == "shorter_expiry":
+            if floor <= 0 or shortest >= min_dte:
+                continue
+            pool = [c for c in chain if shortest <= c.dte < min_dte
+                    and min_delta <= abs(c.delta) <= max_delta and ok(c)]
+            if pool:
+                c = max(pool, key=lambda c: (c.dte, abs(c.delta)))
+                return c, rung, (f"took the same delta with less time: {c.label} "
+                                 f"({abs(c.delta):.2f} delta, {c.dte} days) at "
+                                 f"${c.cost(multiplier):,.0f}."), misses
+            misses.append(f"same delta with less time: none under "
+                          f"${budget:,.0f}")
+        elif rung == "debit_spread":
+            if not bool(cfg.get("contracts.debit_spread.enabled", True)):
+                continue
+            spread, why = build_debit_spread(
+                chain, want, min_delta, max_delta, shortest, max_dte, max_spread,
+                max_price, budget, multiplier, cfg)
+            if spread is not None:
+                kind = "bull call" if want is OptionRight.CALL else "bear put"
+                net = spread.mid
+                rr = (spread.width - net) / net if net else 0.0
+                naked = spread.long_leg.cost(multiplier)
+                return spread, rung, (
+                    f"CONVERTED to a {kind} debit spread: buy "
+                    f"{spread.long_leg.label} ({abs(spread.long_leg.delta):.2f} delta), "
+                    f"sell {spread.short_leg.label} ({abs(spread.short_leg.delta):.2f} "
+                    f"delta). Net debit {net:.2f} = ${spread.cost(multiplier):,.0f} a "
+                    f"spread (naked ${naked:,.0f}); max profit "
+                    f"${(spread.width - net) * (spread.multiplier or multiplier):,.0f}, "
+                    f"reward:risk {rr:.2f}."), misses
+            misses.append(f"debit spread: {why}")
+        elif rung == "secondary_delta":
+            if floor <= 0:
+                continue
+            thin = 0
+            for where, best in (
+                    (lambda c: min_dte <= c.dte <= max_dte and floor <= abs(c.delta) < min_delta,
+                     lambda c: (abs(c.delta), c.dte)),
+                    (lambda c: shortest <= c.dte < min_dte and floor <= abs(c.delta) < min_delta,
+                     lambda c: (abs(c.delta), c.dte))):
+                pool = [c for c in chain if where(c) and ok(c)]
+                liquid = [c for c in pool if not liquidity_problem(c, cfg)]
+                thin += len(pool) - len(liquid)
+                if liquid:
+                    c = max(liquid, key=best)
+                    return c, rung, (
+                        f"took the secondary tier ({floor:.2f}-{min_delta - 0.01:.2f} "
+                        f"delta, liquid): {c.label} ({abs(c.delta):.2f} delta, "
+                        f"{c.dte} days, OI {c.open_interest}) at "
+                        f"${c.cost(multiplier):,.0f}."), misses
+            misses.append(f"{floor:.2f}-{min_delta - 0.01:.2f} delta tier: "
+                          + (f"{thin} fit the budget but failed liquidity"
+                             if thin else _diagnose(chain, want, shortest, max_dte,
+                                                    floor, min_delta, max_spread,
+                                                    budget, multiplier)))
+    return None, "", "", misses
 
-    # Nothing fitted: say exactly why, over everything the fallback could use.
-    candidates = [c for c in chain if c.right is want
-                  and shortest <= c.dte <= max_dte and abs(c.delta) >= floor]
+
+def _diagnose(chain, want, shortest, max_dte, floor, below, max_spread, budget,
+              multiplier) -> str:
+    candidates = [c for c in chain if c.right is want and shortest <= c.dte <= max_dte
+                  and floor <= abs(c.delta) < below]
     if not candidates:
-        return None, "", (f"no {want.value.lower()} at {floor:.2f}+ delta between "
-                          f"{shortest} and {max_dte} days came back")
+        return (f"no {want.value.lower()} at {floor:.2f}-{below - 0.01:.2f} delta "
+                f"between {shortest} and {max_dte} days came back")
     causes: dict[str, int] = {}
     for c in candidates:
         cause = ("no two-sided market" if c.mid <= 0 else
-                 f"spread over {max_spread:g}%" if c.spread_pct_of_mid > max_spread else
+                 f"spread over {max_spread:g}%" if c.effective_spread_pct > max_spread else
                  f"over the ${budget:,.0f} budget" if c.cost(multiplier) > budget else
                  "outside the price range")
         causes[cause] = causes.get(cause, 0) + 1
     priced = [c for c in candidates if c.mid > 0]
     cheapest = min(priced, key=lambda c: c.mid, default=None)
-    return None, "", (
-        f"of {len(candidates)} {want.value.lower()}s at {floor:.2f}+ delta, "
-        f"{shortest}-{max_dte} days: "
-        + ", ".join(f"{n} {k}" for k, n in sorted(causes.items(), key=lambda kv: -kv[1]))
-        + (f". Cheapest was {cheapest.label} ({abs(cheapest.delta):.2f} delta) at "
-           f"${cheapest.cost(multiplier):,.0f}, spread "
-           f"{cheapest.spread_pct_of_mid:.0f}%." if cheapest else "."))
+    return (f"of {len(candidates)}, "
+            + ", ".join(f"{n} {k}" for k, n in sorted(causes.items(), key=lambda kv: -kv[1]))
+            + (f" (cheapest {cheapest.label} at ${cheapest.cost(multiplier):,.0f})"
+               if cheapest else ""))
+
+
+def make_spread(long_leg: OptionContract, short_leg: OptionContract) -> OptionContract:
+    """One position: buy `long_leg`, sell `short_leg`. Priced at the net."""
+    return OptionContract(
+        symbol=long_leg.symbol, right=long_leg.right, strike=long_leg.strike,
+        expiry=long_leg.expiry, dte=long_leg.dte,
+        bid=round(max(long_leg.bid - short_leg.ask, 0.0), 4),
+        ask=round(max(long_leg.ask - short_leg.bid, 0.0), 4),
+        delta=long_leg.delta, implied_volatility=long_leg.implied_volatility,
+        open_interest=min(long_leg.open_interest, short_leg.open_interest),
+        volume=min(long_leg.volume, short_leg.volume),
+        multiplier=long_leg.multiplier,
+        estimated=long_leg.estimated or short_leg.estimated,
+        long_leg=long_leg, short_leg=short_leg)
+
+
+def build_debit_spread(chain, want, min_delta, max_delta, min_dte, max_dte,
+                       max_spread, max_price, budget, multiplier, cfg):
+    """The debit spread that keeps the setup's delta and fits the budget.
+
+    Long leg: the setup's delta band (0.40-0.50), liquid, spread within the
+    limit. Short leg: same expiry, further out of the money (a higher strike
+    for calls, lower for puts), liquid. Of the spreads whose net debit fits
+    the budget and the per-share ceiling, with reward:risk of at least
+    `contracts.debit_spread.min_reward_risk`: nearest expiry (when the desk
+    prefers it), long delta nearest the middle of the band, then the widest —
+    the most upside the budget allows.
+
+    Returns (spread or None, why not).
+    """
+    min_rr = float(cfg.get("contracts.debit_spread.min_reward_risk", 0.8))
+    min_net = float(cfg.get("contracts.debit_spread.min_net_debit", 0.10))
+    centre = (min_delta + max_delta) / 2
+
+    def usable(c) -> bool:
+        return (c.right is want and c.mid > 0 and bool(c.bid and c.ask)
+                and c.effective_spread_pct <= max_spread
+                and not liquidity_problem(c, cfg))
+
+    longs = [c for c in chain if usable(c) and min_dte <= c.dte <= max_dte
+             and min_delta <= abs(c.delta) <= max_delta]
+    if not longs:
+        return None, (f"no liquid {want.value.lower()} at {min_delta:.2f}-"
+                      f"{max_delta:.2f} delta with a spread under {max_spread:g}%")
+    above = want is OptionRight.CALL
+    fits: list[OptionContract] = []
+    over = poor = 0
+    for leg in longs:
+        for short in chain:
+            if (short.expiry != leg.expiry or not usable(short)
+                    or not (short.strike > leg.strike if above else short.strike < leg.strike)):
+                continue
+            spread = make_spread(leg, short)
+            net = spread.mid
+            if net < min_net:
+                continue
+            if spread.cost(multiplier) > budget or net > max_price:
+                over += 1
+                continue
+            if (spread.width - net) / net < min_rr:
+                poor += 1
+                continue
+            fits.append(spread)
+    if not fits:
+        return None, (f"{len(longs)} long leg(s) in band; "
+                      + (f"{over} spread(s) still over ${budget:,.0f}" if over else
+                         "no liquid short strike further out")
+                      + (f", {poor} under {min_rr:g} reward:risk" if poor else ""))
+    if bool(cfg.get("contracts.prefer_nearest_expiry", False)):
+        nearest = min(s.dte for s in fits)
+        fits = [s for s in fits if s.dte == nearest]
+    best = min(fits, key=lambda s: (s.dte, round(abs(abs(s.delta) - centre), 3), -s.width))
+    return best, ""
 
 
 def affordable_delta(chain: list[OptionContract], direction: Direction,

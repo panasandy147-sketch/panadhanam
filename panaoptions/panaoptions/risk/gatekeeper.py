@@ -8,7 +8,9 @@ a particular contract may be bought for that signal, and it checks, in order:
                                    ($400 on $4,000) stops all trading today
     2. the signal itself           five keys, stop on the right side
     3. the contract's side         a call for a long, a put for a short
-    4. the bid-ask spread          no more than 7% of the mid
+    4. the bid-ask spread          no more than 7% of the mid, on the rolling
+                                   1-minute volume-weighted figure; for a
+                                   debit spread, on each leg
     5. the delta band              the setup's band, or down to the 0.30
                                    fallback floor when the band was over budget
     6. the per-trade capital cap   20% of capital ($800), or 25% ($1,000) on the
@@ -175,14 +177,31 @@ class RiskGatekeeper:
             no(f"{contract.label} is a {contract.right.value.lower()}, the "
                f"signal needs a {want.value.lower()}")
 
+        # The spread is the rolling 1-minute volume-weighted figure when the
+        # desk has one (see engine/liquidity.py), not one snapshot; for a
+        # debit spread, each leg must pass on its own.
         mid = contract.mid
-        if mid <= 0 or not (contract.bid and contract.ask):
-            no(f"{contract.label} has no two-sided market")
-        elif contract.spread_pct_of_mid > self.max_spread_pct:
-            no(f"spread {contract.spread_pct_of_mid:.1f}% of mid is wider than "
-               f"{self.max_spread_pct:g}%")
+        legs = ([contract.long_leg, contract.short_leg] if contract.is_spread
+                else [contract])
+        one_sided = [leg.label for leg in legs if leg.mid <= 0 or not (leg.bid and leg.ask)]
+        spread = contract.effective_spread_pct
+        rolling = any(leg.rolling_spread_pct is not None for leg in legs)
+        how = " (1-min volume-weighted)" if rolling else ""
+        if mid <= 0 or one_sided:
+            no(f"{', '.join(one_sided) or contract.label} has no two-sided market")
+        elif spread > self.max_spread_pct:
+            no(f"spread {spread:.1f}% of mid{how} is wider than "
+               f"{self.max_spread_pct:g}%" + (" on a leg" if contract.is_spread else ""))
         else:
-            ok(f"spread {contract.spread_pct_of_mid:.1f}% ≤ {self.max_spread_pct:g}%")
+            ok(f"spread {spread:.1f}%{how} ≤ {self.max_spread_pct:g}%"
+               + (" on both legs" if contract.is_spread else ""))
+        if contract.is_spread:
+            if contract.width <= mid:
+                no(f"{contract.label} costs {mid:.2f} for {contract.width:g} of "
+                   f"width — no profit is possible")
+            else:
+                ok(f"{contract.structure}: net debit {mid:.2f}, width "
+                   f"{contract.width:g}, max loss is the debit")
 
         low, high = self.delta_bounds(delta_band)
         delta = abs(contract.delta)

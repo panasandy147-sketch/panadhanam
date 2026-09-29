@@ -633,6 +633,37 @@ async def _screen() -> None:
             print(f"          {reason}")
 
 
+async def _backtest_spreads(limit: int, symbols: str | None, days: int) -> int:
+    """Replay blocked setups through the fallback ladder (debit spreads)."""
+    from panaoptions import backtest_spreads as bt
+    from panaoptions.data.provider import make_feed
+
+    cfg = get_config()
+    now = clock.now(cfg.timezone)
+    if symbols:
+        items = bt.sessions_for([s.strip() for s in symbols.split(",") if s.strip()],
+                                days, cfg, now)
+        origin = f"{symbols} at 10:00 on the last {days} session(s)"
+    else:
+        items = bt.blocked_from_log(limit)
+        origin = f"the last {len(items)} blocked setup(s) in the desk's log"
+    if not items:
+        print("\nNo blocked setups in the log yet. Try: python run.py "
+              "--backtest-spreads --symbols SPY,QQQ,NVDA --days 5")
+        return 1
+    async with make_feed(cfg) as feed:
+        if not await feed.connect():
+            print("Could not reach the chart feed for historical prices.")
+            return 1
+        results = await bt.replay(items, feed, cfg)
+    summary = bt.summarise(results)
+    print(f"\n=== BACKTEST: {origin} ===")
+    print(bt.to_markdown(results, summary, cfg))
+    saved = bt.save(results, summary, cfg, now)
+    print(f"Saved: {saved['markdown']}")
+    return 0
+
+
 def _report(days: int) -> None:
     from datetime import date, timedelta
 
@@ -751,6 +782,15 @@ def main() -> None:
     parser.add_argument("--once", action="store_true", help="one cycle, then exit")
     parser.add_argument("--status", action="store_true", help="print state and exit")
     parser.add_argument("--screen", action="store_true", help="pre-market screen only")
+    parser.add_argument("--backtest-spreads", action="store_true",
+                        help="replay blocked setups through the debit-spread "
+                             "fallback on historical prices")
+    parser.add_argument("--limit", type=int, default=5,
+                        help="how many blocked setups to replay (default 5)")
+    parser.add_argument("--symbols", default=None,
+                        help="backtest these symbols instead of the log, e.g. SPY,QQQ")
+    parser.add_argument("--days", type=int, default=5,
+                        help="sessions back for --symbols (default 5)")
     parser.add_argument("--explain-contracts", action="store_true",
                         help="what your budget actually buys, on live chains")
     parser.add_argument("--report", nargs="?", const=30, type=int, metavar="DAYS",
@@ -845,6 +885,9 @@ def main() -> None:
     if args.screen:
         asyncio.run(_screen())
         return
+    if args.backtest_spreads:
+        raise SystemExit(asyncio.run(_backtest_spreads(args.limit, args.symbols,
+                                                       args.days)))
     if args.report is not None:
         _report(args.report)
         return

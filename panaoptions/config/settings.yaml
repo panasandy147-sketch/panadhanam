@@ -152,8 +152,9 @@ technical:
 contracts:
   min_dte: 7
   max_dte: 14
-  min_delta: 0.45
-  max_delta: 0.60
+  # The primary tier: 0.40-0.50 delta.
+  min_delta: 0.40
+  max_delta: 0.50
   # Delayed quotes on single-stock options 2-6 weeks out routinely show
   # 5-10% spreads; at 5% nearly every name but SPY and QQQ was turned away.
   # The Risk Gatekeeper refuses anything wider than risk.max_spread_pct_of_mid
@@ -162,8 +163,38 @@ contracts:
   max_spread_pct_of_mid: 7.0
   # When the setup's delta band is over budget, buy the highest-delta contract
   # that fits instead of skipping the trade — but never below this delta.
-  # 0 switches the fallback off.
+  # 0 switches the fallback off. With the primary band at 0.40-0.50, this is
+  # the secondary tier: 0.30-0.39 delta, and only if liquid (below).
   budget_fallback_min_delta: 0.30
+
+  # What to try, in order, when the setup's own contract is over the per-trade
+  # budget or the per-contract price ceiling. Anything still unfunded is a
+  # hard risk failure: skipped, and logged as one.
+  fallback_order: ["shorter_expiry", "debit_spread", "secondary_delta"]
+
+  # The debit spread: buy the 0.40-0.50 delta contract, sell a further out-of-
+  # the-money strike in the same expiry (bull call spread on a long, bear put
+  # spread on a short). Held as one position at its net debit; the most it
+  # can lose is that debit, the most it can make is the width minus it.
+  debit_spread:
+    enabled: true
+    min_reward_risk: 0.8     # (width - debit) / debit
+    min_net_debit: 0.10      # per share
+
+  # Liquid enough for a believable fill at the mid: open interest OR volume.
+  # Applied to the 0.30-0.39 tier and to both legs of a debit spread.
+  liquidity:
+    min_open_interest: 100
+    min_volume: 50
+
+  # The spread check uses the 1-minute volume-weighted average bid-ask spread,
+  # not one snapshot: a quote that flashes wide at the open is sampled again
+  # inside the minute rather than refused on sight.
+  rolling_spread:
+    enabled: true
+    window_seconds: 60
+    resamples: 2
+    resample_delay_seconds: 5
 
   # --------------------------------------------------------------------
   # These two are a SANITY CEILING, not position sizing.

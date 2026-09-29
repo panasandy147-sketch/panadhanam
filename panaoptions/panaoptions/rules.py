@@ -316,8 +316,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         })
     sections.append({
         "title": "Which contract it buys",
-        "intro": ("Calls for a long setup, puts for a short one. Always a "
-                  "single-leg option you buy: no selling, no spreads."),
+        "intro": ("Calls for a long setup, puts for a short one. A single "
+                  "option you buy — or, when that is over budget, a debit "
+                  "spread: buy the target-delta option and sell one further "
+                  "out of the money, so the most it can lose is what was paid."),
         "rules": [
             _rule("Days to expiry (strategies 1–3)"
                   + (" — the NEAREST expiry first: 0DTE where the symbol lists "
@@ -326,16 +328,25 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                      if g("contracts.prefer_nearest_expiry", False) else ""),
                   f"{g('contracts.min_dte', 7)}–{g('contracts.max_dte', 14)} days",
                   "contracts.min_dte / max_dte"),
-            _rule("Delta (strategies 1–3)",
-                  f"{g('contracts.min_delta', 0.45)}–{g('contracts.max_delta', 0.60)}",
+            _rule("Delta — the primary tier (strategies 1–3)",
+                  f"{g('contracts.min_delta', 0.40)}–{g('contracts.max_delta', 0.50)}",
                   "contracts.min_delta / max_delta"),
-            _rule("Bid/ask spread no wider than",
+            _rule("Bid/ask spread no wider than (judged on the rolling "
+                  "1-minute volume-weighted spread"
+                  + (", re-sampled inside the minute before refusing"
+                     if g("contracts.rolling_spread.enabled", True) else "") + ")",
                   f"{_pct(g('contracts.max_spread_pct_of_mid', 7.0))} of the mid price",
-                  "contracts.max_spread_pct_of_mid"),
-            _rule("Over budget: take the same delta with less time, then the "
-                  "highest delta that fits — never below this delta",
+                  "contracts.max_spread_pct_of_mid / rolling_spread"),
+            _rule("Over budget, in order: the same delta with less time; a "
+                  "debit spread (buy the primary-tier option, sell a strike "
+                  "further out, reward:risk ≥ "
+                  f"{g('contracts.debit_spread.min_reward_risk', 0.8)}); then the "
+                  "secondary tier down to this delta, liquid contracts only "
+                  f"(open interest ≥ {g('contracts.liquidity.min_open_interest', 100)} "
+                  f"or volume ≥ {g('contracts.liquidity.min_volume', 50)}). "
+                  "Nothing funded = skipped as a hard risk failure",
                   g("contracts.budget_fallback_min_delta", 0.30) or "off",
-                  "contracts.budget_fallback_min_delta"),
+                  "contracts.fallback_order / debit_spread / liquidity"),
             _rule("Unusual options flow (volume ≥ "
                   f"{g('flow.min_volume_to_oi', 3.0)}x open interest, ≥ "
                   f"{g('flow.min_volume', 1000)} contracts) passes the screen "
