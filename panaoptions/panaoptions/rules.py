@@ -370,6 +370,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                                          ["candlestick_at_level"]) or []))
                   if g("fno.confluence.enabled", False) else "off",
                   "fno.confluence.enabled / strategies"),
+            _rule("GO / NO-GO before any 5-minute candlestick pattern is read: "
+                  "LONG CALL only after a clean sweep below the PDL that closed "
+                  "back inside; LONG PUT only after a sweep above the PDH. No "
+                  "sweep: skipped — \"No institutional sweep of previous day "
+                  "extremes.\"",
+                  (", ".join(str(x).replace("_", " ")
+                             for x in (g("fno.go_no_go.strategies") or [])) or "none")
+                  if g("fno.go_no_go.enabled", True) else "off",
+                  "fno.go_no_go"),
             _rule("Cached before the open, from",
                   f"{g('fno.ingest_from', g('premarket.screen_from', '09:00'))} "
                   f"({'ET' if cfg.market == 'US' else 'IST'})", "fno.ingest_from"),

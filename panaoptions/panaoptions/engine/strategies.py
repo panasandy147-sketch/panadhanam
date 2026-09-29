@@ -329,6 +329,28 @@ ALL: list[type[Strategy]] = [
 ]
 
 
+NO_SWEEP = "No institutional sweep of previous day extremes."
+
+
+def pd_gate_strategies(cfg) -> set[str]:
+    """The candlestick strategies behind the previous-day go/no-go."""
+    if not bool(cfg.get("fno.go_no_go.enabled", True)):
+        return set()
+    return {str(s).lower() for s in (cfg.get("fno.go_no_go.strategies")
+                                     or ["candlestick_at_level", "liquidity_sweep"])}
+
+
+def pd_sweep_now(df5: pd.DataFrame, levels: SessionLevels, cfg) -> dict | None:
+    """A clean sweep of the PDL (calls) or PDH (puts) on today's 5m tape,
+    closed back inside — the same rule as the PD Liquidity Sweep strategy."""
+    key = "strategies.pd_liquidity_sweep"
+    if not (levels.previous_high and levels.previous_low):
+        return None
+    return sweep_of_previous_day(df5, levels, float(cfg.get(f"{key}.proximity_pct", 0.25)),
+                                 int(cfg.get(f"{key}.lookback_bars", 3)),
+                                 bool(cfg.get(f"{key}.first_test_only", True)))
+
+
 def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
                  cfg) -> tuple[Setup | None, list[Setup]]:
     """Run every enabled, in-window strategy. Returns (winner, all attempts).
@@ -346,12 +368,30 @@ def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
     df15 = ta.resample(df5, "15min")
     attempts: list[Setup] = []
     winner: Setup | None = None
+    gated = pd_gate_strategies(cfg)
+    sweep: dict | None | bool = False           # not looked yet
 
     for cls in ALL:
         strategy = cls(cfg)
         if not strategy.enabled or not strategy.in_window(df5):
             continue
+        if strategy.key in gated:
+            # Previous-day go/no-go, BEFORE the pattern is even read: calls
+            # only after a clean sweep of the PDL, puts only after the PDH.
+            if sweep is False:
+                sweep = pd_sweep_now(df5, levels, cfg)
+            if sweep is None:
+                skipped = _base(symbol, df5, strategy.name)
+                skipped.blockers.append(NO_SWEEP)
+                attempts.append(skipped)
+                continue
         setup = strategy.evaluate(symbol, df5, df15, levels)
+        if strategy.key in gated and setup.triggered and sweep:
+            want = Direction.LONG if sweep["direction"] > 0 else Direction.SHORT
+            if setup.direction is not want:
+                setup.blockers.append(
+                    f"{NO_SWEEP} ({'LONG CALL needs the PDL' if setup.direction is Direction.LONG else 'LONG PUT needs the PDH'} "
+                    f"swept; only the {'PDL' if want is Direction.LONG else 'PDH'} was)")
         attempts.append(setup)
         if winner is None and setup.triggered:
             winner = setup

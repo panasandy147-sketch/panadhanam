@@ -82,6 +82,9 @@ def cfg(tmp_path, monkeypatch):
                              # the premium targets the ledger tests are written
                              # against; tests/test_exit_plan.py tests r_multiple
                              "exit_style": "auto"})
+    # Likewise the previous-day go/no-go on the candlestick strategies;
+    # tests/test_go_no_go.py tests it.
+    cfg.data["fno"].setdefault("go_no_go", {})["enabled"] = False
     return cfg
 
 

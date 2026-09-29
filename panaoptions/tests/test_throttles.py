@@ -52,7 +52,7 @@ def test_the_shipped_numbers_are_the_tournament_ones():
         assert g("risk.daily_loss_limit_pct") == 3.0
         assert g("risk.max_risk_per_trade_pct") == 2.0
         assert g("risk.max_open_trades") == 2
-        assert g("risk.max_daily_trades") == 4
+        assert g("risk.max_daily_trades") == 3
     risk = RiskManager(Config())
     assert risk.daily_limit == 120.0 and risk.risk_per_trade == 80.0
 
@@ -96,12 +96,12 @@ def test_a_contract_that_alone_risks_more_than_2pct_is_refused(shipped):
 # --------------------------------------------------------------------------- #
 # 2 open, 4 a day
 # --------------------------------------------------------------------------- #
-def test_the_fifth_trade_of_the_day_is_refused(shipped):
+def test_the_fourth_trade_of_the_day_is_refused(shipped):
     risk = RiskManager(shipped)
     risk.roll_day("2026-09-23")
-    risk.state.trades_taken = 4
-    signal, why = risk.size(_setup(), _contract(), "S5", NOW)
-    assert signal is None and "Daily trade limit: 4 of 4" in why
+    risk.state.trades_taken = 3
+    signal, why = risk.size(_setup(), _contract(), "S4", NOW)
+    assert signal is None and "Daily trade limit: 3 of 3" in why
 
 
 def test_a_third_open_position_is_refused(shipped):
@@ -211,13 +211,13 @@ def test_the_simulation_applies_the_throttles_and_the_breaker(shipped):
     fills = [_fill(10, 0, 90, "SPY"), _fill(10, 0, 90, "QQQ"),
              _fill(10, 5, 90, "AAPL"),                   # a third at once
              _fill(11, 0, -45, "SPY"), _fill(11, 0, -45, "QQQ"),
-             _fill(12, 0, 90, "NVDA")]                   # the fifth of the day
+             _fill(12, 0, 90, "NVDA")]                   # past three a day
     taken, skipped, locked, dd = validate.simulate(fills, shipped)
-    assert [t.symbol for t in taken] == ["QQQ", "SPY", "QQQ", "SPY"]      # same time: by name
+    assert [t.symbol for t in taken] == ["QQQ", "SPY", "QQQ"]      # same time: by name
     assert skipped["max open trades (2)"] == 1
-    assert skipped["daily trade limit (4)"] == 1
+    assert skipped["daily trade limit (3)"] == 2
     # $45 planned at the stop per contract, $80 a trade -> one contract: R = pnl / 45.
-    assert [t.r for t in taken] == [2.0, 2.0, -1.0, -1.0]
+    assert [t.r for t in taken] == [2.0, 2.0, -1.0]
 
     losers = [_fill(10, 0, -90, "SPY"), _fill(10, 0, -45, "QQQ"),
               _fill(11, 0, 90, "AAPL")]                  # after -$135: locked out
@@ -284,7 +284,7 @@ def test_without_a_validation_the_priority_list_decides(shipped):
     assert ranking.preferred(shipped, SetupType.PD_LIQUIDITY_SWEEP)
     assert ranking.preferred(shipped, SetupType.ORB_VWAP)
     assert not ranking.preferred(shipped, SetupType.VWAP_EMA_PULLBACK)
-    # 4 a day, 2 reserved: a non-preferred strategy may take the first two only.
+    # 3 a day, 1 reserved: a non-preferred strategy may take the first two only.
     assert ranking.slot_refusal(shipped, SetupType.VWAP_EMA_PULLBACK, 1) == ""
     assert "kept for the strategies" in ranking.slot_refusal(
         shipped, SetupType.VWAP_EMA_PULLBACK, 2)
@@ -321,9 +321,9 @@ def test_the_simulation_keeps_the_last_slots_for_the_better_strategies(shipped):
     pull = "VWAP / 9-EMA Pullback"
     fills = [_fill(10, 0, 45, "SPY", strategy=pull), _fill(10, 40, 45, "QQQ", strategy=pull),
              _fill(11, 20, 45, "AAPL", strategy=pull),          # 3rd weak one: held back
-             _fill(12, 0, 90, "NVDA"), _fill(12, 50, 90, "AMD")]  # ORB: the reserved slots
+             _fill(12, 0, 90, "NVDA"), _fill(12, 50, 90, "AMD")]  # ORB: the reserved slot
     taken, skipped, _, _ = validate.simulate(fills, shipped)
-    assert [t.symbol for t in taken] == ["SPY", "QQQ", "NVDA", "AMD"]
+    assert [t.symbol for t in taken] == ["SPY", "QQQ", "NVDA"]      # AMD: past three
     assert skipped["reserved slots (kept for the better strategies)"] == 1
 
 

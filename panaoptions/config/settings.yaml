@@ -117,6 +117,14 @@ auto_watchlist:
   weights: { trend: 0.25, volume: 0.25, analysts: 0.20, buzz: 0.15, liquidity: 0.15 }
 
 fno:
+  # The previous-day GO/NO-GO for every 5-minute candlestick strategy,
+  # checked BEFORE the pattern is read: LONG CALL only after a clean sweep
+  # below the previous-day low (PDL) that closed back inside; LONG PUT only
+  # after a sweep above the PDH. No sweep: skipped, "No institutional sweep of
+  # previous day extremes." (The sweep rule is the PD Liquidity Sweep's own.)
+  go_no_go:
+    enabled: true
+    strategies: ["candlestick_at_level", "liquidity_sweep"]
   # The previous day's F&O picture, mapped for every watched symbol once a
   # day after the screen (and refreshed whenever a chain is read): PDH / PDL /
   # PDC from the tape, total call and put open interest and their change, and
@@ -471,11 +479,13 @@ risk:
   # good morning is given back: the 10-session backtest took 400+ setups
   # with no throttle, and the extra trades were the losing ones.
   max_open_trades: 2
-  max_daily_trades: 4
-  # Of those four, the last two are kept for the strategies with the best
+  # Three trades a day, win or lose: once three have been taken the scanner
+  # shuts down for the rest of the calendar session (restarts included).
+  max_daily_trades: 3
+  # Of those three, the last one is kept for the strategies with the best
   # backtested edge (ranking, below): first-come-first-served handed the day
   # to whatever fired earliest — mostly the weaker morning setups.
-  reserved_slots: 2
+  reserved_slots: 1
   # The most one trade may LOSE at its first stop, as a share of capital:
   # 2% = $80 on $4,000. max_capital_deployed_pct (below) still caps the
   # PREMIUM; this caps the loss, and whichever is tighter sizes the trade.
