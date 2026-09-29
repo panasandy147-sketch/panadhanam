@@ -54,6 +54,9 @@ class Review(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.now)
     trades: list[dict[str, Any]] = Field(default_factory=list)
     stats: dict[str, Any] = Field(default_factory=dict)
+    market: str = "US"
+    # Every buy and sell so far, date by date, from the audit log.
+    audit_days: list[dict[str, Any]] = Field(default_factory=list)
     coach: Coach | None = None
 
     @property
@@ -113,8 +116,13 @@ def collect(week_start: date, week_end: date, cfg,
     rows = sorted(rows, key=lambda r: str(r.get("ts") or ""))
     complete = (session_over(cfg, week_end) if period == "day"
                 else is_complete(week_end, cfg))
+    from panaoptions import audit
+    # Monday to today (or Friday): a Wednesday look shows Mon, Tue and Wed.
+    until = min(week_end, max(today(cfg), week_start))
     return Review(week_start=week_start, week_end=week_end, period=period,
-                  complete=complete, trades=rows, stats=analyse(rows))
+                  complete=complete, trades=rows, stats=analyse(rows),
+                  market=str(getattr(cfg, "market", "US")),
+                  audit_days=audit.by_day(week_start, until))
 
 
 # --------------------------------------------------------------------------- #
@@ -292,6 +300,7 @@ def to_markdown(review: Review, cfg) -> str:
                 + ".** These numbers are provisional.", ""]
     if not s["total"]:
         out += ["No trades were graded in this window.", ""]
+        out += _audit_markdown(review, currency)
         return "\n".join(out)
 
     out += [
@@ -348,7 +357,37 @@ def to_markdown(review: Review, cfg) -> str:
                 out.append(f"| {c.rule} | {c.change} | {c.why} |")
             out.append("")
         out += ["### Focus next week", "", coach.focus_next_week, ""]
+    out += _audit_markdown(review, currency)
     return "\n".join(out)
+
+
+def _audit_markdown(review: Review, currency: str) -> list[str]:
+    """The audit log, date by date — as far as the week has got."""
+    days = review.audit_days
+    out = ["## Audit log — day by day", ""]
+    if not days:
+        return out + ["No buys or sells recorded yet.", ""]
+    out += ["Every buy and sell with the case for it and how it ended, as the "
+            "desk wrote it at the time.", ""]
+    for d in days:
+        out += [f"### {d.get('weekday', '')} {d['date']} — {d['buys']} buy(s), "
+                f"{d['sells']} sell(s), P&L {currency}{d['pnl']:+,.2f} "
+                f"({d['wins']}W / {d['losses']}L)", "",
+                f"File: `audit/{d['date']}.md`", "",
+                "| Time | Event | Contract | Strategy | Qty | Price | Cost / P&L | Why |",
+                "|---|---|---|---|---|---|---|---|"]
+        for e in d["events"]:
+            money = (f"{currency}{e['cost']:,.2f}" if e.get("cost") is not None
+                     else f"{currency}{e['pnl']:+,.2f}" if e.get("pnl") is not None else "—")
+            why = str(e.get("reason") or "").replace("|", "/")[:220]
+            if e.get("estimated"):
+                why = "ESTIMATED price. " + why
+            out.append(f"| {e.get('time', '')} | {e.get('event')} | {e.get('contract')} | "
+                       f"{e.get('strategy') or ''} | {e.get('quantity') or ''} | "
+                       f"{e.get('price') if e.get('price') is not None else '—'} | "
+                       f"{money} | {why} |")
+        out.append("")
+    return out
 
 
 def save(review: Review, cfg) -> dict[str, str]:

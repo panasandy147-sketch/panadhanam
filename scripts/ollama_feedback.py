@@ -227,7 +227,8 @@ def closed_trades(since: date, until: date) -> list[dict[str, Any]]:
         bias, scores = _votes(row.get("signal_id"))
         want = 1 if bias == "BULLISH" else -1 if bias == "BEARISH" else 0
         out.append({
-            "date": str(row.get("ts") or "")[:10], "symbol": row.get("symbol"),
+            "date": str(row.get("ts") or "")[:10], "market": row.get("market"),
+            "symbol": row.get("symbol"),
             "setup": row.get("setup"), "side": row.get("side"), "bias": bias,
             "verdict": row.get("verdict"), "discipline": row.get("execution_score"),
             "pnl": round(float(row.get("pnl") or 0.0), 2),

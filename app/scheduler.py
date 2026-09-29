@@ -427,8 +427,11 @@ class TradingEngine:
         here is what the desk was waiting for" is the more common outcome and
         the more useful one to read.
         """
+        # Keyed by market as well as date: on Auto, India closes and then the
+        # US trades the same date, and each needs its own day record.
         today = clock.market_now(self.timezone).date().isoformat()
-        if self._day_summary_on == today:
+        marker = f"{self.cfg.active_market}:{today}"
+        if self._day_summary_on == marker:
             return
 
         delay = int(self.cfg.get("trading_day.summary_after_square_off_minutes", 5))
@@ -439,23 +442,26 @@ class TradingEngine:
         if (now.hour * 60 + now.minute) < after:
             return
         if now.weekday() >= 5:
-            self._day_summary_on = today
+            self._day_summary_on = marker
             return
 
         try:
             summary = self.trading_day.report()
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not build the day summary: %s", exc)
-            self._day_summary_on = today
+            self._day_summary_on = marker
             return
 
-        self._day_summary_on = today
+        self._day_summary_on = marker
         # Keep the day for the weekly review: its record and its audit.
         try:
             from app.core.record import save_day
             save_day(self.cfg, now.date())
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not save the day's record: %s", exc)
+        # And the week so far: journal/weekly/ holds Monday-to-today after
+        # every session, not only after Friday.
+        await self._save_week_so_far()
         summary["published_at"] = now.isoformat()
         self._last_day_summary = summary
         await bus.publish("trading_day.summary", summary)
@@ -465,6 +471,23 @@ class TradingEngine:
                  "%+.2fR, %s%+.0f", today, summary.get("signals_generated", 0),
                  summary.get("trades_taken", 0), summary.get("trades_closed", 0),
                  summary.get("total_r", 0.0), cur, summary.get("pnl", 0.0))
+
+    async def _save_week_so_far(self) -> None:
+        """The provisional weekly review, rewritten after each session.
+
+        No coach (that waits for Friday); just the numbers and the audit log
+        day by day, so a Wednesday look at journal/weekly/ has Mon-Wed in it.
+        """
+        from app.journal import weekly
+        try:
+            start, end = weekly.current_week(self.cfg)
+            review = await weekly.build(start, end, with_coach=False, cfg=self.cfg)
+            if review.trades or review.audit_days:
+                weekly.save(review)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not save the week so far: %s", exc)
 
     async def _maybe_write_weekly_review(self) -> None:
         """Have the week's review waiting once Friday has closed.
@@ -477,13 +500,14 @@ class TradingEngine:
 
         try:
             start, end = weekly.current_week(self.cfg)
-            if self._weekly_written_for == end.isoformat():
+            marker = f"{self.cfg.active_market}:{end.isoformat()}"
+            if self._weekly_written_for == marker:
                 return
             if not weekly.is_complete(end, self.cfg):
                 return
 
             review = await weekly.build(start, end, cfg=self.cfg)
-            self._weekly_written_for = end.isoformat()
+            self._weekly_written_for = marker
             # Friday's self-reflection runs whether or not a review is saved;
             # with too few trades it records that and changes nothing.
             await self._friday_feedback(start, end)
@@ -496,7 +520,8 @@ class TradingEngine:
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not write the weekly review: %s", exc)
             # Do not retry every two minutes for the rest of the weekend.
-            self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
+            self._weekly_written_for = (f"{self.cfg.active_market}:"
+                                        f"{weekly.current_week(self.cfg)[1].isoformat()}")
 
     async def _friday_feedback(self, start, end) -> None:
         """scripts/ollama_feedback.py: Ollama tunes the analysts' vote weights."""

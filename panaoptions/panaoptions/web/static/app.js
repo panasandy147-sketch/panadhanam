@@ -763,11 +763,12 @@ function renderReview(r, target) {
     `<div class="note warn"><b>This ${daily ? "session is not over" : "week is not finished"}.</b>
      These numbers are provisional.</div>`;
 
+  const audit = renderAuditDays(r);
   if (!s.total) {
     $(target).innerHTML = `${provisional}
       <div class="empty">No graded trades ${daily
         ? `on ${esc(r.week_start)}`
-        : `in ${esc(r.week_start)} – ${esc(r.week_end)}`}.</div>`;
+        : `in ${esc(r.week_start)} – ${esc(r.week_end)}`}.</div>${audit}`;
     return;
   }
 
@@ -798,7 +799,39 @@ function renderReview(r, target) {
         <p style="margin:4px 0">${esc(c.focus_next_week)}</p>
         <p style="font-size:11px;color:var(--muted);margin-top:8px">
           Graded by ${esc(c.generated_by)}.</p>
-      </div>` : ""}`;
+      </div>` : ""}
+    ${audit}`;
+}
+
+/* The audit log, date by date: every buy and sell with its reason. On a
+   weekly review mid-week it runs Monday to today. */
+function renderAuditDays(r) {
+  const days = r.audit_days || [];
+  if (!days.length) {
+    return `<div class="empty audit-days">No buys or sells in the audit log
+      yet${r.period === "day" ? " today" : " this week"}.</div>`;
+  }
+  return `<div class="audit-days" style="padding:10px 14px">
+    <div class="k">Audit log — day by day</div>
+    ${days.map((d, i) => `
+      <details ${i === days.length - 1 ? "open" : ""}>
+        <summary><b>${esc(d.weekday)} ${esc(d.date)}</b> · ${d.buys} buy(s),
+          ${d.sells} sell(s) · <span class="${sign(d.pnl)}">${money(d.pnl)}</span>
+          · ${d.wins}W / ${d.losses}L</summary>
+        <table><thead><tr><th>Time</th><th>Event</th><th>Contract</th>
+          <th>Strategy</th><th class="num">Qty</th><th class="num">Price</th>
+          <th class="num">Cost / P&amp;L</th><th>Why</th></tr></thead>
+        <tbody>${d.events.map((e) => `<tr>
+          <td>${esc(e.time)}</td><td>${esc(e.event)}</td><td>${esc(e.contract)}</td>
+          <td>${esc(e.strategy || "")}</td><td class="num">${e.quantity ?? ""}</td>
+          <td class="num">${e.price == null ? "—" : num(e.price, 2)}</td>
+          <td class="num ${e.pnl == null ? "" : sign(e.pnl)}">${
+            e.cost != null ? money(e.cost) : e.pnl != null ? money(e.pnl) : "—"}</td>
+          <td style="font-size:12px">${e.estimated ? "<b>ESTIMATED price.</b> " : ""}${
+            esc(e.reason)}</td></tr>`).join("")}
+        </tbody></table>
+      </details>`).join("")}
+  </div>`;
 }
 
 function renderActivity(d, decisionsOnly) {

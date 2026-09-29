@@ -110,7 +110,10 @@ A real-money account is never auto-armed, and no setting permits it.
 A few minutes after square-off the **Today** panel fills in by itself — signals,
 trades, win rate, total R, P&L, and what the desk was waiting for on a day it
 took nothing. Every trade is journalled as it closes, and the **Weekly Review**
-panel builds the week from them.
+panel builds the week from them. It also shows the audit log day by day: every
+buy and sell with its reason, Monday to today. The week so far is saved to
+`journal/weekly/<week>-<us|in>.md` after every session, so US and India each
+have their own file.
 
 See [docs/PAPER-TRADING.md](docs/PAPER-TRADING.md).
 

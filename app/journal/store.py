@@ -128,7 +128,8 @@ def save_card(card: MistakeCard) -> Path:
 
 def entries(limit: int = 200, setup: str | None = None,
             verdict: str | None = None, since: str | None = None,
-            until: str | None = None) -> list[dict[str, Any]]:
+            until: str | None = None, market: str | None = None
+            ) -> list[dict[str, Any]]:
     """Journal rows, or an empty list if the journal has never been written.
 
     The tables are created on first use, so any read-only caller — the day
@@ -155,6 +156,11 @@ def entries(limit: int = 200, setup: str | None = None,
     if until:
         clauses.append("ts <= ?")
         params.append(f"{until}T23:59:59.999999")
+    if market:
+        # US and India are reviewed apart: a rupee P&L added to a dollar one
+        # means nothing.
+        clauses.append("UPPER(market) = ?")
+        params.append(str(market).upper())
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY ts DESC LIMIT ?"

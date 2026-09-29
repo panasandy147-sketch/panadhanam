@@ -189,7 +189,7 @@ async def download_weekly(week: str | None = None,
     else:
         body, media = weekly.to_markdown(review), "text/markdown; charset=utf-8"
 
-    name = f"weekly-review-{review.label}.{format}"
+    name = f"weekly-review-{review.label}-{str(review.market).lower()}.{format}"
     return Response(
         content=body, media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{name}"'})

@@ -57,6 +57,8 @@ def week(tmp_path, monkeypatch, cfg):
     monkeypatch.setattr(db, "_conn", None, raising=False)
     monkeypatch.setattr(type(cfg), "db_path",
                         property(lambda self: tmp_path / "runtime.db"))
+    # The seeded trades are US names: the review reads one market's week.
+    monkeypatch.setattr(cfg, "active_market", "US")
 
     monday = datetime(2026, 9, 14, 10, 0)
     _seed(monday, [

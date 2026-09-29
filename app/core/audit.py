@@ -188,6 +188,66 @@ def days(since: date, until: date, market: str | None = None) -> list[tuple[str,
     return sorted(out, key=lambda x: (x[1], x[0]))
 
 
+_OPENS = {"BUY", "SELL_SHORT"}
+
+
+def _event_date(e: dict[str, Any]) -> str:
+    return str(e.get("market_time") or e.get("ts") or "")[:10]
+
+
+def _why_text(why: Any) -> str:
+    """explain.why_bought's dict (or an older string) as one line."""
+    if isinstance(why, dict):
+        parts = [why.get("headline") or "",
+                 ("(" + ", ".join(why.get("confirmations") or []) + ")")
+                 if why.get("confirmations") else "",
+                 why.get("vote") or ""]
+        return " ".join(p for p in parts if p).strip()
+    return str(why or "")
+
+
+def by_day(since: date, until: date, market: str | None = None) -> list[dict[str, Any]]:
+    """Every buy and sell from `since` to `until`, grouped by market day, in
+    order — what the weekly review shows date by date, mid-week included."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for e in entries(since=since, until=until, market=market):
+        grouped.setdefault(_event_date(e), []).append(e)
+    out = []
+    for day in sorted(grouped):
+        rows = []
+        for e in grouped[day]:
+            opening = e.get("event") in _OPENS
+            rows.append({
+                "time": str(e.get("market_time") or "")[11:16],
+                "event": e.get("event"), "market": e.get("market"),
+                "symbol": e.get("symbol"),
+                "instrument": e.get("tradingsymbol") or e.get("symbol"),
+                "quantity": e.get("quantity"),
+                "price": e.get("entry") if opening else e.get("exit_price"),
+                "stop": e.get("stop_loss") if opening else None,
+                "target": e.get("target") if opening else None,
+                "amount": e.get("notional") if opening else None,
+                "risk": e.get("total_risk") if opening else None,
+                "pnl": None if opening else e.get("pnl"),
+                "r_multiple": None if opening else e.get("r_multiple"),
+                "held_minutes": None if opening else e.get("held_minutes"),
+                "reason": (_why_text(e.get("why")) if opening else
+                           e.get("exit_detail") or e.get("why_sold")) or "",
+                "counter_argument": e.get("counter_argument") if opening else None,
+                "setup": ((e.get("volume_profile") or {}).get("name")
+                          if opening else "") or "",
+                "signal_id": e.get("signal_id"),
+            })
+        sells = [r for r in rows if r["pnl"] is not None]
+        wd = date.fromisoformat(day).strftime("%a") if len(day) == 10 else ""
+        out.append({"date": day, "weekday": wd, "events": rows,
+                    "buys": len(rows) - len(sells), "sells": len(sells),
+                    "wins": sum(1 for r in sells if (r["pnl"] or 0) > 0),
+                    "losses": sum(1 for r in sells if (r["pnl"] or 0) < 0),
+                    "pnl": round(sum(r["pnl"] or 0.0 for r in sells), 2)})
+    return out
+
+
 def by_signal(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """{signal_id: {"buy": {...}, "sell": {...}}} — a trade's two halves."""
     out: dict[str, dict[str, Any]] = {}

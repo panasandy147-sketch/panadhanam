@@ -231,13 +231,22 @@ def test_todays_review_builds(page):
     assert "could not" not in _text(page, "#daily-body").lower()
 
 
-def test_weekly_review_builds(page):
+def test_weekly_review_builds(page, desk):
+    from panaoptions import audit
+    # Each test has its own journal folder, so put this week's buy in it.
+    audit._write(desk["desk"].cfg, {
+        "event": "BUY", "trade_id": "PT-BROWSER", "symbol": "SPY",
+        "contract": "SPY 2026-10-02 110C", "strategy": "orb_vwap", "quantity": 1,
+        "entry": 0.8, "cost": 80.0, "confirmations": ["opening-range break"]})
     if page.is_checked("#w-coach"):
         page.uncheck("#w-coach")
     page.click("#btn-weekly")
     page.wait_for_function(
         "document.getElementById('weekly-body').innerText.trim().length > 40", timeout=30000)
     assert "could not" not in _text(page, "#weekly-body").lower()
+    # This week's buys and sells are in the review, date by date.
+    _wait_text(page, "#weekly-body .audit-days", "audit log — day by day", timeout=5000)
+    assert "BUY" in _text(page, "#weekly-body .audit-days")
 
 
 def test_the_rules_popup_opens_fills_and_closes(page):

@@ -100,6 +100,8 @@ class WeekReview(BaseModel):
     trades: list[dict[str, Any]] = Field(default_factory=list)
     stats: dict[str, Any] = Field(default_factory=dict)
     agent_scorecard: list[dict[str, Any]] = Field(default_factory=list)
+    # Every buy and sell of the week so far, date by date, from the audit log.
+    audit_days: list[dict[str, Any]] = Field(default_factory=list)
     coach: CoachNotes | None = None
 
     @property
@@ -111,12 +113,18 @@ def collect(week_start: date, week_end: date,
             cfg: Config | None = None) -> WeekReview:
     """Gather the week from the journal and the decision log."""
     cfg = cfg or get_config()
+    # One market's week: US and India are reviewed separately.
     rows = store.entries(limit=500, since=week_start.isoformat(),
-                         until=week_end.isoformat())
+                         until=week_end.isoformat(), market=cfg.active_market)
     # entries() returns newest first; a week reads forwards.
     rows = sorted(rows, key=lambda r: str(r.get("ts") or ""))
 
     trades = [_trade_detail(r) for r in rows]
+    from app.core import audit
+    # Monday to today (or Friday): a Wednesday look shows Mon, Tue and Wed.
+    today = clock.market_now(str(cfg.get("system.timezone", "Asia/Kolkata"))).date()
+    audit_days = audit.by_day(week_start, min(week_end, max(today, week_start)),
+                              market=cfg.active_market)
     return WeekReview(
         week_start=week_start,
         week_end=week_end,
@@ -126,6 +134,7 @@ def collect(week_start: date, week_end: date,
         trades=trades,
         stats=analyse(rows),
         agent_scorecard=score_agents(trades),
+        audit_days=audit_days,
     )
 
 
@@ -421,10 +430,45 @@ _AGENT_NAMES = {
 }
 
 
-def _audit_days(start: date, end: date) -> list[tuple[str, str]]:
-    """(market, day) pairs of this week that have an audit file."""
-    from app.core import audit
-    return audit.days(start, end)
+def _money(cur: str, value: Any) -> str:
+    try:
+        return f"{cur}{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _audit_markdown(review: WeekReview) -> list[str]:
+    """The week's audit log, date by date — as far as the week has got."""
+    cur = review.currency
+    days = review.audit_days
+    if not days:
+        return ["## Audit log — day by day", "",
+                "No buys or sells recorded yet this week.", ""]
+    out = ["## Audit log — day by day", "",
+           "Every buy and sell with the case for it and how it ended, as the "
+           "desk wrote it at the time.", ""]
+    for d in days:
+        m = str(review.market or "IN").lower()
+        out += [f"### {d.get('weekday', '')} {d['date']} — {d['buys']} buy(s), "
+                f"{d['sells']} sell(s), P&L {_money(cur, d['pnl'])} "
+                f"({d['wins']}W / {d['losses']}L)", "",
+                f"Files: `journal/audit/{m}/{d['date']}.md` · "
+                f"`journal/daily/{d['date']}-{m}-record.md`", "",
+                "| Time | Event | Instrument | Qty | Price | Stop / Target | P&L | Why |",
+                "|---|---|---|---|---|---|---|---|"]
+        for e in d["events"]:
+            levels = (f"{e['stop']} / {e['target']}"
+                      if e.get("stop") is not None else "—")
+            pnl = "—" if e.get("pnl") is None else (
+                _money(cur, e["pnl"]) + (f" ({e['r_multiple']:+.2f}R)"
+                                         if e.get("r_multiple") is not None else ""))
+            why = str(e.get("reason") or "").replace("|", "/").replace("\n", " ")[:220]
+            out.append(f"| {e.get('time', '')} | {e.get('event')} | "
+                       f"{e.get('instrument')} | {e.get('quantity') or ''} | "
+                       f"{e.get('price') if e.get('price') is not None else '—'} | "
+                       f"{levels} | {pnl} | {why} |")
+        out.append("")
+    return out
 
 
 def to_markdown(review: WeekReview) -> str:
@@ -441,15 +485,8 @@ def to_markdown(review: WeekReview) -> str:
         out += ["> **This week is not finished.** These numbers are provisional "
                 "and will change before Friday's close.", ""]
 
-    # Every buy and sell of the week, with the reasons, day by day.
-    days = _audit_days(review.week_start, review.week_end)
-    if days:
-        out += ["## Audit log", "",
-                "Every buy and sell with the case for it and how it ended, as "
-                "written at the time:", ""]
-        out += [f"- {m} {d}: `journal/audit/{m.lower()}/{d}.md` · day record "
-                f"`journal/daily/{d}-{m.lower()}-record.md`" for m, d in days]
-        out.append("")
+    # Every buy and sell of the week so far, with the reasons, day by day.
+    out += _audit_markdown(review)
 
     if not review.trades:
         out += ["No trades were logged in this window, so there is nothing to "
@@ -639,8 +676,10 @@ def save(review: WeekReview) -> dict[str, Any]:
     folder = store.JOURNAL_DIR / "weekly"
     folder.mkdir(parents=True, exist_ok=True)
 
-    md = folder / f"{review.label}.md"
-    js = folder / f"{review.label}.json"
+    # The market in the name, or India's week would overwrite the US one.
+    stem = f"{review.label}-{str(review.market or 'IN').lower()}"
+    md = folder / f"{stem}.md"
+    js = folder / f"{stem}.json"
     md.write_text(to_markdown(review), encoding="utf-8")
     js.write_text(review.model_dump_json(indent=2), encoding="utf-8")
 

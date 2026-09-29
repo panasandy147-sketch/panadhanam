@@ -590,10 +590,12 @@ function renderWeekly(r) {
     <div class="banner warn" style="margin:12px 14px">
       <b>This week is not finished.</b> These numbers are provisional.</div>`;
 
+  const audit = renderAuditDays(r);
   if (!r.trades?.length) {
     $("weekly-body").innerHTML = `${provisional}
-      <div class="empty">No trades were logged this week. Check the Activity
-      Log for what the desk approved and why nothing filled.</div>`;
+      <div class="empty">No trades were graded this week yet. Check the
+      Activity Log for what the desk approved and why nothing filled.</div>
+      ${audit}`;
     return;
   }
 
@@ -659,7 +661,39 @@ function renderWeekly(r) {
     </div>
     <div style="padding:10px 14px 0" class="k">Every trade, and why the desk took it</div>
     <div style="padding:4px 14px 10px">${trades}</div>
+    ${audit}
     ${coach}`;
+}
+
+/* The week's audit log, date by date: every buy and sell with its reason.
+   Mid-week it runs Monday to today. */
+function renderAuditDays(r) {
+  const days = r.audit_days || [];
+  if (!days.length) {
+    return `<div class="empty" id="weekly-audit">No buys or sells in the audit
+      log yet this week.</div>`;
+  }
+  return `<div id="weekly-audit" style="padding:10px 14px">
+    <div class="k">Audit log — day by day</div>
+    ${days.map((d) => `
+      <details class="weekly-day" ${d === days[days.length - 1] ? "open" : ""}>
+        <summary><b>${esc(d.weekday)} ${esc(d.date)}</b> · ${d.buys} buy(s),
+          ${d.sells} sell(s) · <span class="${signClass(d.pnl)}">${money(d.pnl, 2)}</span>
+          · ${d.wins}W / ${d.losses}L</summary>
+        <table><thead><tr><th>Time</th><th>Event</th><th>Instrument</th>
+          <th class="num">Qty</th><th class="num">Price</th><th>Stop / Target</th>
+          <th class="num">P&amp;L</th><th>Why</th></tr></thead>
+        <tbody>${d.events.map((e) => `<tr>
+          <td>${esc(e.time)}</td><td>${esc(e.event)}</td><td>${esc(e.instrument)}</td>
+          <td class="num">${e.quantity ?? ""}</td>
+          <td class="num">${e.price == null ? "—" : fmt(e.price)}</td>
+          <td>${e.stop == null ? "—" : `${fmt(e.stop)} / ${fmt(e.target)}`}</td>
+          <td class="num ${e.pnl == null ? "" : signClass(e.pnl)}">${
+            e.pnl == null ? "—" : money(e.pnl, 2)}</td>
+          <td style="font-size:12px">${esc(e.reason)}</td></tr>`).join("")}
+        </tbody></table>
+      </details>`).join("")}
+  </div>`;
 }
 
 function downloadWeekly(format) {

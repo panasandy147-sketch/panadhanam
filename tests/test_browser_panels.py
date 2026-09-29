@@ -298,12 +298,24 @@ def test_todays_review_is_this_market_and_explains_the_trade(page):
 
 
 def test_weekly_review_builds(page):
+    from app.core import audit
+    from app.core.config import get_config
+    # A buy in this week's audit log, for the review to show day by day.
+    audit._write(get_config(), {
+        "event": "BUY", "signal_id": "SIG-BROWSER", "symbol": "SPY",
+        "tradingsymbol": "SPY", "quantity": 5, "entry": 570.0, "stop_loss": 566.0,
+        "target": 578.0, "why": {"headline": "3 analysts agreed on a long"}})
     page.click("#btn-weekly")
     page.wait_for_selector("#s-weekly", state="visible", timeout=15000)
     page.wait_for_function(
         "document.getElementById('weekly-body').innerText.trim().length > 20",
         timeout=60000)
     assert "Could not" not in _text(page, "#weekly-body")
+    # The week's audit log, day by day, is part of the review.
+    page.wait_for_selector("#weekly-audit", state="attached", timeout=5000)
+    audit_text = _text(page, "#weekly-audit")
+    assert "Audit log — day by day" in audit_text and "SPY" in audit_text
+    assert "3 analysts agreed" in audit_text
 
 
 # --------------------------------------------------------------------------- #

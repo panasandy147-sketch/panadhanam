@@ -1128,21 +1128,30 @@ class OptionsDesk:
             from panaoptions.journal import weekly
 
             day = weekly.today(self.cfg)
-            if self._daily_written_for == day.isoformat():
+            # Keyed by market too: on Auto, India's session and the US one
+            # share a date, and each needs its own review.
+            marker = f"{self.cfg.market}:{day.isoformat()}"
+            if self._daily_written_for == marker:
                 return
             if not weekly.session_over(self.cfg, day):
                 return
 
             review = await weekly.build_daily(self.cfg, day)
-            self._daily_written_for = day.isoformat()
-            if review.trades:
+            self._daily_written_for = marker
+            if review.trades or review.audit_days:
                 weekly.save(review, self.cfg)
             else:
                 log.info("no trades to review for %s", day)
+            # And the week so far: journal/weekly/ holds Monday-to-today after
+            # every session, not only after Friday. No coach until Friday.
+            start, end = weekly.current_week(self.cfg)
+            week = await weekly.build(self.cfg, start, end, with_coach=False)
+            if week.trades or week.audit_days:
+                weekly.save(week, self.cfg)
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not write the daily review: %s", exc)
             from panaoptions.journal import weekly
-            self._daily_written_for = weekly.today(self.cfg).isoformat()
+            self._daily_written_for = f"{self.cfg.market}:{weekly.today(self.cfg).isoformat()}"
 
     async def _maybe_write_weekly_review(self) -> None:
         """Have the week's review waiting once Friday's session has closed."""
@@ -1152,13 +1161,14 @@ class OptionsDesk:
             from panaoptions.journal import weekly
 
             start, end = weekly.current_week(self.cfg)
-            if self._weekly_written_for == end.isoformat():
+            marker = f"{self.cfg.market}:{end.isoformat()}"
+            if self._weekly_written_for == marker:
                 return
             if not weekly.is_complete(end, self.cfg):
                 return
 
             review = await weekly.build(self.cfg, start, end)
-            self._weekly_written_for = end.isoformat()
+            self._weekly_written_for = marker
             if review.trades:
                 weekly.save(review, self.cfg)
             else:
@@ -1167,7 +1177,8 @@ class OptionsDesk:
         except Exception as exc:                 # noqa: BLE001 - never fatal
             log.warning("could not write the weekly review: %s", exc)
             from panaoptions.journal import weekly
-            self._weekly_written_for = weekly.current_week(self.cfg)[1].isoformat()
+            self._weekly_written_for = (f"{self.cfg.market}:"
+                                        f"{weekly.current_week(self.cfg)[1].isoformat()}")
 
     async def _catch_up_reflection(self) -> None:
         """Reflect on the last finished week if nobody has yet."""

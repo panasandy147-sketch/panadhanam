@@ -64,6 +64,8 @@ def record_buy(cfg: Any, trade: Any, signal: Any, setup: Any,
         "spread_pct": c.spread_pct_of_mid, "quantity": trade.quantity,
         "estimated_prices": bool(getattr(c, "estimated", False)),
         "entry": trade.entry_price, "cost": signal.cost(cfg.multiplier),
+        "market": getattr(cfg, "market", "US"),
+        "currency": getattr(cfg, "currency", "$"),
         "disaster_stop": trade.stop_price, "target_1": trade.target_1,
         "target_2": trade.target_2, "strategy": setup.strategy.value,
         "pattern": setup.pattern, "underlying": setup.indicators.close,
@@ -93,6 +95,8 @@ def record_sell(cfg: Any, trade: Any) -> dict[str, Any]:
         "event": "SELL", "trade_id": trade.id, "signal_id": trade.signal_id,
         "symbol": trade.symbol, "contract": trade.contract_label,
         "strategy": trade.strategy.value, "pattern": trade.pattern,
+        "market": getattr(cfg, "market", "US"),
+        "currency": getattr(cfg, "currency", "$"),
         "entry": trade.entry_price,
         "exits": [{"ts": f.ts, "quantity": f.quantity, "price": f.price,
                    "reason": f.reason} for f in exits],
@@ -124,6 +128,51 @@ def entries(day: date | None = None, since: date | None = None,
     return out
 
 
+def by_day(since: date, until: date) -> list[dict[str, Any]]:
+    """Every buy and sell from `since` to `until`, grouped by session date, in
+    order — what the weekly review shows date by date, mid-week included.
+    (Each market keeps its own folder, so this is one market's.)"""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for e in entries(since=since, until=until):
+        grouped.setdefault(str(e.get("market_time") or e.get("ts") or "")[:10],
+                           []).append(e)
+    out = []
+    for day in sorted(grouped):
+        rows = []
+        for e in sorted(grouped[day], key=lambda x: str(x.get("ts") or "")):
+            buy = e.get("event") == "BUY"
+            exits = e.get("exits") or []
+            qty = sum(int(x.get("quantity") or 0) for x in exits) if not buy else e.get("quantity")
+            price = e.get("entry") if buy else (
+                round(sum(float(x.get("price") or 0) * int(x.get("quantity") or 0)
+                          for x in exits) / qty, 4) if qty else None)
+            rows.append({
+                "time": str(e.get("market_time") or "")[11:16],
+                "event": e.get("event"), "trade_id": e.get("trade_id"),
+                "symbol": e.get("symbol"), "contract": e.get("contract"),
+                "strategy": e.get("strategy"), "pattern": e.get("pattern"),
+                "quantity": qty, "price": price,
+                "cost": e.get("cost") if buy else None,
+                "stop": e.get("underlying_stop") if buy else None,
+                "option_stop": e.get("disaster_stop") if buy else None,
+                "target": e.get("target_1") if buy else None,
+                "pnl": None if buy else e.get("pnl"),
+                "held_minutes": None if buy else e.get("held_minutes"),
+                "reason": ("; ".join(e.get("confirmations") or [])
+                           or e.get("invalidation_note") or "") if buy
+                          else str(e.get("exit_reason") or ""),
+                "estimated": bool(e.get("estimated_prices")),
+            })
+        sells = [r for r in rows if r["pnl"] is not None]
+        wd = date.fromisoformat(day).strftime("%a") if len(day) == 10 else ""
+        out.append({"date": day, "weekday": wd, "events": rows,
+                    "buys": len(rows) - len(sells), "sells": len(sells),
+                    "wins": sum(1 for r in sells if (r["pnl"] or 0) > 0),
+                    "losses": sum(1 for r in sells if (r["pnl"] or 0) < 0),
+                    "pnl": round(sum(r["pnl"] or 0.0 for r in sells), 2)})
+    return out
+
+
 def by_trade(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for e in events:
@@ -145,7 +194,8 @@ def day_markdown(day: date) -> str:
             lines += [
                 ("> **Estimated prices** — NSE refused; bought and marked on a "
                  "model price, not a market quote." if b.get("estimated_prices") else ""),
-                f"**BUY** {b.get('quantity')} @ {b.get('entry')} (${b.get('cost')}) at "
+                f"**BUY** {b.get('quantity')} @ {b.get('entry')} "
+                f"({b.get('currency', '$')}{b.get('cost')}) at "
                 f"{b.get('market_time')} · {b.get('delta')} delta, {b.get('dte')} DTE, "
                 f"spread {b.get('spread_pct')}%",
                 f"- **Wrong if:** {b.get('invalidation_note')} (stock stop "

@@ -897,6 +897,13 @@ Per-strategy win rate, P&L and average discipline, the money lost specifically
 to rule breaks (clean losses excluded — those are the cost of an edge), and a
 coach's read.
 
+It also carries the **audit log day by day**: every buy and sell, with the
+reason and the P&L, for each day of the week so far. Open it on a Wednesday and
+you see Monday, Tuesday and Wednesday. After every session the week so far is
+also written to `journal/weekly/` (`journal/in/weekly/` for India). It is
+marked provisional until Friday's close, when it is rewritten with the coach's
+read. US and India keep separate reviews and audit logs.
+
 `journal.use_llm` is **on by default** and safe to leave on: if Ollama is not
 running the cards fall back to the rules-written version, the failure is logged
 once rather than per trade, and the grading is unaffected.
