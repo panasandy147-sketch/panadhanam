@@ -50,7 +50,11 @@ from panaoptions.models import Direction, OptionContract, OptionRight, option_si
 
 log = get_logger("backtest")
 
-BLOCKED = re.compile(r"over the \$|dearer than|Nothing fits|SKIPPED|budget|cannot both hold",
+# Refused for PRICE: the contract, or every fallback, cost more than the
+# budget or the per-contract ceiling. Not a committee vote, not the screen.
+BLOCKED = re.compile(r"over the \S?[\d,]+(?:\.\d+)? budget|dearer than|Nothing fits|"
+                     r"cannot both hold|SKIPPED — hard risk failure|"
+                     r"over the \d+(?:\.\d+)?% cap|Not even one contract fits",
                      re.IGNORECASE)
 DAILY_EXPIRY = {"SPY", "QQQ", "IWM"}
 
@@ -83,6 +87,8 @@ class Result:
     max_profit: float = 0.0
     exit_value: float | None = None
     pnl: float | None = None
+    exit_at: str = ""                  # HH:MM the P&L was measured at
+    session_over: bool = True          # False: measured mid-session, "so far"
     note: str = ""
     was_blocked: str = ""
     legs: list[str] = field(default_factory=list)
@@ -99,8 +105,11 @@ class Result:
 # --------------------------------------------------------------------------- #
 # Reading the log
 # --------------------------------------------------------------------------- #
-def blocked_from_log(limit: int = 5, since: str | None = None) -> list[Blocked]:
-    """The most recent setups the desk refused for want of a contract."""
+def blocked_from_log(limit: int = 5, since: str | None = None,
+                     cooldown_minutes: int = 30) -> list[Blocked]:
+    """The most recent setups the desk refused for want of an affordable
+    contract. The desk re-logs a live setup every cycle; a repeat of the same
+    symbol and side inside `cooldown_minutes` is the same setup, counted once."""
     from panaoptions.ledger import store
 
     q = ("SELECT ts, symbol, direction, reason, payload FROM signals_seen "
@@ -116,6 +125,8 @@ def blocked_from_log(limit: int = 5, since: str | None = None) -> list[Blocked]:
     except Exception as exc:                         # noqa: BLE001
         log.warning("could not read the setup log: %s", exc)
         return []
+    # Oldest first, so a setup re-logged every minute keeps its FIRST sighting.
+    rows = list(reversed(rows))
     for ts, symbol, direction, reason, payload in rows:
         if not BLOCKED.search(str(reason or "")) or direction not in {"LONG", "SHORT"}:
             continue
@@ -125,13 +136,17 @@ def blocked_from_log(limit: int = 5, since: str | None = None) -> list[Blocked]:
             extra = {}
         budget = float(extra.get("budget") or 0.0)
         if not budget:
-            m = re.search(r"\$([\d,]+(?:\.\d+)?) budget", str(reason))
+            m = re.search(r"over the \S?([\d,]+(?:\.\d+)?) budget", str(reason))
             budget = float(m.group(1).replace(",", "")) if m else 0.0
-        out.append(Blocked(symbol=str(symbol), ts=datetime.fromisoformat(str(ts)),
-                           direction=str(direction), reason=str(reason), budget=budget))
-        if len(out) >= limit:
-            break
-    return list(reversed(out))
+        when = datetime.fromisoformat(str(ts))
+        if any(b.symbol == str(symbol) and b.direction == str(direction)
+               and abs((b.ts - when).total_seconds()) < cooldown_minutes * 60 for b in out):
+            continue
+        out.append(Blocked(symbol=str(symbol), ts=when, direction=str(direction),
+                           reason=str(reason), budget=budget,
+                           pattern=str(extra.get("pattern") or ""),
+                           strategy=str(extra.get("strategy") or "")))
+    return out[-limit:] if limit else out
 
 
 def sessions_for(symbols: list[str], days: int, cfg: Any, now: datetime,
@@ -334,12 +349,20 @@ async def replay(items: list[Blocked], feed: Any, cfg: Any,
             r.max_profit = round((c.width - c.mid) * (c.multiplier or lot), 2)
         exit_bar = _exit_bar(intraday, when, cfg)
         if exit_bar is not None:
-            value = value_at(c, exit_bar.close, iv, exit_bar.ts.astimezone(tz), cfg)
+            at = exit_bar.ts.astimezone(tz)
+            value = value_at(c, exit_bar.close, iv, at, cfg)
             r.exit_value = round(value, 4)
             r.pnl = round((value - c.mid) * (c.multiplier or lot), 2)
+            r.exit_at = (at + timedelta(minutes=5)).strftime("%H:%M")
+            hh, mm = (int(x) for x in str(cfg.get("session.force_exit_at", "15:45")).split(":"))
+            r.session_over = (at + timedelta(minutes=5)).time() >= time(hh, mm)
         r.note = search.note[:300]
         out.append(r)
     return out
+
+
+# Symbols the last scan_history call got no price history for.
+missing: list[str] = []
 
 
 async def scan_history(symbols: list[str], days: int, feed: Any, cfg: Any,
@@ -363,13 +386,17 @@ async def scan_history(symbols: list[str], days: int, feed: Any, cfg: Any,
         if day.weekday() < 5:
             wanted_days.append(day)
     found: list[Blocked] = []
+    missing.clear()
     for symbol in symbols:
         try:
             bars = await feed.candles(symbol, str(cfg.get("technical.timeframe", "5m")))
         except Exception as exc:                     # noqa: BLE001
             log.warning("no history for %s: %s", symbol, exc)
-            continue
+            bars = []
         bars = sorted(bars or [], key=lambda b: b.ts)
+        if not bars:
+            missing.append(symbol)
+            continue
         for d in sorted(wanted_days):
             idx = [i for i, b in enumerate(bars) if b.ts.astimezone(tz).date() == d]
             if not idx:
@@ -446,14 +473,15 @@ def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any,
              f"**{summary['filled']} of {summary['setups']}** setups would have filled "
              f"({summary['as_debit_spread']} as a debit spread); by rung: "
              + ", ".join(f"{k} {v}" for k, v in sorted(summary["by_tier"].items())) + ".",
-             f"Debit spreads at the close: {summary['spread_winners']} of "
+             f"Debit spreads at the square-off (or the last bar, mid-session): "
+             f"{summary['spread_winners']} of "
              f"{summary['as_debit_spread']} green, {cur}{summary['spread_pnl']:+,.2f}.", "",
              "_Model prices (Black-Scholes on the historical underlying and its recorded "
              "or realised volatility), not historical option quotes. Liquidity is not "
              "tested; the spread rule is._", "",
              "| When | Symbol | Side | Pattern | Spot | Budget | Naked 0.40-0.50 | "
-             "Executed as | Cost | Max profit | P&L at close | Note |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "Executed as | Cost | Max profit | P&L (at) | Originally | Note |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         naked = f"{r.naked} ({cur}{r.naked_cost:,.0f})" if r.naked else "—"
         filled = (f"{r.execution}: {r.contract}" if r.tier else "SKIPPED")
@@ -462,7 +490,8 @@ def to_markdown(results: list[Result], summary: dict[str, Any], cfg: Any,
             f"{r.spot or '—'} | {cur}{r.budget:,.0f} | "
             f"{naked} | {filled} | {cur}{r.cost:,.0f} | "
             f"{(cur + format(r.max_profit, ',.0f')) if r.max_profit else '—'} | "
-            f"{'—' if r.pnl is None else cur + format(r.pnl, '+,.2f')} | "
+            f"{'—' if r.pnl is None else cur + format(r.pnl, '+,.2f') + ' (' + r.exit_at + (')' if r.session_over else ', so far)')} | "
+            f"{r.was_blocked.replace('|', '/')[:160] or '—'} | "
             f"{r.note.replace('|', '/')[:160]} |")
     return "\n".join(lines) + "\n"
 

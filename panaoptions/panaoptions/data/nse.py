@@ -555,7 +555,7 @@ def make_india_feed(cfg: Any) -> Any:
     from panaoptions.data.feed import YahooFeed
     from panaoptions.data.hybrid import HybridFeed
 
-    charts = YahooNames(YahooFeed(), cfg.get("data.yahoo_symbols") or {},
+    charts = YahooNames(YahooFeed(check_options=False), cfg.get("data.yahoo_symbols") or {},
                         str(cfg.get("data.yahoo_suffix", ".NS")))
     nse = NseChains(cfg.get("data.lot_sizes") or {}, default_lot=1)
     fallback = bool(cfg.get("data.estimated.enabled", True))

@@ -81,7 +81,9 @@ def make_feed(cfg) -> Any:
         from panaoptions.data.feed import YahooFeed
         from panaoptions.data.hybrid import HybridFeed
 
-        charts = YahooFeed()
+        # The chain sources are probed (and reported) by AutoChains itself;
+        # Yahoo's own options check would only log a misleading error.
+        charts = YahooFeed(check_options=False)
         candidates: list[Any] = [YahooChains(charts), CboeChains()]
 
         # A token is a deliberate choice, so try it before the public feeds:
@@ -123,7 +125,7 @@ def make_feed(cfg) -> Any:
 
         log.info("market data: Yahoo charts + CBOE chains (no account, "
                  "greeks included, delayed)")
-        return HybridFeed(charts=YahooFeed(), chains=CboeChains(),
+        return HybridFeed(charts=YahooFeed(check_options=False), chains=CboeChains(),
                           chains_name="CBOE")
     elif name not in PROVIDERS:
         log.warning("unknown data.provider %r — using Yahoo. Valid: %s",

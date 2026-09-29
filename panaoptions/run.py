@@ -633,12 +633,28 @@ async def _screen() -> None:
             print(f"          {reason}")
 
 
-async def _backtest_spreads(limit: int, symbols: str | None, days: int) -> int:
+def _backtest_cfg(market: str | None):
+    """The config for a backtest: the desk's own, or `--market US|IN`'s."""
+    cfg = get_config()
+    code = (market or "").upper()
+    if code and code != cfg.market:
+        from panaoptions import markets
+        from panaoptions.config import Config
+
+        cfg = Config(profile=cfg.profile or None, market=code)
+        markets.activate(code)
+    print(f"Backtesting on {cfg.market_name} ({cfg.market}) — "
+          f"{'--market US or --market IN to change' if not code else 'as asked'}")
+    return cfg
+
+
+async def _backtest_spreads(limit: int, symbols: str | None, days: int,
+                            market: str | None = None) -> int:
     """Replay blocked setups through the fallback ladder (debit spreads)."""
     from panaoptions import backtest_spreads as bt
     from panaoptions.data.provider import make_feed
 
-    cfg = get_config()
+    cfg = _backtest_cfg(market)
     now = clock.now(cfg.timezone)
     if symbols:
         items = bt.sessions_for([s.strip() for s in symbols.split(",") if s.strip()],
@@ -664,12 +680,13 @@ async def _backtest_spreads(limit: int, symbols: str | None, days: int) -> int:
     return 0
 
 
-async def _backtest_signals(symbols: str | None, days: int, only: str | None) -> int:
+async def _backtest_signals(symbols: str | None, days: int, only: str | None,
+                            market: str | None = None) -> int:
     """Replay recent sessions through the scanner, both directions."""
     from panaoptions import backtest_spreads as bt
     from panaoptions.data.provider import make_feed
 
-    cfg = get_config()
+    cfg = _backtest_cfg(market)
     now = clock.now(cfg.timezone)
     names = ([s.strip().upper() for s in symbols.split(",") if s.strip()]
              if symbols else list(cfg.symbols))
@@ -679,8 +696,13 @@ async def _backtest_signals(symbols: str | None, days: int, only: str | None) ->
             print("Could not reach the chart feed for historical prices.")
             return 1
         items = await bt.scan_history(names, days, feed, cfg, now, only=keep)
+        if bt.missing:
+            other = "US" if cfg.market == "IN" else "IN"
+            print(f"\nNo price history for {', '.join(bt.missing)} on {cfg.market_name}. "
+                  f"If they trade on the other market, add --market {other}.")
         if not items:
-            print(f"\nNo setups fired on {', '.join(names)} in the last {days} session(s).")
+            print(f"\nNo setups fired on {', '.join(n for n in names if n not in bt.missing) or 'any symbol'} "
+                  f"in the last {days} session(s).")
             return 1
         results = await bt.replay(items, feed, cfg)
     summary = bt.summarise(results)
@@ -816,6 +838,9 @@ def main() -> None:
     parser.add_argument("--backtest-signals", action="store_true",
                         help="replay recent sessions bar by bar through the "
                              "scanner (calls and puts) and the contract ladder")
+    parser.add_argument("--market", default=None, choices=("US", "IN", "us", "in"),
+                        help="with --backtest-*: which market to backtest "
+                             "(default: the desk's current toggle)")
     parser.add_argument("--only", default=None,
                         help="with --backtest-signals: only these strategies, "
                              "e.g. candlestick_at_level")
@@ -921,10 +946,10 @@ def main() -> None:
         return
     if args.backtest_signals:
         raise SystemExit(asyncio.run(_backtest_signals(args.symbols, args.days,
-                                                       args.only)))
+                                                       args.only, args.market)))
     if args.backtest_spreads:
         raise SystemExit(asyncio.run(_backtest_spreads(args.limit, args.symbols,
-                                                       args.days)))
+                                                       args.days, args.market)))
     if args.report is not None:
         _report(args.report)
         return

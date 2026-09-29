@@ -43,8 +43,12 @@ class YahooFeed:
     # Whether the options endpoint answered at connect time. None = not probed.
     options_available: bool | None = None
 
-    def __init__(self, timeout: float = 15.0) -> None:
+    def __init__(self, timeout: float = 15.0, check_options: bool = True) -> None:
         self.timeout = timeout
+        # False when this feed only draws charts and another source prices
+        # the options (India: NSE); then Yahoo's option endpoint refusing is
+        # not news and must not be logged as an error.
+        self.check_options = check_options
         self._client: httpx.AsyncClient | None = None
         self.connected = False
 
@@ -72,6 +76,9 @@ class YahooFeed:
             # screen, chart and fire setups all day and never place one paper
             # trade — which is exactly what it looks like from the outside.
             self.options_error = ""
+            if not self.check_options:
+                self.options_available = False
+                return True
             probe = await self._get(OPTIONS.format(sym="SPY"))
             self.options_available = bool(
                 (probe or {}).get("optionChain", {}).get("result"))

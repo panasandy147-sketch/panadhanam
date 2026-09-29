@@ -184,3 +184,88 @@ class _Ctx(HistoryFeed):
 
     async def __aexit__(self, *exc):
         return None
+
+
+# --------------------------------------------------------------------------- #
+# From the first run on a real desk
+# --------------------------------------------------------------------------- #
+def test_a_setup_re_logged_every_minute_is_one_setup(zcfg):
+    for minute in (11, 12, 13):
+        store.save_signal_seen(f"I{minute}", datetime(2026, 9, 29, 10, minute, tzinfo=ET),
+                               "INFY", "SHORT", False,
+                               "The 0.40-0.50 delta contract costs ₹90,000, over the "
+                               "₹70,000 budget. SKIPPED — hard risk failure")
+    items = bt.blocked_from_log(limit=5)
+    assert [(b.symbol, b.ts.minute) for b in items] == [("INFY", 11)]
+    assert items[0].budget == 70000.0                         # read from a ₹ reason
+
+
+def test_only_price_refusals_are_replayed(zcfg):
+    store.save_signal_seen("C1", datetime(2026, 9, 29, 10, 0, tzinfo=ET), "TCS", "LONG",
+                           False, "committee 0.41 below 0.55 — the contract was within "
+                                  "the ₹70,000 budget")
+    store.save_signal_seen("C2", datetime(2026, 9, 29, 10, 5, tzinfo=ET), "SBIN", "LONG",
+                           False, "Risk Gatekeeper: one contract costs ₹80,000, over "
+                                  "the 20% cap of ₹70,000")
+    assert [b.symbol for b in bt.blocked_from_log(limit=5)] == ["SBIN"]
+
+
+class MorningOnly(HistoryFeed):
+    """Only the bars up to 10:15 exist yet: the session is still running."""
+
+    async def candles(self, symbol, interval="5m", include_prepost=False):
+        bars = await super().candles(symbol, interval, include_prepost)
+        if interval == "1d":
+            return bars
+        cut = datetime(2026, 9, 25, 14, 15, tzinfo=UTC)                # 10:15 ET
+        return [b for b in bars if b.ts < cut]
+
+
+def test_a_mid_session_result_says_so_far(zcfg):
+    item = bt.Blocked(symbol="SPY", ts=datetime(2026, 9, 25, 10, 0, tzinfo=ET),
+                      direction="LONG", budget=60.0)
+    [r] = asyncio.run(bt.replay([item], MorningOnly(), zcfg))
+    assert r.pnl is not None and not r.session_over and r.exit_at == "10:15"
+    md = bt.to_markdown([r], bt.summarise([r]), zcfg)
+    assert "(10:15, so far)" in md
+    assert "Originally" in md
+
+
+def test_a_symbol_with_no_history_is_named(zcfg):
+    class Empty(HistoryFeed):
+        async def candles(self, symbol, interval="5m", include_prepost=False):
+            return []
+
+    items = asyncio.run(bt.scan_history(["SPY"], 2, Empty(), zcfg,
+                                        datetime(2026, 9, 26, 9, 0, tzinfo=ET)))
+    assert items == [] and bt.missing == ["SPY"]
+
+
+def test_market_flag_backtests_the_other_market(tmp_path, monkeypatch, capsys):
+    import run
+    from panaoptions import config as config_mod
+    from panaoptions import markets
+
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    india = config_mod.Config(market="IN")
+    monkeypatch.setattr(run, "get_config", lambda *a, **k: india)
+    try:
+        us = run._backtest_cfg("US")
+        assert us.market == "US" and "SPY" in us.symbols
+        assert "Backtesting on" in capsys.readouterr().out
+        assert run._backtest_cfg(None) is india
+    finally:
+        markets.activate("US")
+
+
+def test_the_india_chart_feed_does_not_report_yahoo_options_as_an_error(tmp_path, monkeypatch):
+    from panaoptions import config as config_mod
+    from panaoptions import markets
+    from panaoptions.data.nse import make_india_feed
+
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    try:
+        feed = make_india_feed(config_mod.Config(market="IN"))
+        assert feed.charts.inner.check_options is False
+    finally:
+        markets.activate("US")
