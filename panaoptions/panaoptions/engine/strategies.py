@@ -612,7 +612,7 @@ ALL.append(CandlestickAtLevel)
 
 # --------------------------------------------------------------------------- #
 def sweep_of_previous_day(df5: pd.DataFrame, levels: SessionLevels, band_pct: float,
-                          lookback: int = 3) -> dict | None:
+                          lookback: int = 3, first_test: bool = True) -> dict | None:
     """The two-candle Previous Day Liquidity Sweep, if the tape shows one.
 
     LONG:  a candle's low sweeps BELOW the previous-day low (PDL), no more than
@@ -622,6 +622,11 @@ def sweep_of_previous_day(df5: pd.DataFrame, levels: SessionLevels, band_pct: fl
            `band_pct` %, and the next candle closes back inside.
     The sweep candle is one of the last `lookback` completed bars, the reclaim
     the one after it. Returns {"direction", "level", "wick", "sweep_i", ...}.
+
+    `first_test`: the sweep must be the FIRST time today's tape reached beyond
+    that level. The stops resting there are run once; later pokes through the
+    same level are price chopping around it, not a fresh trap (the backtest
+    showed the same PDH "swept" up to six times a day, mostly losers).
     """
     pdh, pdl = float(levels.previous_high or 0), float(levels.previous_low or 0)
     if not pdh or not pdl or pdh <= pdl or len(df5) < 2:
@@ -634,13 +639,16 @@ def sweep_of_previous_day(df5: pd.DataFrame, levels: SessionLevels, band_pct: fl
         close = float(nxt["close"])
         inside = pdl < close < pdh
         low, high = float(sweep["low"]), float(sweep["high"])
-        if low < pdl and (pdl - low) / pdl * 100 <= band_pct and inside:
+        before = today.iloc[:i]
+        fresh_low = not first_test or not (before["low"] < pdl).any()
+        fresh_high = not first_test or not (before["high"] > pdh).any()
+        if low < pdl and (pdl - low) / pdl * 100 <= band_pct and inside and fresh_low:
             return {"direction": 1, "level": pdl, "wick": low, "reclaim": close,
                     "sweep_ts": today.index[i], "bars_after": back - 1,
                     "tweezer": abs(float(nxt["low"]) - low) <= max(pdl * 0.0015, 0.0),
                     "swing": float(nxt["low"]) >= low
                     and all(float(today.iloc[j]["low"]) >= low for j in range(max(0, i - 2), i))}
-        if high > pdh and (high - pdh) / pdh * 100 <= band_pct and inside:
+        if high > pdh and (high - pdh) / pdh * 100 <= band_pct and inside and fresh_high:
             return {"direction": -1, "level": pdh, "wick": high, "reclaim": close,
                     "sweep_ts": today.index[i], "bars_after": back - 1,
                     "tweezer": abs(float(nxt["high"]) - high) <= max(pdh * 0.0015, 0.0),
@@ -678,12 +686,15 @@ class PdLiquiditySweep(Strategy):
             return setup
         band = float(self.cfg.get(f"{key}.proximity_pct", 0.25))
         found = sweep_of_previous_day(df5, levels, band,
-                                      int(self.cfg.get(f"{key}.lookback_bars", 3)))
+                                      int(self.cfg.get(f"{key}.lookback_bars", 3)),
+                                      bool(self.cfg.get(f"{key}.first_test_only", True)))
         if found is None:
             setup.blockers.append(
                 f"no sweep of the previous-day high {levels.previous_high:.2f} / low "
                 f"{levels.previous_low:.2f} within {band:g}% with the next candle "
-                f"closing back inside")
+                f"closing back inside"
+                + (" (first test of the level today only)"
+                   if self.cfg.get(f"{key}.first_test_only", True) else ""))
             return setup
         long = found["direction"] > 0
         shape = ("Tweezer Bottom" if long else "Tweezer Top") if found["tweezer"] else (

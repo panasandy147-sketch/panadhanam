@@ -29,7 +29,8 @@ def vwap(df: pd.DataFrame) -> pd.Series:
     notional = typical * df["volume"]
     day = df.index.normalize()
     return (notional.groupby(day).cumsum()
-            / df["volume"].groupby(day).cumsum().replace(0, pd.NA)).ffill()
+            / df["volume"].groupby(day).cumsum().astype(float)
+            .replace(0.0, float("nan"))).ffill()
 
 
 def true_range(df: pd.DataFrame) -> pd.Series:

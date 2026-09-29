@@ -91,6 +91,18 @@ def test_a_sweep_deeper_than_the_band_is_not_a_sweep():
                                             0.25) is None
 
 
+def test_only_the_first_test_of_the_level_today_is_a_sweep():
+    """The stops beyond the PDL are run once. A second poke through the same
+    level later in the day is chop, not a fresh trap."""
+    again = TODAY + [(99.3, 99.4, 99.1, 99.2),
+                     (99.2, 99.25, 98.9, 98.95),                # 10:00 pokes the PDL again
+                     (98.95, 99.4, 98.92, 99.35)]               # 10:05 closes back inside
+    tape, lv = frame(bars(again)), session(bars(again))
+    assert strategies.sweep_of_previous_day(tape, lv, 0.25) is None
+    found = strategies.sweep_of_previous_day(tape, lv, 0.25, first_test=False)
+    assert found and found["wick"] == 98.9
+
+
 def test_the_next_candle_must_close_back_inside():
     stays = TODAY[:3] + [(98.95, 99.0, 98.8, 98.9)]             # closes below the PDL
     assert strategies.sweep_of_previous_day(frame(bars(stays)), session(bars(stays)),

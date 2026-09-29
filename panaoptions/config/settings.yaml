@@ -285,6 +285,10 @@ strategies:
     proximity_pct: 0.25
     lookback_bars: 3
     require_pattern: true      # a tweezer or swing low/high at the sweep
+    # Only the FIRST run beyond the level today counts: the stops there are
+    # taken once. Backtest (10 sessions, SPY/QQQ/NVDA/AAPL/TSLA): without it
+    # the same PDH "swept" up to 6 times a day — 84 trades, 26% winners.
+    first_test_only: true
     tick: 0.01                 # $0.01 (the India overlay: ₹0.05)
     stop_ticks: 2
     min_reward_risk: 3.0

@@ -40,7 +40,9 @@ def sweep_check(setup: Any, levels: Any, frame: Any, cfg: Any) -> tuple[str, dic
     from panaoptions.engine.strategies import sweep_of_previous_day
     band = float(cfg.get("fno.confluence.proximity_pct", 0.25))
     found = sweep_of_previous_day(frame, levels, band,
-                                  int(cfg.get("fno.confluence.lookback_bars", 3)))
+                                  int(cfg.get("fno.confluence.lookback_bars", 3)),
+                                  bool(cfg.get("strategies.pd_liquidity_sweep."
+                                               "first_test_only", True)))
     want = 1 if setup.direction is Direction.LONG else -1
     name = "previous-day low (PDL)" if want > 0 else "previous-day high (PDH)"
     if found is None or found["direction"] != want:
