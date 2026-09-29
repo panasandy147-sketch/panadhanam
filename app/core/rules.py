@@ -405,6 +405,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "underlying", "risk.swing_lookback_bars / atr_stop_multiplier"),
             _rule("Open positions at once, at most", g("risk.max_open_positions", 3),
                   "risk.max_open_positions"),
+            _rule("Trades a day, at most (the over-trading throttle)",
+                  g("risk.max_daily_trades") or "no limit", "risk.max_daily_trades"),
             _rule("Anti-stacking: one position per stock; a stock that closes a "
                   "trade goes on the cooldown blacklist for",
                   f"{'on' if g('risk.one_position_per_symbol', True) else 'off'}, "
@@ -417,8 +419,9 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   if g("risk.max_portfolio_heat_pct") else "no cap",
                   "risk.max_portfolio_heat_pct"),
             _rule("Daily circuit breaker: at this loss (closed + open) every "
-                  "position is closed at market and the desk is locked for the "
-                  "session" if g("risk.circuit_breaker", True)
+                  "position is closed at market and the desk is LOCKED OUT for the "
+                  "rest of the calendar day — a restart does not clear it"
+                  if g("risk.circuit_breaker", True)
                   else "Stop taking trades for the day after losing",
                   f"{_pct(loss_pct)} = {money(capital * loss_pct / 100)}",
                   "risk.max_daily_loss_pct"),

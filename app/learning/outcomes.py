@@ -122,10 +122,9 @@ class OutcomeTracker:
         if state.daily_loss_limit <= 0 or state.daily_pnl > -state.daily_loss_limit:
             return []
         first = not state.halted
-        state.halted = True
-        state.halt_reason = (f"Daily circuit breaker: P&L {state.daily_pnl:,.0f} hit the "
-                             f"-{state.daily_loss_limit:,.0f} limit — flat and locked "
-                             f"for the rest of the session")
+        self.risk.lock(f"Daily circuit breaker: P&L {state.daily_pnl:,.0f} hit the "
+                       f"-{state.daily_loss_limit:,.0f} limit — flat and locked "
+                       f"for the rest of the day")
         out = [await self._close(row, price, SignalStatus.CLOSED_TIME, "circuit_breaker")
                for row, price in still_open]
         self.risk.set_unrealised(0.0)

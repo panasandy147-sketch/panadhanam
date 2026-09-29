@@ -22,7 +22,9 @@ ET = ZoneInfo("America/New_York")
 
 def test_the_shipped_numbers(cfg):
     assert cfg.get("risk.risk_per_trade_pct") == 1.0
-    assert cfg.get("risk.max_daily_loss_pct") == 10.0       # $400 on $4,000
+    assert cfg.get("risk.max_daily_loss_pct") == 3.0        # $120 on $4,000
+    assert cfg.get("risk.max_open_positions") == 2
+    assert cfg.get("risk.max_daily_trades") == 4
     cfg.switch_market("US")
     try:
         assert cfg.get("risk.total_capital") == 4000        # the US account, dollars
@@ -125,7 +127,7 @@ async def test_circuit_breaker_waits_until_the_limit(cfg):
 
     rm = RiskManager(cfg)
     rm.set_capital(4_000)
-    rm.state.realised_pnl = -300.0
+    rm.state.realised_pnl = -100.0                          # the limit is -$120
     tracker = OutcomeTracker(broker=None, cfg=cfg, risk_manager=rm)
     assert await tracker._maybe_trip_breaker([({"id": "A"}, 99.0)]) == []
     assert not rm.state.halted

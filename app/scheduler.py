@@ -128,6 +128,11 @@ class TradingEngine:
         self.broker = await build_broker(self.cfg)
 
         self.risk = RiskManager(self.cfg)
+        # The new market's day so far: its trade count, P&L and any lockout.
+        try:
+            self.risk.restore_day()
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not restore %s's day: %s", code, exc)
         self.desk = TradingDesk(self.broker, self.cfg, risk_manager=self.risk)
         self.data = MarketDataService(self.broker, self.cfg)
         self.news = NewsCollector(self.cfg)
@@ -561,6 +566,8 @@ class TradingEngine:
         self.running = True
         db.init_db()
         self.risk.restore_open(db.open_signals())
+        # Today's trade count, realised P&L and any lockout survive a restart.
+        self.risk.restore_day()
         self.feedback.apply_learned_weights()
         self._feedback_task = asyncio.create_task(self._catch_up_feedback())
         self._task = asyncio.create_task(self._loop())

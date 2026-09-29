@@ -250,12 +250,12 @@ def test_without_the_flex_spy_would_have_been_refused(rm, us):
 # =========================================================================== #
 # The circuit breaker, the spread limit, and stops on the underlying
 # =========================================================================== #
-def test_the_daily_circuit_breaker_is_400_on_4000(rm):
-    assert rm.state.daily_loss_limit == 400.0
-    rm.state.realised_pnl = -250.0
-    rm.set_unrealised(-149.0)
+def test_the_daily_circuit_breaker_is_120_on_4000(rm):
+    assert rm.state.daily_loss_limit == 120.0                # 3%
+    rm.state.realised_pnl = -80.0
+    rm.set_unrealised(-39.0)
     assert not any("Daily loss" in r for r in rm.desk_checks())
-    rm.set_unrealised(-150.0)
+    rm.set_unrealised(-40.0)
     assert any("Daily loss limit" in r for r in rm.desk_checks())
     assert rm.state.halted
 

@@ -37,8 +37,8 @@ risk:
   # sensible practice size. That is the sizing maths being honest, not a fault
   # — and small capital does not make live trading safer, staying in paper does.
   # $4,000 paper: 1% risk is $40 a trade; option premium per trade is capped
-  # at 20% ($800), or 25% ($1,000) on SPY/QQQ/DIA; the day stops at -10%
-  # ($400). start.sh applies this figure once to a .env left at an earlier
+  # at 20% ($800), or 25% ($1,000) on SPY/QQQ/DIA; the day stops at -3%
+  # ($120). start.sh applies this figure once to a .env left at an earlier
   # shipped value; editing Capital on the dashboard afterwards still sticks.
   total_capital: 4000
   # ACTIVE PAPER PROFILE: many trades to learn from (loose entry gates, five
@@ -46,12 +46,16 @@ risk:
   # on what can be lost at once and in a day.
   risk_per_trade_pct: 1.0        # 1% of capital risked per trade, while learning
   max_risk_per_trade_pct: 2.0    # hard ceiling — never exceed
-  # Daily hard-loss circuit breaker: when realised + open P&L reaches -10%
-  # ($400 on $4,000), every open position is closed at market, the desk halts
-  # and the day is disarmed — locked until the next session.
-  max_daily_loss_pct: 10.0
+  # Daily hard-loss circuit breaker: when realised + open P&L reaches -3%
+  # ($120 on $4,000; ₹10,500 on ₹3,50,000), every open position is closed at
+  # market, the desk halts and the day is disarmed. The lockout is SAVED: it
+  # holds for the rest of the calendar day, restarts included.
+  max_daily_loss_pct: 3.0
   circuit_breaker: true
-  max_open_positions: 5
+  # The tournament throttles (as in panaoptions): two positions at once and
+  # four trades a day. Over-trading is how a good morning is given back.
+  max_open_positions: 2
+  max_daily_trades: 4
   # Portfolio heat: the total that would be lost if EVERY open position hit
   # its stop together (a headline moving correlated names at once). Five at 1%
   # would be 5%; the cap holds it at 4% — the fifth trade takes what is left.
@@ -251,9 +255,11 @@ volume_profile:
   lvn_ratio: 0.30          # a bin at <= 0.30x the mean bin is thin (LVN)
   hvn_ratio: 1.5           # a bin at >= 1.5x the mean bin is thick (HVN)
   strategies:
-    va_rejection: true     # failed auction at the VAH (put) / VAL (call) → POC
+    # va_rejection and poc_bounce are OFF: the worst two in every panaoptions
+    # backtest on 29 Sept 2026 (US -1.23R / -1.08R a trade in the test half).
+    va_rejection: false    # failed auction at the VAH (put) / VAL (call) → POC
     lvn_acceleration: true # shelf → close into a volume pocket on RVOL ≥ 1.5x
-    poc_bounce: true       # ≥ 1 ATR away, back to the POC, rejected there
+    poc_bounce: false      # ≥ 1 ATR away, back to the POC, rejected there
   va_lookback_bars: 2
   lvn_min_rvol: 1.5
   lvn_shelf_bars: 3

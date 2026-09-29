@@ -122,6 +122,65 @@ class RiskManager:
             reasons.append(blocked)
         return reasons
 
+    # ------------------------------------------------------------------ #
+    # The daily lockout
+    # ------------------------------------------------------------------ #
+    def lock(self, reason: str) -> None:
+        """Halt for the rest of this market's calendar day — saved, so a
+        restart (every git pull) does not clear it."""
+        first = not self.state.halted
+        self.state.halted = True
+        self.state.halt_reason = reason
+        if first:
+            log.warning("DESK LOCKED OUT for the day — %s", reason)
+        try:
+            from app.storage import db
+            db.save_lockout(self._day.isoformat(), str(self.cfg.active_market), reason)
+        except Exception as exc:                          # noqa: BLE001 - never fatal
+            log.warning("could not save the lockout: %s", exc)
+
+    def restore_day(self) -> dict[str, Any]:
+        """After a restart: today's trade count, realised P&L and any lockout
+        for the ACTIVE market, from the database. Starting from zero let a
+        restart hand the desk a fresh daily loss budget and trade count."""
+        from zoneinfo import ZoneInfo
+
+        from app.storage import db
+        self.roll_day_if_needed()
+        tz = ZoneInfo(str(self.cfg.get("system.timezone", "Asia/Kolkata")))
+        u = self.cfg.universe or {}
+        mine = ({i["symbol"] for i in (u.get("indices") or [])}
+                | {i["symbol"] for i in (u.get("stocks") or [])})
+        trades = wins = losses = 0
+        realised = 0.0
+        for r in db.recent_signals(limit=2000):
+            if r.get("status") == "REJECTED" or (mine and r["symbol"] not in mine):
+                continue
+            try:
+                ts = datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if ts.tzinfo is None:
+                from datetime import UTC
+                ts = ts.replace(tzinfo=UTC)
+            if ts.astimezone(tz).date() != self._day:
+                continue
+            trades += 1
+            if r.get("pnl") is not None:
+                realised += float(r["pnl"])
+                wins += 1 if float(r["pnl"]) >= 0 else 0
+                losses += 1 if float(r["pnl"]) < 0 else 0
+        self.state.trades_today = max(self.state.trades_today, trades)
+        self.state.realised_pnl = realised
+        self.state.wins_today, self.state.losses_today = wins, losses
+        saved = db.lockout(self._day.isoformat(), str(self.cfg.active_market))
+        if saved:
+            self.state.halted, self.state.halt_reason = True, saved.get("reason") or "locked"
+        elif guard.breaker_tripped(self.state.daily_pnl, self.state.daily_loss_limit):
+            self.lock(f"Daily loss limit breached ({self.state.daily_pnl:,.0f})")
+        return {"trades_today": trades, "realised_pnl": round(realised, 2),
+                "locked": self.state.halted}
+
     def approve_add(self, symbol: str, open_pnl: float, add_notional: float,
                     add_risk: float = 0.0) -> list[str]:
         """Reasons a pyramid ADD to a held position is refused ([] = approved).
@@ -166,11 +225,14 @@ class RiskManager:
             reasons.append(f"Desk halted: {self.state.halt_reason}")
 
         if self.state.daily_pnl <= -self.state.daily_loss_limit:
-            self.state.halted = True
-            self.state.halt_reason = (
-                f"Daily loss limit hit ({self.state.daily_pnl:,.0f} vs limit "
-                f"-{self.state.daily_loss_limit:,.0f})")
+            self.lock(f"Daily loss limit hit ({self.state.daily_pnl:,.0f} vs limit "
+                      f"-{self.state.daily_loss_limit:,.0f})")
             reasons.append(self.state.halt_reason)
+
+        max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
+        if max_daily and self.state.trades_today >= max_daily:
+            reasons.append(f"Daily trade limit: {self.state.trades_today} of {max_daily} "
+                           f"taken today — no more entries until tomorrow")
 
         max_pos = int(self.cfg.get("risk.max_open_positions", 3))
         if self.state.open_positions >= max_pos:
@@ -852,10 +914,7 @@ class RiskManager:
         else:
             self.state.losses_today += 1
         if guard.breaker_tripped(self.state.daily_pnl, self.state.daily_loss_limit):
-            self.state.halted = True
-            self.state.halt_reason = (
-                f"Daily loss limit breached ({self.state.daily_pnl:,.0f})")
-            log.warning("DESK HALTED — %s", self.state.halt_reason)
+            self.lock(f"Daily loss limit breached ({self.state.daily_pnl:,.0f})")
 
     def set_unrealised(self, value: float) -> None:
         self.state.unrealised_pnl = value

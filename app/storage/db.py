@@ -85,6 +85,15 @@ CREATE TABLE IF NOT EXISTS iv_history (
     PRIMARY KEY (symbol, day)
 );
 
+-- The daily circuit breaker's lockout: one row per market per calendar day.
+CREATE TABLE IF NOT EXISTS lockouts (
+    day TEXT NOT NULL,
+    market TEXT NOT NULL,
+    reason TEXT,
+    at TEXT,
+    PRIMARY KEY (day, market)
+);
+
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY,
     ts TEXT NOT NULL,
@@ -294,6 +303,18 @@ def update_position(signal_id: str, *, quantity: int, entry: float, stop_loss: f
                    notional=?, total_risk=?
             WHERE id=?
         """, (quantity, entry, stop_loss, target, payload, notional, total_risk, signal_id))
+
+
+def save_lockout(day: str, market: str, reason: str) -> None:
+    with transaction() as conn:
+        conn.execute("INSERT OR IGNORE INTO lockouts (day, market, reason, at) "
+                     "VALUES (?,?,?,?)", (day, market, reason, datetime.now().isoformat()))
+
+
+def lockout(day: str, market: str) -> dict[str, Any] | None:
+    row = get_conn().execute("SELECT * FROM lockouts WHERE day=? AND market=?",
+                             (day, market)).fetchone()
+    return dict(row) if row else None
 
 
 def get_signal(signal_id: str) -> dict[str, Any] | None:

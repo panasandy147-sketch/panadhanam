@@ -126,6 +126,10 @@ def _tape() -> list[Candle]:
 @pytest.fixture
 def us(cfg):
     cfg.switch_market("US")
+    # Value Area Rejection and POC Bounce are off by default since 29 Sept;
+    # these tests are about the strategies themselves.
+    cfg.settings["volume_profile"]["strategies"].update(
+        {"va_rejection": True, "poc_bounce": True})
     yield cfg
     cfg.switch_market("IN")
 

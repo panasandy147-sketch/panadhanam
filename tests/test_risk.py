@@ -171,7 +171,7 @@ def test_exposure_cap_trims_quantity_instead_of_rejecting(rm, cfg):
 def test_rejects_when_not_even_one_lot_fits(rm):
     """Index options on small capital: the trade is genuinely untakeable."""
     rm.state.capital = 20_000
-    rm.state.exposure = 19_000
+    rm.state.exposure = 79_000               # of the 80,000 (4x leverage) ceiling
     sig = rm.evaluate(_ctx(price=24_500.0, atr=40.0), Bias.BULLISH, [], 0.9, ["a", "b"])
     assert sig.status == SignalStatus.REJECTED
     assert sig.quantity == 0

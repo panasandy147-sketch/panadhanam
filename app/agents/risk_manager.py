@@ -8,7 +8,8 @@ here is a number that can be read, tested and audited:
                         desk stacking sequential positions on one ticker
                         during a choppy session (the XOM / AVGO pattern).
   daily_loss_limit      the hard circuit breaker: `risk.max_daily_loss_pct`
-                        of capital (10% = $400 on $4,000), realised + open.
+                        of capital (3% = $120 on $4,000), realised + open;
+                        saved, so it holds for the day across restarts.
   spread_rejection      an option whose bid-ask spread is wider than
                         `risk.max_spread_pct_of_mid` (7%) of the mid is refused.
   deployment_cap        premium per trade: `risk.max_capital_deployed_pct`
@@ -114,7 +115,7 @@ class CooldownBlacklist:
 # 2. The daily hard-loss circuit breaker
 # --------------------------------------------------------------------------- #
 def daily_loss_limit(cfg: Any, capital: float) -> float:
-    """The day's loss budget in currency: 10% of $4,000 = $400."""
+    """The day's loss budget in currency: 3% of $4,000 = $120."""
     return round(capital * float(cfg.get("risk.max_daily_loss_pct", 10.0)) / 100.0, 2)
 
 
