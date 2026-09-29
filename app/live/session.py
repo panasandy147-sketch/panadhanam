@@ -15,7 +15,7 @@ alerts instead of orders.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core import clock
@@ -174,6 +174,12 @@ class TradingDay:
         }
 
     # ------------------------------------------------------------------ #
+    def _universe(self) -> set[str]:
+        """The active market's symbols (the two markets' lists do not overlap)."""
+        u = getattr(self.cfg, "universe", None) or {}
+        return ({i["symbol"] for i in (u.get("indices") or [])}
+                | {i["symbol"] for i in (u.get("stocks") or [])})
+
     def report(self) -> dict[str, Any]:
         """Everything that happened this session, for the end-of-day read."""
         from app.core.explain import why_bought, why_sold
@@ -181,8 +187,13 @@ class TradingDay:
         from app.storage import db
 
         today = self.today
-        signals = [s for s in db.recent_signals(limit=300)
-                   if self._local(s.get("ts"))[:10] == today]
+        # This market's symbols only. Both markets share one database, and a
+        # US trade at 15:08 ET is 00:38 IST — "today" on the India clock — so
+        # the date alone would put the US session on India's page.
+        mine = self._universe()
+        signals = [s for s in db.recent_signals(limit=2000)
+                   if self._local(s.get("ts"))[:10] == today
+                   and (not mine or s["symbol"] in mine)]
 
         taken = [s for s in signals if s["status"] != "REJECTED"]
         closed = [s for s in taken if s.get("r_multiple") is not None]
@@ -192,8 +203,11 @@ class TradingDay:
         # places say no: the risk manager (a REJECTED signal) and, far more
         # often, the CMIO's vote — which never becomes a signal at all, so a
         # day of "not enough confirmations" used to leave this list empty.
-        passes = [c for c in db.recent_cycles()
-                  if self._local(c.get("ts"))[:10] == today]
+        since = (datetime.fromisoformat(today) - timedelta(days=1)).replace(
+            tzinfo=UTC).isoformat()
+        passes = [c for c in db.recent_cycles(limit=50000, since=since)
+                  if self._local(c.get("ts"))[:10] == today
+                  and (not mine or c.get("symbol") in mine)]
         firsts: list[str] = []
         for s in rejected:
             try:
@@ -218,6 +232,7 @@ class TradingDay:
             "broker": self.engine.broker.name,
             "is_paper_account": getattr(self.engine.broker, "is_paper_account", True),
             "data_source": self.engine.data_provenance(),
+            "currency": getattr(getattr(self.cfg, "market", None), "currency_symbol", ""),
             "symbols_judged": len(passes),
             "signals_generated": len(signals),
             "trades_taken": len(taken),

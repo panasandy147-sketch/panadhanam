@@ -220,7 +220,10 @@ function applyStatus(s) {
       : "The desk analyses and alerts but places nothing. start.sh turns "
         + "paper trading on for a paper account; restart it.";
 
-  if (s.day_summary) renderDayReport(s.day_summary, "after square-off");
+  if (s.day_summary && (!s.day_summary.market
+                        || s.day_summary.market === state.market?.code)) {
+    renderDayReport(s.day_summary, "after square-off");
+  }
   if (s.risk) renderRisk(s.risk);
   renderBanners(s);
 }

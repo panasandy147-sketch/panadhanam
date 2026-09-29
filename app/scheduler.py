@@ -599,7 +599,11 @@ class TradingEngine:
             "desk": self.desk.describe(),
             "risk": self.risk.snapshot(),
             "trading_mode": self.cfg.trading_mode,
-            "day_summary": self._last_day_summary,
+            # Only this market's: after India's close the desk moves to the
+            # US, and India's summary is not the US screen's "today".
+            "day_summary": (self._last_day_summary
+                            if (self._last_day_summary or {}).get("market")
+                            in (None, self.cfg.active_market) else None),
             "live_orders": self.cfg.live_orders_enabled,
             "auto_place_orders": self.cfg.get("execution.auto_place_orders", False),
             # A paper broker with auto_place_orders on DOES place orders — they

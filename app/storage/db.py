@@ -230,10 +230,16 @@ def last_exit(symbol: str) -> str | None:
     return row[0] if row else None
 
 
-def recent_cycles(limit: int = 2000) -> list[dict[str, Any]]:
-    """The CMIO's verdicts, newest first — including every "no trade"."""
-    rows = get_conn().execute(
-        "SELECT * FROM cycles ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+def recent_cycles(limit: int = 2000, since: str | None = None) -> list[dict[str, Any]]:
+    """The CMIO's verdicts, newest first — including every "no trade".
+    `since`: only those at or after this UTC ISO timestamp."""
+    if since:
+        rows = get_conn().execute(
+            "SELECT * FROM cycles WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (since, limit)).fetchall()
+    else:
+        rows = get_conn().execute(
+            "SELECT * FROM cycles ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
     out = []
     for r in rows:
         d = dict(r)

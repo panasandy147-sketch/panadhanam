@@ -393,3 +393,39 @@ async def test_a_weekend_publishes_nothing(engine, cfg, monkeypatch):
 
     await engine._maybe_publish_day_summary()
     assert published == []
+
+
+@pytest.mark.asyncio
+async def test_the_day_report_keeps_each_market_to_itself(engine, cfg, monkeypatch):
+    """Both markets share one database. A US trade at 15:08 ET is 00:38 IST —
+    India's "today" — and must not appear on India's page (nor India's on the
+    US page)."""
+    from datetime import UTC, datetime
+
+    from app.core import clock as clock_mod
+    from app.storage import db
+    db.init_db()
+
+    india = _signal()
+    india.id, india.ts = "SIG-IN-DAY", datetime(2026, 9, 29, 4, 0, tzinfo=UTC)   # 09:30 IST
+    us = _signal()
+    us.id, us.ts = "SIG-US-DAY", datetime(2026, 9, 28, 19, 8, tzinfo=UTC)      # 15:08 ET
+    us.instrument = Instrument(symbol="AMZN", tradingsymbol="AMZN")
+    db.save_signal(india)
+    db.save_signal(us)
+
+    monkeypatch.setattr(clock_mod, "market_now",
+                        lambda tz: datetime(2026, 9, 29, 16, 0))
+    report = engine.trading_day.report()
+    symbols = {t["symbol"] for t in report["trades"]}
+    assert "RELIANCE" in symbols and "AMZN" not in symbols
+    assert report["market"] == "IN" and report["currency"] == "₹"
+
+    # India's published summary is not shown once the desk is on the US.
+    engine._last_day_summary = dict(report)
+    cfg.switch_market("US")
+    try:
+        assert engine.status()["day_summary"] is None
+    finally:
+        cfg.switch_market("IN")
+    assert engine.status()["day_summary"]["market"] == "IN"
