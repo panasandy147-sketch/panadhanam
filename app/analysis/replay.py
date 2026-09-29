@@ -93,6 +93,10 @@ class WeeklyReplay:
             # The same trades intraday, plain vs the Standard Pyramid.
             "compare": {"plain_intraday": self._book(ordered, "r_intraday", "outcome_intraday"),
                         "pyramid": self._book(ordered, "r_pyramid", "outcome_pyramid")},
+            # The desk's account rules on the same trades: today's screener
+            # (as it would have run each morning), the entry windows, max open,
+            # trades a day and the daily lockout — plain vs pyramid.
+            "rules": await self._rules_books(ordered, targets),
             "best_trades": winners[:10],
             "worst_trades": losers[:5],
             "by_symbol": sorted(per_symbol, key=lambda s: s["total_r"], reverse=True),
@@ -197,6 +201,8 @@ class WeeklyReplay:
                 "stop": round(stop, 2),
                 "target": round(target, 2),
                 "score": report.score,
+                "vwap": round(float(snapshot.get("vwap") or 0.0), 4),
+                "atr": round(float(atr), 4),
                 "regime": snapshot.get("regime", "unknown"),
                 "setup": ", ".join(p["name"] for p in snapshot["patterns"][:3]) or "score threshold",
                 "lot_size": meta.get("lot_size", 1),
@@ -217,6 +223,10 @@ class WeeklyReplay:
             t["r_intraday"], t["outcome_intraday"] = plain["r"], plain["outcome"]
             t["r_pyramid"], t["outcome_pyramid"] = pyr["r"], pyr["outcome"]
             t["pyramid_adds"] = pyr["adds"]
+            for key, res in (("exit_ts_intraday", plain), ("exit_ts_pyramid", pyr)):
+                n = int(res["bars"] or 0)
+                t[key] = (session[n - 1].ts.isoformat() if n and session
+                          else t.get("entry_ts", ""))
         for t in trades:
             t.pop("_i", None)
 
@@ -232,6 +242,22 @@ class WeeklyReplay:
                 "total_r": round(total_r, 2),
                 "avg_r": round(total_r / len(trades), 3) if trades else 0.0,
             },
+        }
+
+    async def _rules_books(self, trades: list[dict[str, Any]],
+                           symbols: list[str]) -> dict[str, Any]:
+        from app.analysis import rules_sim
+        daily: dict[str, list[Candle]] = {}
+        if bool(self.cfg.get("screener.enabled", False)):
+            got = await asyncio.gather(*[self.engine.broker.get_candles(s, "1d", 90)
+                                         for s in symbols], return_exceptions=True)
+            daily = {s: g for s, g in zip(symbols, got, strict=False)
+                     if not isinstance(g, Exception) and g}
+        return {
+            "plain": rules_sim.simulate(self.cfg, trades, "r_intraday", "exit_ts_intraday",
+                                        daily),
+            "pyramid": rules_sim.simulate(self.cfg, trades, "r_pyramid", "exit_ts_pyramid",
+                                          daily),
         }
 
     def _session_bars(self, candles: list[Candle], entry_i: int) -> list[Candle]:

@@ -189,3 +189,34 @@ def test_the_rules_page_explains_the_screener(scfg):
     text = json.dumps(build(scfg))
     assert "Band A" in text and "Midday freeze" in text and "11:15" in text
     assert "13:30" in text and "14:45" in text and "15:15" in text
+
+
+def test_the_rules_simulation_applies_windows_limits_and_lockout(scfg):
+    from app.analysis import rules_sim
+
+    def t(sym, hh, mm, r, side="BUY", out_mm=20):
+        start = datetime(2026, 9, 30, hh, mm, tzinfo=IST)
+        return {"symbol": sym, "side": side, "entry": 100.2, "vwap": 100.0, "atr": 1.0,
+                "entry_ts": start.isoformat(), "r_pyramid": r, "outcome_intraday": "STOP",
+                "exit_ts_pyramid": (start + timedelta(minutes=out_mm)).isoformat()}
+
+    # No screener data: only the limits apply (2 open, 4 a day, 3% lockout at 1% risk).
+    trades = [t("A", 9, 40, -1.5), t("B", 9, 40, -1.0), t("C", 9, 45, 2.0),
+              t("D", 10, 30, -1.0), t("E", 10, 45, 2.0), t("F", 11, 0, 2.0)]
+    scfg.settings["screener"]["enabled"] = False
+    out = rules_sim.simulate(scfg, trades, "r_pyramid", "exit_ts_pyramid", {})
+    # C: two already open. D closes at 10:50 taking the day to -3.5%: locked,
+    # so F (11:00) is refused; E was already in and still books its +2R.
+    assert out["trades"] == 4 and out["skipped"]["max open positions (2)"] == 1
+    assert out["skipped"]["daily lockout"] == 1
+    assert out["return_pct"] == -1.5 and out["locked_days"] == 1
+
+    # With the screener: only that morning's list, in its window.
+    scfg.settings["screener"]["enabled"] = True
+    daily = {"HDFCBANK": _daily(last=(101.0, 99.0, 100.8, 1_500_000)), "INFY": _daily()}
+    out = rules_sim.simulate(scfg, [t("HDFCBANK", 9, 40, 1.0), t("INFY", 9, 40, 1.0),
+                                    t("HDFCBANK", 12, 0, 1.0)],
+                             "r_pyramid", "exit_ts_pyramid", daily)
+    assert out["trades"] == 1
+    assert out["skipped"]["not on that morning's screened list"] == 1
+    assert out["skipped"]["outside the entry windows (freeze)"] == 1
