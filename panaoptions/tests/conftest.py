@@ -81,7 +81,13 @@ def cfg(tmp_path, monkeypatch):
                              "max_open_trades": 3, "daily_loss_limit_pct": 10.0,
                              # the premium targets the ledger tests are written
                              # against; tests/test_exit_plan.py tests r_multiple
-                             "exit_style": "auto"})
+                             "exit_style": "auto",
+                             # the 20% / 25% / 45% budgets the sizing tests are
+                             # written against ($5,000 at 30% since 30 Sept is
+                             # tested in test_throttles and test_preflight)
+                             "max_capital_deployed_pct": 20.0,
+                             "index_max_capital_deployed_pct": 25.0,
+                             "max_total_deployed_pct": 45.0})
     # Likewise the previous-day go/no-go on the candlestick strategies;
     # tests/test_go_no_go.py tests it.
     cfg.data["fno"].setdefault("go_no_go", {})["enabled"] = False

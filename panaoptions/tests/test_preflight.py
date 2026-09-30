@@ -46,18 +46,14 @@ def test_the_shipped_capital_can_actually_buy_the_shipped_universe(shipped):
 
 
 def test_the_shipped_capital_funds_most_of_the_pattern_bands(shipped):
-    """$800 a trade on $4,000, and $1,000 on the index ETFs.
-
-    The standard cap stays at 20%; the index exception (25%) is what lets a
-    near-the-money SPY or QQQ contract through. See risk/gatekeeper.py.
-    """
+    """$1,500 a trade on $5,000 (30%), the index ETFs included."""
     from panaoptions.preflight import check
 
     budget = shipped.capital * float(
         shipped.get("risk.max_capital_deployed_pct")) / 100
-    assert budget == 800.0
+    assert shipped.capital == 5000.0 and budget == 1500.0
     from panaoptions.risk.gatekeeper import cap_pct
-    assert shipped.capital * cap_pct(shipped, "SPY") / 100 == 1000.0
+    assert shipped.capital * cap_pct(shipped, "SPY") / 100 == 1500.0
 
     unaffordable = [f for f in check(shipped)
                     if f.setting == "strategies.candlestick_at_level.patterns"]
@@ -320,9 +316,9 @@ def test_a_stale_env_capital_is_noticed_after_an_upgrade(cfg, monkeypatch):
     cfg.data["account"]["starting_capital"] = 2000.0
     found = [f for f in preflight.check(cfg) if f.setting == "PANAOPTIONS_CAPITAL"]
     assert found, "an override below the shipped figure must be reported"
-    assert "$2,000" in found[0].problem and "$4,000" in found[0].problem
+    assert "$2,000" in found[0].problem and "$5,000" in found[0].problem
     # And it hands over a command rather than a description of one.
-    assert "PANAOPTIONS_CAPITAL=4000" in found[0].command
+    assert "PANAOPTIONS_CAPITAL=5000" in found[0].command
 
 
 def test_matching_or_higher_capital_raises_nothing(cfg, monkeypatch):

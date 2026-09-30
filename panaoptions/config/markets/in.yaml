@@ -16,8 +16,9 @@
 #   Data      Charts from Yahoo (^NSEI, ^NSEBANK, RELIANCE.NS …); option chains
 #             from NSE's own site. NSE serves greeks-free chains, so delta is
 #             computed from the implied volatility, as it is for Yahoo.
-#   Account   ₹3,50,000 of paper capital (about $4,000). PANAOPTIONS_CAPITAL_IN
-#             in .env overrides it.
+#   Account   ₹4,37,500 of paper capital (about $5,000 at ₹87.5), ₹1,31,250
+#             a trade (30%, about $1,500). PANAOPTIONS_CAPITAL_IN in .env
+#             overrides it.
 #
 # Lot sizes change twice a year (NSE circulars). Update lot_sizes below when
 # they do; the chain does not carry them.
@@ -29,7 +30,7 @@ market:
   exchange: "NSE"
 
 account:
-  starting_capital: 350000.0
+  starting_capital: 437500.0
   currency: "₹"
 
 session:
@@ -149,11 +150,14 @@ volume_profile:
   rth_close: "15:30"
 
 risk:
-  # 20% of capital per trade (₹70,000), 25% on the indices (₹87,500).
+  # The same as the US desk: 30% of capital per trade (₹1,31,250), the
+  # indices included, and both open positions at full size (60%).
+  max_capital_deployed_pct: 30.0
+  max_total_deployed_pct: 60.0
   index_symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
-  index_max_capital_deployed_pct: 25.0
-  daily_loss_limit_pct: 3.0        # ₹10,500 — locked out for the day
-  # 2% risk a trade (₹7,000), 2 open, 4 a day: settings.yaml.
+  index_max_capital_deployed_pct: 30.0
+  daily_loss_limit_pct: 3.0        # ₹13,125 — locked out for the day
+  # 2% risk a trade (₹8,750), 2 open, 3 a day: settings.yaml.
 
 agents:
   macro:

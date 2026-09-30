@@ -284,7 +284,7 @@ def _ensure_capital() -> int:
         return (f"${capital * pct / 100:,.0f} a trade, "
                 f"${capital * index_pct / 100:,.0f} on SPY/QQQ/DIA")
 
-    managed = {2000.0, 5000.0}
+    managed = {2000.0, 4000.0, 5000.0}
     if shipped and current is not None and current != shipped and (
             current in managed or current < shipped):
         if not ENV_PATH.exists() and (ROOT / ".env.example").exists():

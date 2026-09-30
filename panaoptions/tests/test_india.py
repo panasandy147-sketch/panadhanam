@@ -31,10 +31,15 @@ def india(tmp_path, monkeypatch):
     markets.activate("US")
 
 
+@pytest.fixture
+def india_old(india):
+    return _pin_old_india_account(india)
+
+
 # --------------------------------------------------------------------------- #
 def test_the_india_overlay_changes_clock_symbols_account_and_contracts(india):
     assert india.market == "IN" and india.timezone == "Asia/Kolkata"
-    assert india.capital == 350000 and india.currency == "₹"
+    assert india.capital == 437500 and india.currency == "₹"
     assert "NIFTY" in india.symbols and "SPY" not in india.symbols
     assert india.lot_size("NIFTY") == 75 and india.lot_size("BANKNIFTY") == 30
     assert india.get("session.force_exit_at") == "15:15"
@@ -111,7 +116,8 @@ def test_yahoo_is_asked_by_its_own_names():
     assert names.name_for("^NSEI") == "^NSEI"
 
 
-def test_sizing_and_pnl_use_the_nse_lot(india):
+def test_sizing_and_pnl_use_the_nse_lot(india_old):
+    india = india_old
     from panaoptions.data.nse import parse_chain
     from panaoptions.ledger.paper import PaperLedger
     from panaoptions.risk.gatekeeper import RiskGatekeeper
@@ -193,7 +199,7 @@ def test_the_desk_switches_market_and_writes_india_audit_to_its_own_folder(cfg):
     us_journal = journal_store.JOURNAL_DIR
     result = asyncio.run(desk.switch_market("IN", feed_factory=lambda c: FakeFeed()))
     assert result["switched"] and desk.cfg.market == "IN"
-    assert desk.cfg.currency == "₹" and desk.risk.capital == 350000
+    assert desk.cfg.currency == "₹" and desk.risk.capital == 437500
     assert "NIFTY" in desk.cfg.symbols
     assert audit.audit_dir() == us_journal / "in" / "audit"
     assert any(e["kind"] == "market" for e in desk.activity.recent(10))
@@ -347,3 +353,13 @@ def test_estimated_trades_are_flagged_in_the_trade_and_the_audit(india):
     assert trade.estimated is True
     record = audit.record_buy(india, trade, signal, setup)
     assert record["estimated_prices"] is True
+
+
+def _pin_old_india_account(cfg):
+    """The lot arithmetic below is written against ₹3,50,000 at 20% / 25%;
+    the shipped ₹4,37,500 at 30% is tested in test_throttles."""
+    cfg.data["account"]["starting_capital"] = 350000.0
+    cfg.data["risk"].update(max_capital_deployed_pct=20.0,
+                            index_max_capital_deployed_pct=25.0,
+                            max_total_deployed_pct=45.0)
+    return cfg

@@ -8,7 +8,7 @@ instruments, different risk model, different session rules.
 or **Auto** (follow whichever session is open; they never overlap). India
 trades NSE options — NIFTY, BANKNIFTY, FINNIFTY and liquid stocks — on
 09:15–15:30 IST, in exchange lots (NIFTY 75, BANKNIFTY 30 …), with charts
-from Yahoo and option chains from NSE's own site, on a ₹3,50,000 paper
+from Yahoo and option chains from NSE's own site, on a ₹4,37,500 paper
 account (`PANAOPTIONS_CAPITAL_IN` overrides). Everything India-specific is in
 `config/markets/in.yaml`. Each market keeps its own books: India's ledger,
 journal, reviews, audit log and learned weights live in `data/in/` and
@@ -78,10 +78,10 @@ Ollama down or slower than 20 s = the rules score stands.
 **The Risk Gatekeeper** (`risk/gatekeeper.py`) then checks the contract,
 deterministically: circuit breaker, signal shape, call-vs-put, spread ≤ 7% of
 mid, delta inside the band (down to the 0.30 fallback floor), the per-trade
-cap — 20% of $4,000 = $800, or 25% = $1,000 on SPY, QQQ and DIA — and the
+cap — 30% of $5,000 = $1,500, SPY, QQQ and DIA included — and the
 total ceiling. A committee approval cannot pass it.
 
-**The circuit breaker** counts closed AND open losses: at $120 (3%) the
+**The circuit breaker** counts closed AND open losses: at $150 (3%) the
 desk sells everything and is locked out for the rest of the day, restarts
 included (see "Tournament risk rules").
 
@@ -940,18 +940,19 @@ order.
 These are Robbins World Cup–style limits: small risk per trade, few trades, and a hard stop
 for the day. They apply to every profile, US and India.
 
-| Rule | Setting | $4,000 account | ₹3,50,000 (India) |
+| Rule | Setting | $5,000 account | ₹4,37,500 (India) |
 |---|---|---|---|
-| Loss at the stop per trade | `risk.max_risk_per_trade_pct: 2.0` | $80 | ₹7,000 |
+| Premium per trade (budget) | `risk.max_capital_deployed_pct: 30.0` | $1,500 | ₹1,31,250 |
+| Loss at the stop per trade | `risk.max_risk_per_trade_pct: 2.0` | $100 | ₹8,750 |
 | Open trades at once | `risk.max_open_trades: 2` | 2 | 2 |
-| Trades a day | `risk.max_daily_trades: 4` | 4 | 4 |
-| Daily circuit breaker | `risk.daily_loss_limit_pct: 3.0` | $120 | ₹10,500 |
+| Trades a day | `risk.max_daily_trades: 3` | 3 | 3 |
+| Daily circuit breaker | `risk.daily_loss_limit_pct: 3.0` | $150 | ₹13,125 |
 
 **Risk per trade** caps the loss, not the premium. The loss is the first exit
 to fire: |delta| × the distance to the underlying stop, or the 45% premium
-backstop. `max_capital_deployed_pct` (20%) still caps the premium, and the
-tighter of the two sizes the trade. 2% of $4,000 as the premium itself would
-be $80, which buys no at-the-money SPY contract, so the desk would never trade.
+backstop. `max_capital_deployed_pct` (30%) still caps the premium, and the
+tighter of the two sizes the trade. 2% of $5,000 as the premium itself would
+be $100, which buys no at-the-money SPY contract, so the desk would never trade.
 
 **The breaker** counts realised plus open losses. When it trips:
 1. Pending signals are cancelled.
@@ -1014,8 +1015,8 @@ available, so only the price half of the F&O confluence rule is tested.
 ## Over budget: the fallback ladder
 
 The primary contract is **0.40-0.50 delta**. When it costs more than the
-per-trade budget (20% of capital, 25% on the index ETFs; ₹70,000 / ₹87,500
-on India) or the per-contract price ceiling, the setup is not simply
+per-trade budget (30% of capital, the index ETFs included: $1,500 on $5,000,
+₹1,31,250 on India) or the per-contract price ceiling, the setup is not simply
 refused. The desk tries, in order (`contracts.fallback_order`):
 
 1. **The same delta with less time**: a nearer expiry.

@@ -161,7 +161,14 @@ def test_a_reversal_signal_without_the_sweep_is_refused(cfg, only_sweep):
 def india(tmp_path, monkeypatch):
     from panaoptions import config as config_mod
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
-    yield config_mod.Config(market="IN")
+    cfg = config_mod.Config(market="IN")
+    # The lot arithmetic below is written against ₹3,50,000 at 20% / 25%;
+    # the shipped ₹4,37,500 at 30% is tested in test_throttles.
+    cfg.data["account"]["starting_capital"] = 350000.0
+    cfg.data["risk"].update(max_capital_deployed_pct=20.0,
+                            index_max_capital_deployed_pct=25.0,
+                            max_total_deployed_pct=45.0)
+    yield cfg
     markets.activate("US")
 
 

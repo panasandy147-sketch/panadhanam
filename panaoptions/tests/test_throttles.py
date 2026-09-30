@@ -20,7 +20,7 @@ NOW = datetime(2026, 9, 23, 10, 0, tzinfo=ET)
 
 @pytest.fixture
 def shipped(cfg):
-    """The shipped rules on the shipped $4,000 account (conftest pins the old
+    """The shipped rules on a $4,000 account (conftest pins the old
     ones for the loop tests)."""
     from panaoptions.config import Config
     fresh = Config()
@@ -45,8 +45,11 @@ def _setup(close=230.0, stop=229.0, strategy=SetupType.ORB_VWAP, target=0.0, sym
 # --------------------------------------------------------------------------- #
 # The numbers
 # --------------------------------------------------------------------------- #
-def test_the_shipped_numbers_are_the_tournament_ones():
+def test_the_shipped_numbers_are_the_tournament_ones(monkeypatch, tmp_path):
+    from panaoptions import config as config_mod
     from panaoptions.config import Config
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    monkeypatch.delenv("PANAOPTIONS_CAPITAL", raising=False)
     for cfg in (Config(), Config(profile="zerodte"), Config(profile="scalp")):
         g = cfg.get
         assert g("risk.daily_loss_limit_pct") == 3.0
@@ -54,17 +57,26 @@ def test_the_shipped_numbers_are_the_tournament_ones():
         assert g("risk.max_open_trades") == 2
         assert g("risk.max_daily_trades") == 3
     risk = RiskManager(Config())
-    assert risk.daily_limit == 120.0 and risk.risk_per_trade == 80.0
+    # $5,000: 3% = $150 a day, 2% = $100 a trade, up to $1,500 of premium.
+    assert risk.capital == 5000.0
+    assert risk.daily_limit == 150.0 and risk.risk_per_trade == 100.0
+    assert Config().get("risk.max_capital_deployed_pct") == 30.0
+    assert Config().get("risk.max_total_deployed_pct") == 60.0
 
 
 def test_india_gets_the_same_rules_in_rupees(tmp_path, monkeypatch):
     from panaoptions import config as config_mod
     from panaoptions import markets
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    monkeypatch.delenv("PANAOPTIONS_CAPITAL_IN", raising=False)
     try:
         india = config_mod.Config(market="IN")
         risk = RiskManager(india)
-        assert risk.daily_limit == 10500.0 and risk.risk_per_trade == 7000.0
+        # ₹4,37,500: 3% = ₹13,125 a day, 2% = ₹8,750 a trade, ₹1,31,250 of premium.
+        assert risk.capital == 437500.0
+        assert risk.daily_limit == 13125.0 and risk.risk_per_trade == 8750.0
+        assert india.get("risk.max_capital_deployed_pct") == 30.0
+        assert india.get("risk.index_max_capital_deployed_pct") == 30.0
     finally:
         markets.activate("US")
 

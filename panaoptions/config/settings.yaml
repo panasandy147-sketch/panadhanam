@@ -6,10 +6,11 @@
 account:
   # Paper capital. Real money is not supported by this app at all: there is no
   # broker adapter, and nothing here can place an order anywhere.
-  # $4,000 of paper capital: $800 a trade at the standard 20% cap, and
-  # $1,000 (25%) on the high-notional index ETFs — SPY, QQQ, DIA — whose
-  # near-the-money contracts cost $900-$1,000 on their own. See
-  # risk.index_max_capital_deployed_pct and risk/gatekeeper.py.
+  # $5,000 of paper capital: up to $1,500 a trade (30%), SPY/QQQ/DIA
+  # included, and two positions at once ($3,000, 60%). See
+  # risk.max_capital_deployed_pct, index_max_capital_deployed_pct and
+  # risk/gatekeeper.py. The loss a trade may take is still 2% ($100): the
+  # $1,500 is the most premium one trade may spend, not what it risks.
   #
   # Raising CAPITAL rather than the deployment percentage is deliberate: 40%
   # of $2,500 is the same $1,000 and doubles what one stop-out costs, from 4%
@@ -17,7 +18,7 @@ account:
   # three. Paper capital is a free parameter; risk ratios are not.
   #
   # PANAOPTIONS_CAPITAL in .env overrides this per machine.
-  starting_capital: 4000.0
+  starting_capital: 5000.0
   currency: "$"
 
 market:
@@ -487,7 +488,7 @@ risk:
   # to whatever fired earliest — mostly the weaker morning setups.
   reserved_slots: 1
   # The most one trade may LOSE at its first stop, as a share of capital:
-  # 2% = $80 on $4,000. max_capital_deployed_pct (below) still caps the
+  # 2% = $100 on $5,000. max_capital_deployed_pct (below) still caps the
   # PREMIUM; this caps the loss, and whichever is tighter sizes the trade.
   # (2% of capital as the premium itself would be $80 — not one at-the-money
   # SPY contract, so the desk would never trade.)
@@ -536,12 +537,13 @@ risk:
   breakeven_trigger_pct: 35.0
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.
-  max_capital_deployed_pct: 20.0
-  # The dynamic index exception: these tickers may deploy up to 25% ($1,000
-  # on $4,000) so a valid at- or near-the-money contract is not refused on
-  # notional alone. "DJI" is read as DIA, the Dow ETF.
+  # 30% = $1,500 a trade on $5,000 (India pins its own 20% in in.yaml).
+  max_capital_deployed_pct: 30.0
+  # The index exception: these tickers may deploy this much so a valid at-
+  # or near-the-money contract is not refused on notional alone. At 30% it
+  # is the same $1,500. "DJI" is read as DIA, the Dow ETF.
   index_symbols: ["SPY", "QQQ", "DIA"]
-  index_max_capital_deployed_pct: 25.0
+  index_max_capital_deployed_pct: 30.0
   # The gatekeeper's liquidity filter: refuse any contract whose bid-ask
   # spread is more than this share of the mid.
   max_spread_pct_of_mid: 7.0
@@ -551,11 +553,11 @@ risk:
   # every single time and put 60% of the account to work. Unset, this falls
   # back to the per-trade budget rather than to "no limit".
   #
-  # At 45%, two positions go on at full size and a third takes what is left,
-  # sizing itself down rather than being refused. Long options can expire
-  # worthless, so this is the number to lower first if three at once feels
-  # like too much — `--check-config` prints what the worst case costs.
-  max_total_deployed_pct: 45.0
+  # At 60%, the two positions max_open_trades allows both go on at the full
+  # $1,500. Long options can expire worthless, so this is the number to
+  # lower first if that feels like too much — `--check-config` prints what
+  # the worst case costs.
+  max_total_deployed_pct: 60.0
   # Hard stop on the contract price itself.
   stop_loss_pct: 20.0
   # So the real risk per trade is 20% of 20% = 4% of the account. The app
@@ -579,7 +581,7 @@ risk:
   # is the opposite — see the scalp profile.
   max_hold_minutes: null
 
-  # The hard daily circuit breaker: 3% ($120 on $4,000), realised plus open.
+  # The hard daily circuit breaker: 3% ($150 on $5,000), realised plus open.
   # When hit: pending signals are cancelled, open positions are sold, the
   # order path refuses, and the lockout is saved — it holds for the rest of
   # the calendar day, restarts included.

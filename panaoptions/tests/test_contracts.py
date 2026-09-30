@@ -204,8 +204,8 @@ def test_the_budget_matches_what_sizing_will_accept(cfg):
 
 def test_start_aligns_a_stale_env_capital_with_the_shipped_figure(cfg, monkeypatch, tmp_path):
     """.env wins over settings.yaml, so a figure an older release wrote there
-    (2,000 from the old example, 5,000 from the $1,000-a-trade release) would
-    silently override the shipped $4,000. A figure somebody chose above the
+    (2,000 from the old example, 4,000 from the $800-a-trade release) would
+    silently override the shipped $5,000. A figure somebody chose above the
     shipped one is left alone."""
     import run
     from panaoptions import config as config_mod
@@ -215,12 +215,12 @@ def test_start_aligns_a_stale_env_capital_with_the_shipped_figure(cfg, monkeypat
     monkeypatch.setattr(config_mod, "ENV_PATH", env)
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "2000")
     assert run._ensure_capital() == 0
-    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")
+    assert "PANAOPTIONS_CAPITAL=5000" in env.read_text(encoding="utf-8")
 
-    env.write_text("PANAOPTIONS_CAPITAL=5000\n", encoding="utf-8")
-    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "5000")
+    env.write_text("PANAOPTIONS_CAPITAL=4000\n", encoding="utf-8")
+    monkeypatch.setenv("PANAOPTIONS_CAPITAL", "4000")
     run._ensure_capital()
-    assert "PANAOPTIONS_CAPITAL=4000" in env.read_text(encoding="utf-8")   # ours, realigned
+    assert "PANAOPTIONS_CAPITAL=5000" in env.read_text(encoding="utf-8")   # ours, realigned
 
     env.write_text("PANAOPTIONS_CAPITAL=9000\n", encoding="utf-8")
     monkeypatch.setenv("PANAOPTIONS_CAPITAL", "9000")

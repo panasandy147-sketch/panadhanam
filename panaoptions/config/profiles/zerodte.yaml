@@ -105,5 +105,5 @@ strategies:
 risk:
   stop_mode: "underlying"       # the structural level decides, not the premium
   disaster_stop_pct: 45.0       # out if the option loses 45% first
-  daily_loss_limit_pct: 3.0     # $120 on $4,000 — flattened and locked out for the day
+  daily_loss_limit_pct: 3.0     # $150 on $5,000 — flattened and locked out for the day
   trail_on_ema: true
