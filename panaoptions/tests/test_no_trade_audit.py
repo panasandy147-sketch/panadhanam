@@ -4,7 +4,7 @@ US clock, NSE indices with no volume, and an exact 3R read as 2.9999R."""
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -318,6 +318,7 @@ def test_the_desk_judges_closed_candles_only(cfg, monkeypatch):
     assert len(completed_bars(bars, "1m", t0 + timedelta(minutes=10, seconds=30))) == 2
 
     from tests.test_app import FakeFeed
+    cfg.data["technical"].update(completed_bars_only=True, stale_after_bars=0)
     desk = OptionsDesk(cfg=cfg, feed=FakeFeed())
 
     async def candles(symbol, tf="5m", **k):
@@ -360,3 +361,64 @@ def test_the_watchlist_keeps_only_names_whose_options_can_be_bought(cfg):
     assert set(kept) == {"GOOD", "DOWN", "SPY", "HELD"}
     assert "no call and put" in thin["THIN"] and "(tightest 67%)" in thin["THIN"]
     assert "no put" in thin["CALLS"]
+
+
+def test_every_unclosed_bar_is_dropped_including_yahoos_live_point():
+    """At 15:33 Yahoo ends the chart with the forming 15:30 bucket AND a live
+    point stamped 15:33: both go, the last closed bar is the 15:25 one."""
+    from panaoptions.app import completed_bars
+    t = datetime(2026, 9, 30, 15, 25, tzinfo=ET)
+    bars = [Candle(ts=t, open=1, high=1, low=1, close=1),
+            Candle(ts=t + timedelta(minutes=5), open=1, high=1, low=1, close=1),
+            Candle(ts=t + timedelta(minutes=8), open=1, high=1, low=1, close=1)]
+    got = completed_bars(bars, "5m", t + timedelta(minutes=8, seconds=20))
+    assert [b.ts for b in got] == [t]
+
+
+def test_a_stale_tape_is_not_traded():
+    from panaoptions.app import stale_reason
+    t = datetime(2026, 9, 30, 11, 0, tzinfo=ET)
+    bars = [Candle(ts=t, open=1, high=1, low=1, close=1)]        # closed 11:05
+    assert stale_reason(bars, "5m", t + timedelta(minutes=19), 3) == ""
+    why = stale_reason(bars, "5m", t + timedelta(minutes=25), 3)
+    assert "data stale" in why and "20 min ago" in why
+    assert stale_reason(bars, "5m", t + timedelta(hours=5), 0) == ""   # guard off
+
+
+def test_candles_fall_back_to_the_second_host_then_to_1m_rebuilt():
+    from panaoptions.data import feed as feed_mod
+
+    t = int(datetime(2026, 9, 30, 14, 0, tzinfo=UTC).timestamp())
+
+    def chart(stamps):
+        n = len(stamps)
+        return {"chart": {"result": [{"timestamp": stamps, "indicators": {"quote": [{
+            "open": [1.0] * n, "high": [float(i + 2) for i in range(n)],
+            "low": [0.5] * n, "close": [float(i + 1) for i in range(n)],
+            "volume": [10] * n}]}}]}}
+
+    class Feed(feed_mod.YahooFeed):
+        def __init__(self, answers):
+            super().__init__()
+            self._client = object()
+            self.answers = answers
+
+        async def _get(self, url, **params):
+            host = "query1" if "query1" in url else "query2"
+            return self.answers.get((host, params.get("interval")))
+
+    five = chart([t, t + 300])
+    f = Feed({("query2", "5m"): five})
+    assert len(asyncio.run(f.candles("SPY", "5m"))) == 2
+    assert f.candle_source["SPY"] == "yahoo query2"
+
+    ones = chart([t + 60 * i for i in range(10)])                   # 14:00-14:09
+    f = Feed({("query1", "1m"): ones})
+    bars = asyncio.run(f.candles("SPY", "5m"))
+    assert f.candle_source["SPY"] == "rebuilt from 1m (5m)"
+    assert len(bars) == 2 and bars[0].high == 6.0 and bars[0].close == 5.0
+    assert bars[0].volume == 50 and bars[1].open == 1.0
+
+    f = Feed({})
+    assert asyncio.run(f.candles("SPY", "5m")) == []
+    assert f.candle_source["SPY"].startswith("none")

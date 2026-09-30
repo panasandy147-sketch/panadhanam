@@ -348,6 +348,10 @@ technical:
   # The analysts judge CLOSED intraday candles only: the feed's last bar is
   # still forming (Yahoo includes it). Exits follow the live quote.
   completed_bars_only: true
+  # In market hours, a timeframe whose last closed bar ended more than this
+  # many bars ago is treated as no data (the feed stopped updating). Candles
+  # come from Yahoo query1, else query2, else 5m/15m rebuilt from 1m bars.
+  stale_after_bars: 3
   timeframes: ["1m", "5m", "15m", "1d"]
   primary_timeframe: "5m"
   emas: [9, 20, 21, 50]      # 20: the trend-pullback level (fno_confluence)

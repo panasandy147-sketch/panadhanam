@@ -346,6 +346,60 @@ def _reflect() -> int:
     return 0
 
 
+async def _check_candles(market: str | None, symbols: str | None) -> int:
+    """Per symbol: which source served the candles, the last CLOSED bar, the
+    forming bar dropped, and whether the tape is stale — what the desk will
+    judge on right now."""
+    from panaoptions.app import completed_bars, stale_reason
+    from panaoptions.data.provider import make_feed
+
+    cfg = _backtest_cfg(market, "Checking candles")
+    now = clock.now(cfg.timezone)
+    tf = str(cfg.get("technical.timeframe", "5m"))
+    names = [s.strip().upper() for s in symbols.split(",")] if symbols else list(cfg.symbols)
+
+    def source(feed, sym: str) -> str:
+        seen, obj = set(), feed
+        while obj is not None and id(obj) not in seen:
+            seen.add(id(obj))
+            found = getattr(obj, "candle_source", None)
+            if isinstance(found, dict) and found:
+                return found.get(sym) or found.get(sym.upper()) or next(iter(found.values()))
+            obj = next((getattr(obj, a) for a in ("charts", "inner", "feed")
+                        if getattr(obj, a, None) is not None), None)
+        return "?"
+
+    print(f"  {now:%Y-%m-%d %H:%M %Z} — {tf} bars; the desk judges CLOSED bars only\n")
+    print(f"  {'symbol':10s} {'source':26s} {'bars':>5s}  {'last closed bar':17s} "
+          f"{'forming bar':12s} status")
+    bad = 0
+    async with make_feed(cfg) as feed:
+        for sym in names:
+            try:
+                bars = await feed.candles(sym, tf)
+            except Exception as exc:                  # noqa: BLE001
+                bars, err = [], str(exc)
+            else:
+                err = ""
+            closed = completed_bars(bars, tf, now)
+            dropped = (f"{len(bars) - len(closed)} dropped" if len(closed) < len(bars)
+                       else "none")
+            stale = stale_reason(closed, tf, now,
+                                 float(cfg.get("technical.stale_after_bars", 3) or 0))
+            unit = {"m": 1, "h": 60}.get(tf[-1:], 0) * int(tf[:-1] or 0)
+            from datetime import timedelta
+            last = ((closed[-1].ts + timedelta(minutes=unit)).astimezone(now.tzinfo)
+                    .strftime("closed %m-%d %H:%M") if closed else "—")
+            status = ("NO DATA " + err if not bars else
+                      "STALE — " + stale.split(": ", 1)[-1] if stale else "OK")
+            bad += status != "OK"
+            print(f"  {sym:10s} {source(feed, sym)[:26]:26s} {len(closed):5d}  {last:17s} "
+                  f"{dropped:12s} {status}")
+    print("\n  Backups: Yahoo's second host (query2), then 5m/15m rebuilt from 1-minute "
+          "bars. Outside market hours every tape reads STALE — that is expected.")
+    return 1 if bad else 0
+
+
 def _why(market: str | None = None) -> int:
     """Why today's setups were, or were not, bought — for both markets, or the
     one asked for with --market. See panaoptions/why.py."""
@@ -988,6 +1042,9 @@ def main() -> None:
                              "finished week now (Ollama tunes strategy weights)")
     parser.add_argument("--why", action="store_true",
                         help="why today's setups were or were not bought")
+    parser.add_argument("--check-candles", action="store_true",
+                        help="per symbol: candle source, last closed bar, stale or not "
+                             "(--market, --symbols)")
     parser.add_argument("--ensure-capital", action="store_true",
                         help="raise a .env capital below the shipped figure to it")
     parser.add_argument("--set", nargs="+", action="extend", metavar="KEY=VALUE",
@@ -1048,6 +1105,8 @@ def main() -> None:
         raise SystemExit(_reflect())
     if args.why:
         raise SystemExit(_why(args.market))
+    if args.check_candles:
+        raise SystemExit(asyncio.run(_check_candles(args.market, args.symbols)))
     if args.ensure_capital:
         raise SystemExit(_ensure_capital())
     if args.suggest_fix:

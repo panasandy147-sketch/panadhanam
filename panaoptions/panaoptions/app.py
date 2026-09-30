@@ -52,10 +52,38 @@ def completed_bars(candles: list, timeframe: str, now: datetime) -> list:
         minutes = 0
     if not minutes or not candles:
         return candles
-    last = candles[-1].ts
-    if last.tzinfo is None and now.tzinfo is not None:
-        last = last.replace(tzinfo=now.tzinfo)
-    return candles[:-1] if last + timedelta(minutes=minutes) > now else candles
+    # Every bar that has not closed goes — Yahoo can end a chart with the
+    # forming bucket AND a live point stamped with the current minute.
+    out = list(candles)
+    while out:
+        last = out[-1].ts
+        if last.tzinfo is None and now.tzinfo is not None:
+            last = last.replace(tzinfo=now.tzinfo)
+        if last + timedelta(minutes=minutes) <= now:
+            break
+        out.pop()
+    return out
+
+
+def stale_reason(candles: list, timeframe: str, now: datetime, bars: float) -> str:
+    """'' when the last CLOSED bar is recent, else why the tape is stale: it
+    ended more than `bars` bars ago (the feed stopped updating mid-session)."""
+    from datetime import timedelta
+    unit = {"m": 1, "h": 60}.get(timeframe[-1:], 0)
+    try:
+        minutes = int(timeframe[:-1]) * unit
+    except ValueError:
+        minutes = 0
+    if not candles or not minutes or bars <= 0:
+        return ""
+    end = candles[-1].ts + timedelta(minutes=minutes)
+    if end.tzinfo is None and now.tzinfo is not None:
+        end = end.replace(tzinfo=now.tzinfo)
+    age = (now - end).total_seconds() / 60
+    if age > bars * minutes:
+        return (f"data stale: the last closed {timeframe} bar ended {age:.0f} min ago "
+                f"(more than {bars:g} bars) — no new entry on an old tape")
+    return ""
 
 
 class OptionsDesk:
@@ -97,6 +125,7 @@ class OptionsDesk:
         self._audit_dirty = False
         self._refusals_logged: dict[tuple, datetime] = {}
         self._looks_logged: dict[str, tuple[datetime, tuple]] = {}
+        self._stale: dict[str, str] = {}
         # Opening range and pre-market extremes, per symbol, for today.
         self._levels: dict[str, Any] = {}
         self._levels_on: str = ""
@@ -676,6 +705,8 @@ class OptionsDesk:
                 continue
             candles, session_levels = tape
             if not candles:
+                why = self._stale.get(symbol) or "no candles from any source"
+                self.activity.add("hunt.skip", f"{symbol} — {why}", level="warn", ts=now)
                 continue
             judged.append((symbol, candles, session_levels, *strategies.evaluate_all(
                 symbol, candles, session_levels, self.cfg)))
@@ -1105,6 +1136,11 @@ class OptionsDesk:
         candles = await self.feed.candles(symbol, tf)
         if candles and bool(self.cfg.get("technical.completed_bars_only", True)):
             candles = completed_bars(candles, tf, now)
+        stale = stale_reason(candles, tf, now,
+                             float(self.cfg.get("technical.stale_after_bars", 3) or 0))
+        self._stale[symbol] = stale
+        if stale:
+            candles = []            # never trade on a tape that stopped updating
         levels = await self._levels_for(symbol, now)
         return candles, levels
 

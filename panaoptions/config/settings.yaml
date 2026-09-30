@@ -192,6 +192,11 @@ technical:
   # Sept; 62 on the same day's replay) and volume read a minute in looked
   # thin. The backtests always used closed bars. Exits follow the live price.
   completed_bars_only: true
+  # No new entry on a tape whose last closed bar ended more than this many
+  # bars ago (the feed stopped updating). Candles come from Yahoo query1,
+  # else query2, else 5m/15m rebuilt from 1-minute bars.
+  # Verify on this machine:  python run.py --check-candles [--market IN]
+  stale_after_bars: 3
   trend_timeframe: "15m"
   fast_ema: 9
   slow_ema: 20

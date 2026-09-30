@@ -39,11 +39,39 @@ def completed_bars(bars: list, timeframe: str, now: datetime | None = None) -> l
         minutes = 0
     if not minutes or not bars:
         return bars
-    last = bars[-1].ts
     now = now or datetime.now(timezone.utc)
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return bars[:-1] if last + timedelta(minutes=minutes) > now else bars
+    # Every bar that has not closed goes — Yahoo can end a chart with the
+    # forming bucket AND a live point stamped with the current minute.
+    out = list(bars)
+    while out:
+        last = out[-1].ts
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if last + timedelta(minutes=minutes) <= now:
+            break
+        out.pop()
+    return out
+
+
+def stale_reason(bars: list, timeframe: str, max_bars: float,
+                 now: datetime | None = None) -> str:
+    """'' when the last closed intraday bar is recent, else why it is stale."""
+    unit = {"m": 1, "h": 60}.get(str(timeframe)[-1:], 0)
+    try:
+        minutes = int(str(timeframe)[:-1]) * unit
+    except ValueError:
+        minutes = 0
+    if not bars or not minutes or max_bars <= 0:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    end = bars[-1].ts
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    age = (now - (end + timedelta(minutes=minutes))).total_seconds() / 60
+    if age > max_bars * minutes:
+        return (f"data stale: the last closed {timeframe} bar ended {age:.0f} min ago "
+                f"(more than {max_bars:g} bars) — not traded on")
+    return ""
 
 
 class MarketDataService:
@@ -132,8 +160,23 @@ class MarketDataService:
         # last bar is still forming, and a pattern, a volume surge or a
         # sweep's reclaim judged on it is judged on a minute of a five-minute
         # candle. The replay always used closed bars. Exits follow the quote.
-        if bool(tech.get("completed_bars_only", True)):
+        # (The paper broker's own synthetic market is not on the market clock:
+        # neither rule applies to it — only to a real feed's candles.)
+        synthetic = (getattr(self.broker, "name", "") == "paper"
+                     and not getattr(self.broker, "data_source", None))
+        if bool(tech.get("completed_bars_only", True)) and not synthetic:
             candles = {tf: completed_bars(bars, tf) for tf, bars in candles.items()}
+        # A tape that stopped updating mid-session is not traded on: an
+        # intraday timeframe whose last closed bar ended more than
+        # technical.stale_after_bars bars ago (in market hours) is emptied, so
+        # the analysts see no data rather than an old picture.
+        stale_bars = float(tech.get("stale_after_bars", 3) or 0)
+        if stale_bars > 0 and not synthetic and self._in_session():
+            for tf, bars in candles.items():
+                why = stale_reason(bars, tf, stale_bars)
+                if why:
+                    log.warning("%s %s: %s", symbol, tf, why)
+                    candles[tf] = []
 
         chain = None
         if chain_task is not None:
@@ -199,6 +242,21 @@ class MarketDataService:
         except Exception as exc:                        # noqa: BLE001
             log.debug("F&O picture not built for %s: %s", symbol, exc)
         return ctx
+
+    def _in_session(self) -> bool:
+        """Market hours on the market's own clock, from 10 minutes after the
+        open (the first bars need time to print) to the close."""
+        from app.core import clock
+        now = clock.market_now(str(self.cfg.get("system.timezone", "Asia/Kolkata")))
+        if now.weekday() >= 5:
+            return False
+
+        def hm(v: str) -> int:
+            h, _, m = str(v).partition(":")
+            return int(h) * 60 + int(m or 0)
+        t = now.hour * 60 + now.minute
+        return (hm(self.cfg.get("system.market_open", "09:15")) + 10 <= t
+                < hm(self.cfg.get("system.market_close", "15:30")))
 
     def _compute_indicators(self, candles: dict[str, list], tech: dict) -> dict[str, Any]:
         primary_tf = tech.get("primary_timeframe", "5m")

@@ -916,6 +916,26 @@ Candlestick-at-a-Level and Liquidity Sweep strategies, are taken only here:
 - **LONG_PUT:** the pattern's high tested the **PDH** and price closed back
   below it, with **put open interest rising**.
 
+### Candles: closed bars, backups, and how to check them
+
+The desk judges **closed** 5-minute candles only (`technical.completed_bars_only`).
+Yahoo's chart ends with the bar still forming, and sometimes with a live
+point stamped with the current minute; both are dropped before any strategy
+looks. Stops and exits still follow the live price.
+
+If Yahoo's chart host (`query1`) fails, the same API is tried on its second
+host (`query2`). If both fail, 5- and 15-minute candles are rebuilt from the
+1-minute bars. A tape whose last closed bar is more than
+`technical.stale_after_bars` (3) bars old is not traded on, and the
+decisions log says so.
+
+    python run.py --check-candles              # every watched symbol, this market
+    python run.py --check-candles --market IN --symbols NIFTY,TCS
+
+For each symbol it prints which source answered, when the last closed bar
+closed, how many unclosed bars were dropped, and OK or STALE. Outside market
+hours every tape reads STALE, which is expected.
+
 How "at" the level is judged is `fno.confluence.mode`:
 - **`sweep`** (the default): a 5-minute candle sweeps through the level by no
   more than 0.50% (`proximity_pct`; 0.25% before 30 Sept), and the next candle closes back inside

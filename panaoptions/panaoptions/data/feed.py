@@ -24,6 +24,8 @@ from panaoptions.models import Candle, OptionContract, OptionRight
 log = get_logger("feed")
 
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+# The same chart API on Yahoo's second host: the backup when query1 fails.
+CHART_BACKUP = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}"
 OPTIONS = "https://query2.finance.yahoo.com/v7/finance/options/{sym}"
 NEWS = "https://query2.finance.yahoo.com/v1/finance/search"
 
@@ -51,6 +53,8 @@ class YahooFeed:
         self.check_options = check_options
         self._client: httpx.AsyncClient | None = None
         self.connected = False
+        # Which source answered each symbol's last candles request.
+        self.candle_source: dict[str, str] = {}
 
     async def __aenter__(self) -> YahooFeed:
         await self.connect()
@@ -133,11 +137,31 @@ class YahooFeed:
     # ------------------------------------------------------------------ #
     async def candles(self, symbol: str, interval: str = "5m",
                       include_prepost: bool = False) -> list[Candle]:
-        payload = await self._get(
-            CHART.format(sym=symbol), interval=interval,
-            range=_INTERVAL_RANGE.get(interval, "60d"),
-            includePrePost="true" if include_prepost else "false")
-        return parse_candles(payload)
+        """Candles, with two backups when Yahoo's chart host fails:
+          1. the same chart API on Yahoo's second host (query2);
+          2. for 5m/15m/30m, the 1-minute bars rebuilt into the interval.
+        Which one answered is kept in `candle_source[symbol]`."""
+        prepost = "true" if include_prepost else "false"
+        for label, url in (("yahoo query1", CHART), ("yahoo query2", CHART_BACKUP)):
+            bars = parse_candles(await self._get(
+                url.format(sym=symbol), interval=interval,
+                range=_INTERVAL_RANGE.get(interval, "60d"), includePrePost=prepost))
+            if bars:
+                self.candle_source[symbol] = label
+                self.chart_error = ""
+                return bars
+        minutes = {"5m": 5, "15m": 15, "30m": 30}.get(interval)
+        if minutes:
+            for url in (CHART, CHART_BACKUP):
+                ones = parse_candles(await self._get(
+                    url.format(sym=symbol), interval="1m", range="5d",
+                    includePrePost=prepost))
+                if ones:
+                    self.candle_source[symbol] = f"rebuilt from 1m ({interval})"
+                    self.chart_error = ""
+                    return resample_candles(ones, minutes)
+        self.candle_source[symbol] = "none — every source failed"
+        return []
 
     async def quote(self, symbol: str) -> dict[str, Any] | None:
         """Last price, previous close and the pre-market print if there is one."""
@@ -259,6 +283,26 @@ def parse_news(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
                     "published": published})
     out.sort(key=lambda n: n["published"] or datetime.min.replace(tzinfo=UTC),
              reverse=True)
+    return out
+
+
+def resample_candles(bars: list[Candle], minutes: int) -> list[Candle]:
+    """1-minute bars into `minutes` buckets on the clock (5m: :00, :05, ...;
+    US and NSE session opens both sit on those boundaries). Open of the first,
+    high/low of all, close of the last, the volumes summed."""
+    out: list[Candle] = []
+    step = minutes * 60
+    for b in sorted(bars, key=lambda x: x.ts):
+        epoch = int(b.ts.timestamp())
+        start = datetime.fromtimestamp(epoch - epoch % step, tz=b.ts.tzinfo or UTC)
+        if out and out[-1].ts == start:
+            last = out[-1]
+            out[-1] = last.model_copy(update={
+                "high": max(last.high, b.high), "low": min(last.low, b.low),
+                "close": b.close, "volume": (last.volume or 0) + (b.volume or 0)})
+        else:
+            out.append(Candle(ts=start, open=b.open, high=b.high, low=b.low,
+                              close=b.close, volume=b.volume or 0))
     return out
 
 

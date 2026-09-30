@@ -32,6 +32,8 @@ from app.core.models import (Candle, Instrument, OptionChain, OptionLeg, Quote,
 log = get_logger("feed.yahoo")
 
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+# The same chart API on Yahoo's second host: the backup when query1 fails.
+CHART_BACKUP = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}"
 OPTIONS = "https://query2.finance.yahoo.com/v7/finance/options/{sym}"
 
 # Yahoo's interval + range vocabulary.
@@ -65,6 +67,25 @@ def yahoo_ticker(symbol: str) -> str:
     return f"{symbol.strip().upper()}{suffix}"
 
 
+def resample_candles(bars: list[Candle], minutes: int) -> list[Candle]:
+    """1-minute bars into `minutes` buckets on the clock (5m: :00, :05, ...;
+    NSE's 09:15 and New York's 09:30 opens both sit on those boundaries)."""
+    out: list[Candle] = []
+    step = minutes * 60
+    for b in sorted(bars, key=lambda x: x.ts):
+        epoch = int(b.ts.timestamp())
+        start = datetime.fromtimestamp(epoch - epoch % step, tz=b.ts.tzinfo or timezone.utc)
+        if out and out[-1].ts == start:
+            last = out[-1]
+            out[-1] = last.model_copy(update={
+                "high": max(last.high, b.high), "low": min(last.low, b.low),
+                "close": b.close, "volume": (last.volume or 0) + (b.volume or 0)})
+        else:
+            out.append(Candle(ts=start, open=b.open, high=b.high, low=b.low,
+                              close=b.close, volume=b.volume or 0))
+    return out
+
+
 class YahooFeed(BrokerAdapter):
     """Read-only market data. Order methods deliberately refuse."""
 
@@ -77,6 +98,8 @@ class YahooFeed(BrokerAdapter):
         super().__init__(credentials, config)
         self._client: httpx.AsyncClient | None = None
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
+        # Which source answered each symbol's last candles request.
+        self.candle_source: dict[str, str] = {}
 
     async def connect(self) -> bool:
         self._client = httpx.AsyncClient(
@@ -146,17 +169,34 @@ class YahooFeed(BrokerAdapter):
         ticker = yahoo_ticker(symbol)
         interval = _INTERVAL.get(timeframe, "5m")
         rng = _RANGE.get(timeframe, "60d")
+        # Backups when Yahoo's chart host fails: the same API on its second
+        # host, then (5m/15m/30m) the 1-minute bars rebuilt into the interval.
+        for label, url in (("yahoo query1", CHART), ("yahoo query2", CHART_BACKUP)):
+            bars = await self._chart(url, ticker, rng, interval, symbol)
+            if bars:
+                self.candle_source[symbol] = label
+                return bars[-count:]
+        minutes = {"5m": 5, "15m": 15, "30m": 30}.get(timeframe)
+        if minutes:
+            for url in (CHART, CHART_BACKUP):
+                ones = await self._chart(url, ticker, "7d", "1m", symbol)
+                if ones:
+                    self.candle_source[symbol] = f"rebuilt from 1m ({timeframe})"
+                    return resample_candles(ones, minutes)[-count:]
+        self.candle_source[symbol] = "none — every source failed"
+        return []
+
+    async def _chart(self, url: str, ticker: str, rng: str, interval: str,
+                     symbol: str) -> list[Candle]:
         try:
-            r = await self._client.get(CHART.format(sym=ticker),
+            r = await self._client.get(url.format(sym=ticker),
                                        params={"range": rng, "interval": interval})
             if r.status_code != 200:
                 return []
             result = (r.json().get("chart", {}).get("result") or [None])[0]
-            if not result:
-                return []
-            return self._parse_candles(result)[-count:]
+            return self._parse_candles(result) if result else []
         except Exception as exc:
-            log.debug("yahoo candles failed %s: %s", symbol, exc)
+            log.debug("yahoo candles failed %s (%s): %s", symbol, url[:30], exc)
             return []
 
     @staticmethod

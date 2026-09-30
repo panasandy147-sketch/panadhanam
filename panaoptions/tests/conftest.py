@@ -94,6 +94,10 @@ def cfg(tmp_path, monkeypatch):
     # Likewise the previous-day go/no-go on the candlestick strategies;
     # tests/test_go_no_go.py tests it.
     cfg.data["fno"].setdefault("go_no_go", {})["enabled"] = False
+    # The loop tests' tapes are made up and not on the desk's clock (a 09:50
+    # cycle reads bars up to 10:15): the closed-bar and stale-tape rules are
+    # off for them; tests/test_no_trade_audit.py tests both.
+    cfg.data["technical"].update(completed_bars_only=False, stale_after_bars=0)
     return cfg
 
 

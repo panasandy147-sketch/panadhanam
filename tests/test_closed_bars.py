@@ -53,3 +53,56 @@ def test_the_context_carries_closed_bars_only(cfg, monkeypatch):
     cfg.settings["technical"]["completed_bars_only"] = False
     ctx = asyncio.run(svc.build_context("INFY", "t"))
     assert len(ctx.candles["5m"]) == 40
+
+
+def test_every_unclosed_bar_goes_including_yahoos_live_point():
+    t = T0 + timedelta(minutes=5)                    # 14:05 bucket forming at 14:08
+    bars = _bars(1) + [Candle(ts=t, open=1, high=1, low=1, close=1),
+                       Candle(ts=t + timedelta(minutes=3), open=1, high=1, low=1, close=1)]
+    assert [b.ts for b in completed_bars(bars, "5m", t + timedelta(minutes=3, seconds=10))] \
+        == [T0]
+
+
+def test_a_stale_tape_is_emptied_in_market_hours():
+    from app.data.market import stale_reason
+    bars = _bars(1)                                  # closed 14:05
+    assert stale_reason(bars, "5m", 3, T0 + timedelta(minutes=19)) == ""
+    assert "data stale" in stale_reason(bars, "5m", 3, T0 + timedelta(minutes=25))
+
+
+def test_panadhanam_candles_fall_back_to_the_second_host_then_1m():
+    from app.data.feeds import yahoo
+
+    t = int(T0.timestamp())
+
+    def chart(stamps):
+        n = len(stamps)
+        return {"chart": {"result": [{"timestamp": stamps, "indicators": {"quote": [{
+            "open": [1.0] * n, "high": [float(i + 2) for i in range(n)],
+            "low": [0.5] * n, "close": [float(i + 1) for i in range(n)],
+            "volume": [10] * n}]}}]}}
+
+    class Resp:
+        def __init__(self, payload):
+            self.status_code = 200 if payload else 503
+            self._p = payload
+
+        def json(self):
+            return self._p
+
+    class Client:
+        def __init__(self, answers):
+            self.answers = answers
+
+        async def get(self, url, params=None):
+            host = "query1" if "query1" in url else "query2"
+            return Resp(self.answers.get((host, params["interval"])))
+
+    feed = yahoo.YahooFeed()
+    feed._client = Client({("query2", "5m"): chart([t, t + 300])})
+    assert len(asyncio.run(feed.get_candles("SPY", "5m"))) == 2
+    assert feed.candle_source["SPY"] == "yahoo query2"
+    feed._client = Client({("query1", "1m"): chart([t + 60 * i for i in range(10)])})
+    bars = asyncio.run(feed.get_candles("SPY", "5m"))
+    assert feed.candle_source["SPY"] == "rebuilt from 1m (5m)" and len(bars) == 2
+    assert bars[0].high == 6.0 and bars[0].volume == 50
