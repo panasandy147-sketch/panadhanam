@@ -626,6 +626,10 @@ audit:
   refusal_repeat_minutes: 30
   # Rewrite the day's summary at most this often during the session.
   summary_every_minutes: 5
+  # Symbol by symbol: a snapshot of each hunted symbol this often (and at
+  # every fired setup) — the bars read, close/VWAP/EMAs/ATR/RVOL, PDH/PDL,
+  # the opening range, and every strategy's verdict with its numbers.
+  look_every_minutes: 15
 
 journal:
   # Grade every closed trade the moment it closes, and write a card to

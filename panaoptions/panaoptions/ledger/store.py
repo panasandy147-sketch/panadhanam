@@ -103,6 +103,17 @@ CREATE TABLE IF NOT EXISTS strategy_checks (
     PRIMARY KEY (day, strategy, outcome, reason)
 );
 
+-- The same, per symbol: which names each strategy looked at and why not.
+CREATE TABLE IF NOT EXISTS symbol_checks (
+    day TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, symbol, strategy, outcome, reason)
+);
+
 CREATE TABLE IF NOT EXISTS signals_seen (
     id TEXT PRIMARY KEY,
     ts TEXT,
@@ -244,8 +255,9 @@ def _generic(reason: str) -> str:
     return re.sub(r"\s+", " ", text).strip()[:160]
 
 
-def tally_checks(day: str, attempts: list[Any]) -> None:
-    """Count one cycle's strategy checks for one symbol."""
+def tally_checks(day: str, attempts: list[Any], symbol: str = "") -> None:
+    """Count one cycle's strategy checks for one symbol (per strategy, and
+    per symbol and strategy when the symbol is given)."""
     rows: dict[tuple[str, str, str], int] = {}
     for a in attempts:
         fired = bool(getattr(a, "triggered", False))
@@ -259,7 +271,19 @@ def tally_checks(day: str, attempts: list[Any]) -> None:
         "INSERT INTO strategy_checks (day, strategy, outcome, reason, n) VALUES (?,?,?,?,?) "
         "ON CONFLICT(day, strategy, outcome, reason) DO UPDATE SET n = n + excluded.n",
         [(day, *k, n) for k, n in rows.items()])
+    if symbol:
+        conn.executemany(
+            "INSERT INTO symbol_checks (day, symbol, strategy, outcome, reason, n) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(day, symbol, strategy, outcome, reason) "
+            "DO UPDATE SET n = n + excluded.n",
+            [(day, symbol, *k, n) for k, n in rows.items()])
     conn.commit()
+
+
+def symbol_checks(day: str) -> list[dict[str, Any]]:
+    return [dict(r) for r in get_conn().execute(
+        "SELECT symbol, strategy, outcome, reason, n FROM symbol_checks WHERE day = ? "
+        "ORDER BY symbol, strategy, n DESC", (day,)).fetchall()]
 
 
 def checks(day: str) -> list[dict[str, Any]]:

@@ -163,6 +163,69 @@ def record_screen(cfg: Any, reads: list[Any], summary: str) -> dict[str, Any]:
                    "reasons": list(r.reasons)} for r in reads]})
 
 
+def _r(x: Any, nd: int = 2) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if v != v else round(v, nd)             # NaN -> None
+
+
+def look(cfg: Any, symbol: str, candles: list[Any], levels: Any,
+         attempts: list[Any], provider: str = "") -> dict[str, Any]:
+    """One symbol at one moment: the data the desk read, the figures it
+    computed, and every strategy's verdict WITH its numbers."""
+    from panaoptions.engine import indicators as ta
+    from panaoptions.engine.strategies import localise
+    snap: dict[str, Any] = {}
+    today: list[Any] = []
+    try:
+        frame = localise(ta.to_frame(candles), cfg.timezone)
+        ind = ta.compute(frame, cfg)
+        snap = {"close": _r(ind.close), "vwap": _r(ind.vwap), "ema_fast": _r(ind.ema_fast),
+                "ema_slow": _r(ind.ema_slow), "atr": _r(ind.atr, 3),
+                "bar_volume": _r(ind.volume, 0), "avg_volume": _r(ind.avg_volume, 0),
+                "rvol": _r(ind.rvol)}
+        last = candles[-1].ts
+        today = [c for c in candles if c.ts.astimezone(frame.index.tz).date()
+                 == last.astimezone(frame.index.tz).date()]
+    except Exception as exc:                                # noqa: BLE001
+        log.debug("audit look for %s: %s", symbol, exc)
+    pdc = float(getattr(levels, "previous_close", 0.0) or 0.0)
+    close = snap.get("close")
+    return {
+        "symbol": symbol,
+        "data": {"provider": provider, "bars": len(candles),
+                 "timeframe": str(cfg.get("technical.timeframe", "5m")),
+                 "first_bar": str(candles[0].ts) if candles else None,
+                 "last_bar": str(candles[-1].ts) if candles else None,
+                 "bars_today": len(today)},
+        "figures": {**snap,
+                    "day_high": _r(max((c.high for c in today), default=0.0)) or None,
+                    "day_low": _r(min((c.low for c in today), default=0.0)) or None,
+                    "change_pct": _r((close - pdc) / pdc * 100) if close and pdc else None},
+        "levels": {k: _r(getattr(levels, k, 0.0)) or None for k in (
+            "previous_high", "previous_low", "previous_close", "opening_range_high",
+            "opening_range_low", "premarket_high", "premarket_low")},
+        "strategies": [{
+            "strategy": a.strategy.value,
+            "fired": bool(getattr(a, "triggered", False)),
+            "direction": getattr(a.direction, "value", str(a.direction)),
+            "pattern": a.pattern,
+            "why_not": list(a.blockers)[:3],
+            "confirmations": list(a.confirmations)[:4],
+            "entry": _r(a.entry_trigger) or None, "stop": _r(a.underlying_support) or None,
+            "target": _r(a.underlying_target) or None,
+        } for a in attempts],
+    }
+
+
+def record_look(cfg: Any, snapshot: dict[str, Any], reason: str = "every") -> dict[str, Any]:
+    """A LOOK: one symbol's figures and every strategy's verdict (see look())."""
+    return _write(cfg, {"event": "LOOK", "trade_id": None, "why_logged": reason,
+                        "market": getattr(cfg, "market", "US"), **snapshot})
+
+
 def refresh_day(cfg: Any, day: date | None = None) -> None:
     """Rewrite the day's readable audit (.md) — even with no events, so a day
     without a trade still says what was looked at and why nothing was bought."""
@@ -211,6 +274,8 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
         for e in sorted(grouped[day], key=lambda x: str(x.get("ts") or "")):
             if e.get("event") == "SCREEN":
                 screen = e.get("summary")
+                continue
+            if e.get("event") == "LOOK":             # in the day's .md, not a row
                 continue
             if e.get("event") in ("SKIP", "REFUSED"):
                 gate = f"[{e.get('gate')}] " if e.get("gate") else ""
@@ -369,4 +434,67 @@ def day_markdown(day: date) -> str:
                   f"[{e.get('gate')}] {e.get('reason')}" for e in refused]
         lines.append("")
     lines += _checks_markdown(day)
+    lines += _symbols_markdown(day, [e for e in events if e.get("event") == "LOOK"])
     return "\n".join(lines)
+
+
+def _num(v: Any, nd: int = 2) -> str:
+    return "—" if v is None else f"{v:,.{nd}f}"
+
+
+def _symbols_markdown(day: date, looks: list[dict[str, Any]]) -> list[str]:
+    """Symbol by symbol: each strategy's tally for that name, then every
+    LOOK — the data read, the figures, and each strategy's verdict."""
+    try:
+        from panaoptions.ledger import store
+        rows = store.symbol_checks(day.isoformat())
+    except Exception:                                  # noqa: BLE001
+        rows = []
+    symbols = sorted({r["symbol"] for r in rows} | {e.get("symbol") for e in looks})
+    if not symbols:
+        return []
+    out = ["## Symbol by symbol", "",
+           "For each symbol the desk hunted: how often each strategy checked it and "
+           "why it did not fire, then a snapshot every "
+           "`audit.look_every_minutes` (and at every fired setup) of the data it read, "
+           "the figures, and each strategy's verdict with its numbers.", ""]
+    for sym in symbols:
+        out += [f"### {sym}", "", "| Strategy | Checked | Fired | Commonest reasons it did not fire |",
+                "|---|---|---|---|"]
+        per: dict[str, dict[str, Any]] = {}
+        for r in (r for r in rows if r["symbol"] == sym):
+            p = per.setdefault(r["strategy"], {"checked": 0, "fired": 0, "why": []})
+            p["checked"] += int(r["n"])
+            if r["outcome"] == "fired":
+                p["fired"] += int(r["n"])
+            else:
+                p["why"].append((int(r["n"]), r["reason"]))
+        for name, p in sorted(per.items()):
+            why = "; ".join(f"{w} ({n})" for n, w in sorted(p["why"], reverse=True)[:2])
+            out.append(f"| {name} | {p['checked']} | {p['fired']} | {why.replace('|', '/')} |")
+        out.append("")
+        for e in (e for e in looks if e.get("symbol") == sym):
+            f, lv, d = e.get("figures") or {}, e.get("levels") or {}, e.get("data") or {}
+            out.append(
+                f"**{str(e.get('market_time', ''))[11:16]}**"
+                f"{' (setup fired)' if e.get('why_logged') == 'fired' else ''} — "
+                f"close {_num(f.get('close'))}"
+                + (f" ({f['change_pct']:+.2f}% vs prev close)" if f.get("change_pct") is not None else "")
+                + f" · VWAP {_num(f.get('vwap'))} · EMA {_num(f.get('ema_fast'))}/"
+                f"{_num(f.get('ema_slow'))} · ATR {_num(f.get('atr'), 3)} · RVOL "
+                f"{_num(f.get('rvol'))}x · day {_num(f.get('day_low'))}–{_num(f.get('day_high'))}"
+                f" · PDH/PDL {_num(lv.get('previous_high'))}/{_num(lv.get('previous_low'))}"
+                f" · OR {_num(lv.get('opening_range_low'))}–{_num(lv.get('opening_range_high'))}"
+                f" · data: {d.get('bars')} {d.get('timeframe')} bars ({d.get('bars_today')} "
+                f"today) from {d.get('provider') or 'the feed'}, last {str(d.get('last_bar'))[11:16]}")
+            for s in e.get("strategies") or []:
+                if s.get("fired"):
+                    out.append(f"  - {s['strategy']}: **FIRED** {s.get('direction')} "
+                               f"{s.get('pattern') or ''} — entry {_num(s.get('entry'))}, "
+                               f"stop {_num(s.get('stop'))}, target {_num(s.get('target'))}"
+                               + (f"; {'; '.join(s.get('why_not'))}" if s.get("why_not") else ""))
+                else:
+                    out.append(f"  - {s['strategy']}: no — "
+                               f"{'; '.join(s.get('why_not') or ['no setup'])}")
+            out.append("")
+    return out

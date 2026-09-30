@@ -79,6 +79,7 @@ class OptionsDesk:
         self._audit_refreshed: datetime | None = None
         self._audit_dirty = False
         self._refusals_logged: dict[tuple, datetime] = {}
+        self._looks_logged: dict[str, tuple[datetime, tuple]] = {}
         # Opening range and pre-market extremes, per symbol, for today.
         self._levels: dict[str, Any] = {}
         self._levels_on: str = ""
@@ -657,9 +658,10 @@ class OptionsDesk:
             # Every strategy's check, tallied for `run.py --why`: which ones
             # looked, how often they fired, and why not when they did not.
             try:
-                store.tally_checks(now.date().isoformat(), judged[-1][4])
+                store.tally_checks(now.date().isoformat(), judged[-1][4], symbol)
             except Exception as exc:                    # noqa: BLE001
                 log.debug("could not tally the strategy checks: %s", exc)
+            self._maybe_look(symbol, candles, session_levels, judged[-1][4], now)
         # The best backtested edge first: when two symbols fire in the same
         # cycle and there is room for one, the better strategy gets it.
         from panaoptions import ranking
@@ -861,7 +863,8 @@ class OptionsDesk:
                                           verdict.gate.reason)
                     else:
                         self._record_refusal(symbol, side, setup, "committee",
-                                             verdict.summary(), now)
+                                             verdict.summary(), now,
+                                             {"verdict": verdict.to_dict()})
                     self._candidate_refused(symbol, verdict.reason)
                     store.save_signal_seen(signal_id, now, symbol,
                                            setup.direction.value, False,
@@ -964,7 +967,7 @@ class OptionsDesk:
                           detail={"spot": setup.indicators.close})
 
     def _record_refusal(self, symbol: str, side: str, setup, gate: str, reason: str,
-                        now: datetime) -> None:
+                        now: datetime, extra: dict | None = None) -> None:
         """A fired setup a softer gate refused, into the audit log — once per
         symbol, side, strategy and reason per `audit.refusal_repeat_minutes`,
         since a setup that stays valid is refused again every minute."""
@@ -978,7 +981,38 @@ class OptionsDesk:
         self._refusals_logged[key] = now
         audit.record_refusal(self.cfg, symbol, side, gate, reason,
                              strategy=setup.strategy.value, pattern=setup.pattern,
-                             detail={"spot": setup.indicators.close})
+                             detail={"spot": setup.indicators.close,
+                                     "entry": setup.entry_trigger or None,
+                                     "stop": setup.underlying_support or None,
+                                     "target": setup.underlying_target or None,
+                                     "confirmations": list(setup.confirmations),
+                                     **(extra or {})})
+
+    def _maybe_look(self, symbol: str, candles, levels, attempts, now: datetime) -> None:
+        """A LOOK into the audit log: the symbol's data, figures and every
+        strategy's verdict with its numbers — every `audit.look_every_minutes`
+        and whenever a different setup fires."""
+        if not attempts:
+            return
+        from panaoptions import audit
+        # What fired, so a setup that stays valid is one snapshot, not one a
+        # minute; a new strategy or side firing gets its own.
+        fired = tuple(sorted((a.strategy.value, str(a.direction.value)) for a in attempts
+                             if getattr(a, "triggered", False)))
+        every = float(self.cfg.get("audit.look_every_minutes", 15) or 15)
+        last, last_fired = self._looks_logged.get(symbol, (None, ()))
+        gap = (now - last).total_seconds() / 60 if last and last.date() == now.date() else None
+        new_fire = bool(fired) and fired != last_fired
+        if gap is not None and gap < every and not new_fire:
+            return
+        self._looks_logged[symbol] = (now, fired)
+        try:
+            audit.record_look(self.cfg, audit.look(
+                self.cfg, symbol, candles, levels, attempts,
+                str(self.cfg.get("data.provider") or "")),
+                "fired" if new_fire else "every")
+        except Exception as exc:                        # noqa: BLE001
+            log.debug("could not write the audit look for %s: %s", symbol, exc)
 
     def _refresh_audit(self, now: datetime, final: bool = False) -> None:
         """Rewrite today's audit summary every few minutes of the session (and

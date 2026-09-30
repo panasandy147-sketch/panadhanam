@@ -188,3 +188,45 @@ def test_india_trades_the_sweep_alone_when_open_interest_cannot_be_read():
     assert india.get("fno.confluence.when_oi_unknown") == "allow"
     assert "pd_liquidity_sweep" in india.get("fno.confluence.strategies")
     assert us.get("fno.confluence.when_oi_unknown") == "block"
+
+
+def test_symbol_by_symbol_the_data_figures_and_each_strategys_verdict(cfg, monkeypatch):
+    from panaoptions import audit, clock
+    from panaoptions.app import OptionsDesk
+    from panaoptions.ledger import store
+    from panaoptions.models import SessionLevels
+    from tests.test_app import FakeFeed
+    t0 = datetime(2026, 9, 30, 9, 30, tzinfo=ET)
+    now = {"t": t0 + timedelta(minutes=40 * 5)}
+    monkeypatch.setattr(clock, "now", lambda tz: now["t"])
+    bars = [Candle(ts=t0 + timedelta(minutes=5 * i), open=100 + i * 0.01, high=100.5 + i * 0.01,
+                   low=99.5 + i * 0.01, close=100.2 + i * 0.01, volume=1000 + i)
+            for i in range(40)]
+    levels = SessionLevels(previous_high=102.0, previous_low=98.0, previous_close=99.0,
+                           opening_range_high=101.0, opening_range_low=99.0)
+    quiet = Setup(symbol="SPY", ts=now["t"], strategy=SetupType.ORB_VWAP,
+                  blockers=["no close beyond the opening range (101.00–99.00)"])
+    fired = Setup(symbol="SPY", ts=now["t"], strategy=SetupType.PD_LIQUIDITY_SWEEP,
+                  direction=Direction.LONG, pattern="PDL Sweep — Tweezer Bottom",
+                  entry_trigger=100.6, underlying_support=99.9, underlying_target=102.7)
+    day = now["t"].date()
+
+    desk = OptionsDesk(cfg=cfg, feed=FakeFeed())
+    for minute in range(3):              # a fired setup: one LOOK, not one a minute
+        store.tally_checks(day.isoformat(), [quiet, fired], "SPY")
+        desk._maybe_look("SPY", bars, levels, [quiet, fired], now["t"] + timedelta(minutes=minute))
+    looks = [e for e in audit.entries(day) if e["event"] == "LOOK"]
+    assert len(looks) == 1 and looks[0]["why_logged"] == "fired"
+    lk = looks[0]
+    assert lk["data"]["bars"] == 40 and lk["figures"]["close"] == 100.59
+    assert lk["levels"]["previous_high"] == 102.0 and lk["figures"]["vwap"]
+    assert audit.by_day(day, day)[0]["events"] == []          # not a buy/sell row
+
+    text = audit.day_markdown(day)
+    assert "## Symbol by symbol" in text and "### SPY" in text
+    assert "| ORB + VWAP | 3 | 0 |" in text and "| PD Liquidity Sweep | 3 | 3 |" in text
+    assert "(setup fired)" in text and "PDH/PDL 102.00/98.00" in text
+    assert "OR 99.00–101.00" in text and "40 5m bars" in text
+    assert "ORB + VWAP: no — no close beyond the opening range (101.00–99.00)" in text
+    assert "PD Liquidity Sweep: **FIRED** LONG PDL Sweep — Tweezer Bottom — entry 100.60, " \
+           "stop 99.90, target 102.70" in text
