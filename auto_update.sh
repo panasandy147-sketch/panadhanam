@@ -5,9 +5,10 @@
 #     ./auto_update.sh --interval 900   every 15 minutes
 #     ./auto_update.sh --once           one check, then exit (for a test)
 #
-# Leave it running in its own Git Bash window. It starts panadhanam (:8000)
-# and panaoptions (:8100) in the background if they are not already up, then
-# every interval:
+# Leave it running in its own Git Bash window. It starts Ollama if it is
+# installed but not running, starts panadhanam (:8000) and panaoptions (:8100)
+# in the background if they are not already up, opens both dashboards in the
+# browser (this first time only), then every interval:
 #
 #   1. git fetch — only this branch, read-only; nothing is pushed, nothing on
 #      this machine is opened to the internet.
@@ -83,6 +84,69 @@ start_panaoptions() {
   ( cd panaoptions && exec env NO_BROWSER=1 $NOHUP ./start.sh >> ../logs/panaoptions.log 2>&1 ) &
 }
 
+# The local model (panadhanam's AI reasoning, the panaoptions agents): the
+# desks only CALL Ollama, they never start it. If it is installed but not
+# answering, start `ollama serve`; pull the model only if it is missing.
+# Without it both desks still trade on their rule engines.
+env_value() {  # KEY from .env, else the default
+  local v
+  v="$(grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"')"
+  echo "${v:-$2}"
+}
+
+ollama_bin() {
+  command -v ollama 2>/dev/null && return
+  for p in "${LOCALAPPDATA:-}/Programs/Ollama/ollama.exe" "/c/Program Files/Ollama/ollama.exe"; do
+    [ -x "$p" ] && { echo "$p"; return; }
+  done
+}
+
+ensure_ollama() {
+  local host model bin
+  host="$(env_value OLLAMA_HOST http://127.0.0.1:11434)"
+  model="$(env_value OLLAMA_MODEL qwen2.5:7b)"
+  if curl -s -m 5 "$host/api/tags" >/dev/null 2>&1; then
+    : # already answering
+  else
+    bin="$(ollama_bin)"
+    if [ -z "$bin" ]; then
+      say "Ollama is not installed — the desks run on their rule engines (docs/OLLAMA.md)"
+      return
+    fi
+    say "Ollama is not answering at $host — starting ollama serve"
+    $NOHUP "$bin" serve >> logs/ollama.log 2>&1 &
+    for _ in $(seq 1 30); do curl -s -m 2 "$host/api/tags" >/dev/null 2>&1 && break; sleep 1; done
+    curl -s -m 5 "$host/api/tags" >/dev/null 2>&1 \
+      || { say "[!] Ollama did not start — see logs/ollama.log"; return; }
+    say "Ollama is up"
+  fi
+  if ! curl -s -m 5 "$host/api/tags" | grep -q "\"$model\""; then
+    # One pull per run of this script (a reload keeps the flag): a large
+    # download still going when the next check comes is not started twice.
+    [ -n "${OLLAMA_PULL_STARTED:-}" ] && return
+    bin="$(ollama_bin)"
+    [ -n "$bin" ] || return
+    say "the model $model is missing — pulling it in the background (a few GB, once)"
+    $NOHUP "$bin" pull "$model" >> logs/ollama.log 2>&1 &
+    export OLLAMA_PULL_STARTED=1
+  fi
+}
+
+# Both dashboards in the default browser: only when you start this script,
+# never on its own restarts or reloads.
+open_tabs() {
+  [ -n "${AUTO_UPDATE_RELOADED:-}" ] && return
+  local url
+  for url in "http://127.0.0.1:$PORT_PD" "http://127.0.0.1:$PORT_PO"; do
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) explorer.exe "$url" >/dev/null 2>&1 || : ;;
+      Darwin)               open "$url" ;;
+      *)                    command -v xdg-open >/dev/null && xdg-open "$url" >/dev/null 2>&1 ;;
+    esac
+  done
+  say "opened both dashboards in the browser"
+}
+
 wait_up() {
   for _ in $(seq 1 90); do up "$1" && { say "$2 is up on :$1"; return 0; }; sleep 2; done
   say "[!] $2 did not come up on :$1 within 3 minutes — see logs/$2.log"
@@ -121,23 +185,27 @@ check() {
     return
   fi
   say "pulled $(git rev-parse --short HEAD) — restarting both desks"
+  ensure_ollama
   restart_all
   # The pull changed this script: carry on as the NEW version (the desks are
   # already up, so it does not restart them again).
   if git diff --name-only "$here" HEAD | grep -qx "auto_update.sh"; then
     say "auto_update.sh itself changed — reloading it"
-    exec bash ./auto_update.sh "${ARGS[@]}"
+    AUTO_UPDATE_RELOADED=1 exec bash ./auto_update.sh "${ARGS[@]}"
   fi
 }
 
 main() {
   say "auto-update on $BRANCH, every $((INTERVAL / 60)) min (log: $LOG)"
+  ensure_ollama
   up "$PORT_PD" || { start_panadhanam; wait_up "$PORT_PD" panadhanam; }
   up "$PORT_PO" || { start_panaoptions; wait_up "$PORT_PO" panaoptions; }
+  open_tabs
   while :; do
     check
     [ -n "$ONCE" ] && exit 0
     sleep "$INTERVAL"
+    ensure_ollama          # started again if it stopped in the meantime
   done
 }
 

@@ -80,8 +80,16 @@ required.**
 
     ./auto_update.sh                   # leave it running in its own Git Bash window
 
-It starts panadhanam (:8000) and panaoptions (:8100) if they are not already
-running. Every 30 minutes (`--interval 900` for 15) it checks this branch on
+When it starts, it does four things:
+- starts Ollama (`ollama serve`) if it is installed but not running, and
+  pulls the model (`OLLAMA_MODEL`, default `qwen2.5:7b`) only if it is
+  missing;
+- starts panadhanam (:8000) and panaoptions (:8100) if they are not already
+  running;
+- opens both dashboards in the browser, this first time only;
+- checks every 30 minutes that Ollama is still running.
+
+Every 30 minutes (`--interval 900` for 15) it checks this branch on
 GitHub:
 - **Nothing new:** it does nothing.
 - **New commits:** it runs `git pull`, then restarts both desks on the new
