@@ -40,6 +40,8 @@ NOTABLE_KINDS = frozenset({
     "contract.none", "contract.fallback", "contract.spread", "contract.skip",
     "spread.rolling", "confluence.refused", "confluence.ok", "fno.ingest", "graded", "halt", "screen.done", "error",
     "restored",
+    # The committee's verdict on a fired setup is a decision, not chatter.
+    "vote.refused", "vote.approved",
 })
 
 
