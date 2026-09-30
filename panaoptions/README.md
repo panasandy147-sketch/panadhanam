@@ -1154,6 +1154,26 @@ US (no better in the judged half; with "hold" it did worse in the other ten
 sessions). Neither market passes the validation bar yet (+0.5R, DD < 5%).
 The scalp profile keeps 1.5R.
 
+**Stop floor and target snapping (US only, since 30 Sept 2026).**
+- **Stop floor:** the underlying stop sits at least max(1× the 5m ATR,
+  0.25% of the price) from the entry (`risk.min_stop_atr` /
+  `min_stop_pct`). A closer stop is widened, and the target is kept at 1:3
+  from it.
+- **Target snapping:** with 2.2R–3R of room to the nearest level, the trade
+  is taken with the target 2 ticks inside that level (`risk.target_snap`),
+  instead of being refused.
+
+| Market | Book | Judged half | Other ten sessions |
+|---|---|---|---|
+| US | before | +$200, DD 6.2% | −$874 |
+| US | **floor + snap (on)** | **+$589, DD 5.7%** | −$869 |
+| India | before | −₹9,494, DD 8.4% | +₹12,213 |
+| India | floor 1× ATR / 0.25% (off) | −₹12,388, DD 8.0% | +₹91,678 |
+| India | snapping (off) | −₹38,226 | −₹3,649 |
+
+India keeps neither, because neither beat the current rules in the judged
+half. The India floor is worth re-testing with more sessions.
+
 ## One contract cannot be halved
 
 `risk.exit_style: auto` notices when a position is a single contract, where

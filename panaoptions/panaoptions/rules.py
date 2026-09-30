@@ -422,6 +422,17 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "opening-range or pre-market level in the way",
                   f"1:{g('risk.min_reward_risk', 3.0):g}" if g("risk.min_reward_risk", 3.0)
                   else "off", "risk.min_reward_risk / reward_room_levels"),
+            _rule("Stop floor: the stop on the underlying sits at least the larger of "
+                  "this many 5m ATRs or this % of the price from the entry (a closer "
+                  "one is widened, and the target kept at 1:3 from it)",
+                  (f"{g('risk.min_stop_atr', 0)} × ATR or {g('risk.min_stop_pct', 0)}%"
+                   if (g("risk.min_stop_atr", 0) or g("risk.min_stop_pct", 0)) else "off"),
+                  "risk.min_stop_atr / risk.min_stop_pct"),
+            _rule("Target snapping: with less than 1:3 of room to the nearest level but "
+                  "at least this much, the trade is taken with the target 2 ticks "
+                  "inside that level",
+                  (f"{g('risk.target_snap.min_r', 2.2)}R" if g("risk.target_snap.enabled", False)
+                   else "off"), "risk.target_snap"),
             _rule("Verified 1:3 — these must reach it with their OWN target (the "
                   "POC for a value-area rejection, VWAP-or-3R for the sweep), not "
                   "a projected one",

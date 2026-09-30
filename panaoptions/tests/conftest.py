@@ -98,6 +98,11 @@ def cfg(tmp_path, monkeypatch):
     # cycle reads bars up to 10:15): the closed-bar and stale-tape rules are
     # off for them; tests/test_no_trade_audit.py tests both.
     cfg.data["technical"].update(completed_bars_only=False, stale_after_bars=0)
+    # The US stop floor and target snapping (30 Sept): the sizing, sweep and
+    # 1:3 tests are written against the unwidened stop and the plain refusal;
+    # tests/test_no_trade_audit.py tests the shipped ones.
+    cfg.data["risk"].update(min_stop_atr=0, min_stop_pct=0,
+                            target_snap={"enabled": False})
     return cfg
 
 

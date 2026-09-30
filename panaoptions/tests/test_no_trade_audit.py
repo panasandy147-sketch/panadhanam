@@ -8,6 +8,8 @@ from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from panaoptions.models import Candle, Direction, Indicators, PreMarketRead, Setup, SetupType
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -422,3 +424,39 @@ def test_candles_fall_back_to_the_second_host_then_to_1m_rebuilt():
     f = Feed({})
     assert asyncio.run(f.candles("SPY", "5m")) == []
     assert f.candle_source["SPY"].startswith("none")
+
+
+def test_the_stop_floor_and_target_snap_are_us_only(tmp_path, monkeypatch):
+    from panaoptions import config as config_mod
+    from panaoptions import markets
+    from panaoptions.engine import reward
+    from panaoptions.models import SessionLevels
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    us = config_mod.Config()
+    assert us.get("risk.min_stop_atr") == 1.0 and us.get("risk.min_stop_pct") == 0.25
+    assert us.get("risk.target_snap.enabled") is True
+    assert config_mod.Config(profile="scalp").get("risk.target_snap.enabled") is False
+    try:
+        india = config_mod.Config(market="IN")
+        assert india.get("risk.min_stop_pct") == 0
+        assert india.get("risk.target_snap.enabled") is False
+    finally:
+        markets.activate("US")
+
+    # SPY 30 Sept: a PDH sweep put, stop 2 ticks past the wick — widened.
+    setup = Setup(symbol="SPY", ts=datetime(2026, 9, 30, 9, 50, tzinfo=ET),
+                  direction=Direction.SHORT, strategy=SetupType.PD_LIQUIDITY_SWEEP,
+                  pattern="PDH Sweep", indicators=Indicators(close=766.5, atr=0.9),
+                  entry_trigger=766.5, underlying_support=767.0, underlying_target=765.0)
+    assert "stop widened" in reward.widen_stop(setup, us)
+    # max(1 x 0.90, 0.25% x 766.50 = 1.92) -> 768.42; target kept at 1:3.
+    assert setup.underlying_support == pytest.approx(768.4163, abs=1e-3)
+    assert setup.underlying_target == pytest.approx(766.5 - 3 * 1.9163, abs=1e-3)
+
+    # 2.5R of room to the opening range: snapped, not refused.
+    long = Setup(symbol="CBRS", ts=datetime(2026, 9, 30, 10, 25, tzinfo=ET),
+                 direction=Direction.LONG, strategy=SetupType.ORB_VWAP, pattern="x",
+                 indicators=Indicators(close=100.0, atr=1.0), entry_trigger=100.0,
+                 underlying_support=99.0)
+    target, rr, why, note = reward.project(long, SessionLevels(opening_range_high=102.5), us)
+    assert not why and target == pytest.approx(102.48) and "snapped" in note

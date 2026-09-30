@@ -168,6 +168,13 @@ risk:
   daily_loss_limit_pct: 3.0        # ₹13,125 — locked out for the day
   # Sell half at +2R (not the US desk's hold-to-square-off): see strategies.
   scale_out_r: 2.0
+  # No stop floor and no target snapping on India: on the 20-session
+  # walk-forward neither beat the current rules in the judged half (snapping
+  # -₹38,226 vs -₹9,494; the 1 ATR / 0.25% floor -₹12,388, though +₹91,678 vs
+  # +₹12,213 in the ten sessions before — to re-test with more sessions).
+  min_stop_atr: 0
+  min_stop_pct: 0
+  target_snap: {enabled: false}
   # 2% risk a trade (₹8,750), 2 open, 3 a day: settings.yaml.
 
 agents:

@@ -83,6 +83,10 @@ risk:
   # The scale-out at 1.5R stays on the scalp desk (the US "hold" was tested
   # on the 5-minute desk, not on 1-minute scalps).
   scale_out_r: 1.5
+  # Tested on the 5-minute desk only: off for 1-minute scalps.
+  min_stop_atr: 0
+  min_stop_pct: 0
+  target_snap: {enabled: false}
   # A scalp risks less per trade because it takes many more of them.
   max_capital_deployed_pct: 10.0
   # Two names at once and four trades a day, as on every desk (settings.yaml).

@@ -572,6 +572,16 @@ risk:
   # the same "hold" lost -0.53R. The scalp profile keeps 1.5R.
   scale_out_r: 0
   runner_trail_r: 1.0
+  # Stop floor + target snapping (US since 30 Sept 2026; India turns both off
+  # in in.yaml). The stop sits at least max(min_stop_atr x the 5m ATR,
+  # min_stop_pct % of the price) from the entry — the SPY sweep's 2-tick stop
+  # planned $1.64 and lost $15.60. With 2.2R-3R of room to the nearest level
+  # the target is snapped 2 ticks inside it instead of refusing the trade.
+  # 20-session walk-forward on \$5,000: judged half +\$200 -> +\$589 (DD 6.2%
+  # -> 5.7%), the other ten -\$874 -> -\$869; all 20 DD 25.2% -> 18.5%.
+  min_stop_atr: 1.0
+  min_stop_pct: 0.25
+  target_snap: {enabled: true, min_r: 2.2, ticks: 2}
   breakeven_trigger_pct: 35.0
   # Premium paid as a share of the account. This is capital DEPLOYED, not
   # capital at risk: the stop below is what decides the real loss.
