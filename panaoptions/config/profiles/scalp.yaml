@@ -80,6 +80,9 @@ contracts:
   max_contract_price: 5.00
 
 risk:
+  # The scale-out at 1.5R stays on the scalp desk (the US "hold" was tested
+  # on the 5-minute desk, not on 1-minute scalps).
+  scale_out_r: 1.5
   # A scalp risks less per trade because it takes many more of them.
   max_capital_deployed_pct: 10.0
   # Two names at once and four trades a day, as on every desk (settings.yaml).

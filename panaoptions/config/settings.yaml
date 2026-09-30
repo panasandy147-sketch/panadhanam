@@ -532,7 +532,13 @@ risk:
   # the same fills: India expectancy -0.07R -> +0.23R, P&L +₹7,090 -> +₹30,883
   # (+8.8%); US P&L -$138 -> -$88 (+$71 with Value Area Rejection off).
   exit_style: "r_multiple"
-  scale_out_r: 1.5
+  # 0 = no scale-out, no breakeven, no trail: the original stop (and the
+  # premium backstop) hold to the square-off. US since 30 Sept 2026 — the
+  # 20-session walk-forward on the new $5,000 account: judged half +$5 ->
+  # +$200 (expectancy -0.13R -> +0.26R, max DD 6.8% -> 6.2%), the other ten
+  # sessions -$917 -> -$860. India keeps a scale-out, at 2R (in.yaml): there
+  # the same "hold" lost -0.53R. The scalp profile keeps 1.5R.
+  scale_out_r: 0
   runner_trail_r: 1.0
   breakeven_trigger_pct: 35.0
   # Premium paid as a share of the account. This is capital DEPLOYED, not

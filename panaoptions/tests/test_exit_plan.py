@@ -96,3 +96,47 @@ def test_the_validation_uses_the_configured_plan(rcfg):
     assert validate.outcome(r, rcfg, 1)[0] == 30.0
     rcfg.data["risk"]["exit_style"] = "auto"
     assert validate.outcome(r, rcfg, 2)[0] == -10.0
+
+
+# --------------------------------------------------------------------------- #
+# scale_out_r 0: hold to the square-off (the US desk since 30 Sept)
+# --------------------------------------------------------------------------- #
+def test_scale_out_zero_holds_the_original_stop_to_the_square_off(rcfg):
+    rcfg.data["risk"]["scale_out_r"] = 0
+    ledger, trade = _open(rcfg)
+    # +3R and back to +1R: nothing sold, no breakeven, no trail.
+    assert ledger.mark(trade.id, 2.20, 103.0, TS) == []
+    assert ledger.mark(trade.id, 1.45, 101.0, TS) == []
+    assert trade.remaining == 2 and not trade.breakeven_armed
+    assert trade.underlying_support == 99.0
+    ledger.mark(trade.id, 0.60, 98.9, TS)                         # the original stop
+    assert trade.exit_reason is ExitReason.UNDERLYING_BREAK
+
+
+def test_the_replay_holds_too(rcfg):
+    rcfg.data["risk"]["scale_out_r"] = 0
+    when = datetime(2026, 9, 23, 10, 0, tzinfo=ET)
+    bars = _bars([(100, 100.4, 99.8, 100.2), (100.2, 101.6, 100.1, 101.5),
+                  (101.5, 103.0, 101.4, 102.8), (102.8, 102.9, 101.9, 102.0)])
+    legs = _walk_r(bars, when, rcfg, Direction.LONG, 100.0, 99.0, split=True)
+    assert [(round(p, 2), f, why) for _, p, f, why in legs] == [(102.0, 1.0, "SQUARE_OFF")]
+
+
+def test_the_shipped_exit_plan_per_market(tmp_path, monkeypatch):
+    """US holds (scale_out_r 0); India sells half at 2R with ORB off; the
+    scalp profile keeps 1.5R."""
+    from panaoptions import config as config_mod
+    from panaoptions import markets, rules
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    us = config_mod.Config()
+    assert us.get("risk.scale_out_r") == 0 and us.get("strategies.orb_vwap.enabled")
+    assert config_mod.Config(profile="scalp").get("risk.scale_out_r") == 1.5
+    text = str(rules.build(us))
+    assert "Hold: no scale-out, no breakeven, no trail" in text
+    try:
+        india = config_mod.Config(market="IN")
+        assert india.get("risk.scale_out_r") == 2.0
+        assert india.get("strategies.orb_vwap.enabled") is False
+        assert "+2.0R, sell" in str(rules.build(india))
+    finally:
+        markets.activate("US")

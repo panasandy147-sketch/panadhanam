@@ -559,7 +559,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     else:
         exits.append(_rule("Stop: the option falls by",
                            _pct(g("risk.stop_loss_pct", 20.0)), "risk.stop_loss_pct"))
-    if exit_style == "r_multiple":
+    if exit_style == "r_multiple" and not float(g("risk.scale_out_r", 1.5) or 0):
+        exits.append(_rule(
+            "Hold: no scale-out, no breakeven, no trail — the trade keeps its "
+            "original stop on the UNDERLYING (and the premium backstop) until "
+            "the square-off", "on (scale_out_r 0)", "risk.exit_style / risk.scale_out_r"))
+    elif exit_style == "r_multiple":
         exits.append(_rule(
             "Scale out at this multiple of the trade's risk, measured on the "
             "UNDERLYING: sell half and move the stop to breakeven (one contract "

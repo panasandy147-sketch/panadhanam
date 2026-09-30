@@ -1118,6 +1118,22 @@ sessions (walk-forward, same fills):
 
 The plan is set back to the premium targets below with `exit_style: auto`.
 
+### Per market since 30 Sept 2026
+
+Tested on the same 20 sessions, walk-forward, on the $5,000 / ₹4,37,500
+accounts. A change was switched on only if it beat the old rules in BOTH
+halves without more drawdown:
+
+| | Change | Judged half (16–29 Sept) | Other ten sessions |
+|---|---|---|---|
+| **US** | `scale_out_r: 0` — no scale-out, no breakeven, no trail: the original stop holds to the square-off | +$5 → **+$200**, −0.13R → +0.26R, DD 6.8% → 6.2% | −$917 → −$860 |
+| **India** | `scale_out_r: 2.0` and ORB off (`in.yaml`) | −₹5,151 → **+₹9,035**, DD 7.3% → 6.1% | −₹5,521 → +₹8,019 |
+
+Not switched on: "hold" on India (−0.53R there), and "morning only" on the
+US (no better in the judged half; with "hold" it did worse in the other ten
+sessions). Neither market passes the validation bar yet (+0.5R, DD < 5%).
+The scalp profile keeps 1.5R.
+
 ## One contract cannot be halved
 
 `risk.exit_style: auto` notices when a position is a single contract, where

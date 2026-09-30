@@ -229,13 +229,20 @@ class PaperLedger:
         The backtest showed wins averaging ~1.2R against 3R targets: most
         trades were squared off before the target. This banks the move that
         usually happens and lets the rest run as far as the day allows.
+
+        scale_out_r 0 switches it off: the original stop (and the premium
+        backstop) hold to the square-off — the US desk since 30 Sept.
         """
         sign = 1.0 if trade.direction is Direction.LONG else -1.0
-        move = (underlying_price - trade.underlying_entry) * sign / trade.risk_r
+        move =(underlying_price - trade.underlying_entry) * sign / trade.risk_r
         trade.best_r = max(trade.best_r, move)
-        scale_r = float(self.cfg.get("risk.scale_out_r", 1.5))
+        scale_r = float(self.cfg.get("risk.scale_out_r", 1.5) or 0.0)
         trail_r = float(self.cfg.get("risk.runner_trail_r", 1.0))
         fills: list[Fill] = []
+        if scale_r <= 0:
+            # Off: no scale-out, no breakeven, no trail. The original stop
+            # (and the premium backstop) hold to the square-off.
+            return fills
         if not trade.breakeven_armed:
             if move >= scale_r:
                 share = float(self.cfg.get("risk.take_profit_1_size_pct", 50.0))

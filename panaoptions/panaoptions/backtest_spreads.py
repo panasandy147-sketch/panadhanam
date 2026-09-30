@@ -380,7 +380,7 @@ def _walk_r(bars: list[Any], when: datetime, cfg: Any, direction: Direction,
     if not path or risk <= 0:
         return []
     sign = 1.0 if direction is Direction.LONG else -1.0
-    scale_r = float(cfg.get("risk.scale_out_r", 1.5))
+    scale_r = float(cfg.get("risk.scale_out_r", 1.5) or 0.0) or float("inf")   # 0 = off
     trail_r = float(cfg.get("risk.runner_trail_r", 1.0))
     share = float(cfg.get("risk.take_profit_1_size_pct", 50.0)) / 100.0 if split else 0.0
     left, best, armed, cur_stop = 1.0, 0.0, False, stop

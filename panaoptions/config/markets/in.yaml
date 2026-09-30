@@ -137,7 +137,12 @@ contracts:
 
 strategies:
   pd_liquidity_sweep:   { from: "09:25", to: "14:45", tick: 0.05 }
-  orb_vwap:             { from: "09:30", to: "14:45" }
+  # ORB off on India since 30 Sept 2026, with the scale-out at 2R (risk,
+  # below): the 20-session walk-forward on ₹4,37,500 — judged half -₹5,151
+  # -> +₹9,035 (max DD 7.3% -> 6.1%), the other ten sessions -₹5,521 ->
+  # +₹8,019. ORB was -0.18R over its 9 judged trades; the PD sweep carries
+  # India (+0.43R over 16).
+  orb_vwap:             { enabled: false, from: "09:30", to: "14:45" }
   vwap_ema_pullback:    { from: "09:45", to: "14:45" }
   liquidity_sweep:      { from: "09:30", to: "14:30" }
   candlestick_at_level: { from: "09:30", to: "14:45" }
@@ -157,6 +162,8 @@ risk:
   index_symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
   index_max_capital_deployed_pct: 30.0
   daily_loss_limit_pct: 3.0        # ₹13,125 — locked out for the day
+  # Sell half at +2R (not the US desk's hold-to-square-off): see strategies.
+  scale_out_r: 2.0
   # 2% risk a trade (₹8,750), 2 open, 3 a day: settings.yaml.
 
 agents:
