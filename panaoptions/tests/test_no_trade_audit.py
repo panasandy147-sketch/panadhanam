@@ -247,3 +247,61 @@ def test_the_decisions_view_moves_every_cycle_without_evicting_trades():
     assert kinds.count("cycle.done") == MAX_ROLLING
     assert shown[0]["detail"].endswith(str(MAX_ROLLING + 49))    # newest first
     assert log.notable_count == 1                                 # decisions, not checks
+
+
+# --------------------------------------------------------------------------- #
+# Zero-volume bars, midday RVOL, the 0.50% sweep band
+# --------------------------------------------------------------------------- #
+def test_a_live_bar_with_no_volume_bypasses_the_volume_gates():
+    from panaoptions.engine import strategies as st
+    lag = Indicators(close=100, volume=0, avg_volume=50_000, rvol=0.0)
+    thin = Indicators(close=100, volume=20_000, avg_volume=50_000, rvol=0.4)
+    assert st._volume_ok(lag, 1.5) and not st._volume_ok(thin, 1.5)
+    assert "bypassed" in st._volume_note(lag, "volume 0x")
+    assert st._volume_note(thin, "volume 0.4x") == "volume 0.4x"
+
+
+def test_the_midday_window_lowers_the_volume_gates_to_1_2x(cfg):
+    from panaoptions.engine.strategies import volume_multiple
+    cfg.data["technical"]["midday_rvol"] = {"enabled": True, "from": "10:30",
+                                            "to": "14:00", "min": 1.2}
+    at = lambda h, m: datetime(2026, 9, 30, h, m, tzinfo=ET)    # noqa: E731
+    assert volume_multiple(cfg, 1.5, at(10, 29)) == 1.5
+    assert volume_multiple(cfg, 1.5, at(10, 30)) == 1.2
+    assert volume_multiple(cfg, 1.5, at(13, 59)) == 1.2
+    assert volume_multiple(cfg, 1.5, at(14, 0)) == 1.5
+    assert volume_multiple(cfg, 1.0, at(12, 0)) == 1.0        # never raised
+
+
+def test_the_technical_agent_uses_the_midday_gate_and_ignores_a_lagging_bar(cfg):
+    from panaoptions import alpha
+    from panaoptions.agents import technical
+    cfg.data.setdefault("llm", {})["enabled"] = False
+    cfg.data["technical"]["midday_rvol"] = {"enabled": True, "from": "10:30",
+                                            "to": "14:00", "min": 1.2}
+    signal = alpha.AlphaSignal("SPY", "LONG", 100.0, 99.0, 0.8, source="orb_vwap")
+
+    def vote(hh, rvol, last_volume):
+        ts = datetime(2026, 9, 30, hh, 0, tzinfo=ET)
+        setup = Setup(symbol="SPY", ts=ts, direction=Direction.LONG,
+                      strategy=SetupType.ORB_VWAP, pattern="x",
+                      indicators=Indicators(close=100.0, rvol=rvol))
+        bars = [Candle(ts=ts - timedelta(minutes=5 * i), open=100, high=100.5, low=99.5,
+                       close=100, volume=1000) for i in range(30, 0, -1)]
+        bars[-1] = bars[-1].model_copy(update={"volume": last_volume})
+        return asyncio.run(technical.vote(signal, setup, bars, cfg))
+
+    assert vote(10, 1.3, 1000).veto                      # 1.3x < 1.5x in the morning
+    noon = vote(12, 1.3, 1000)
+    assert not noon.veto and "midday RVOL gate 1.5x → 1.2x" in " ".join(noon.reasons)
+    lag = vote(10, 0.0, 0)                               # the live bar not reported yet
+    assert not lag.veto and "feed lag" in " ".join(lag.reasons)
+
+
+def test_the_shipped_sweep_band_is_half_a_percent_everywhere(tmp_path, monkeypatch):
+    from panaoptions import config as config_mod
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    c = config_mod.Config()
+    assert c.get("strategies.pd_liquidity_sweep.proximity_pct") == 0.50
+    assert c.get("fno.confluence.proximity_pct") == 0.50
+    assert c.get("technical.midday_rvol.min") == 1.2

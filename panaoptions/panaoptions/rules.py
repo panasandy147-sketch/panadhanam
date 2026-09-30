@@ -119,6 +119,18 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                       f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below "
                       f"(not applied to an index with no volume in the feed)",
                       "agents.technical.min_rvol"),
+                _rule("Midday RVOL: between these times (market clock) every volume "
+                      "gate asking for more asks for this instead — the Technical "
+                      "agent's veto and the strategies' volume multiples",
+                      (f"{g('technical.midday_rvol.from', '10:30')}–"
+                       f"{g('technical.midday_rvol.to', '14:00')}: "
+                       f"{g('technical.midday_rvol.min', 1.2)}x"
+                       if g("technical.midday_rvol.enabled", False) else "off"),
+                      "technical.midday_rvol"),
+                _rule("A live 5m bar with NO volume (0 or missing — feed lag, or an "
+                      "NSE index) is 'not measured', not 'quiet'",
+                      "the volume gates are bypassed for it, and the log says so",
+                      "engine/strategies.py volume_unreported"),
                 _rule("Volume profile confluence on every signal: a call at the "
                       "VAL or POC, or a put at the VAH or POC, scores "
                       f"+{g('volume_profile.alignment_boost', 0.30)}; a thick High "

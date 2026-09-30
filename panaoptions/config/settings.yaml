@@ -145,7 +145,9 @@ fno:
     # proximity_pct and the NEXT candle closed back inside yesterday's range.
     # touch: the pattern's extreme within touch_atr of the level (the old test).
     mode: "sweep"
-    proximity_pct: 0.25
+    # 0.50% since 30 Sept 2026 (was 0.25%) — the same band as the sweep
+    # strategy below, or this re-check would refuse the sweeps it finds.
+    proximity_pct: 0.50
     lookback_bars: 3
     touch_atr: 0.15          # "at the level" in touch mode: within this x ATR
     # A chain with no open interest (India on estimated prices) cannot show
@@ -184,6 +186,17 @@ technical:
   atr_period: 14
   volume_lookback: 20
   volume_multiplier: 1.0   # candle volume must beat this x the average
+  # Midday RVOL: between from and to (market time) any volume gate asking
+  # for more than `min` asks for `min` instead — the strategies' volume
+  # multiples (ORB 1.5x, the pre-market sweep 1.5x) and the Technical
+  # agent's 1.5x veto. Volume tapers naturally at midday.
+  # A live bar with NO volume (0 / missing: feed lag, or an NSE index) is
+  # "not measured", not "quiet": the volume gates are bypassed for it.
+  midday_rvol:
+    enabled: true
+    from: "10:30"
+    to: "14:00"
+    min: 1.2
 
 contracts:
   min_dte: 7
@@ -291,7 +304,9 @@ strategies:
     enabled: true
     from: "09:45"
     to: "15:00"
-    proximity_pct: 0.25
+    # 0.50% since 30 Sept 2026 (was 0.25%): wick rejections just outside the
+    # old band were missed. Also the go/no-go's band (fno.go_no_go).
+    proximity_pct: 0.50
     lookback_bars: 3
     require_pattern: true      # a tweezer or swing low/high at the sweep
     # Only the FIRST run beyond the level today counts: the stops there are

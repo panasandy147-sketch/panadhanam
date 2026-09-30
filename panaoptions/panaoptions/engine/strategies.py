@@ -57,8 +57,43 @@ def localise(df: pd.DataFrame, tz: str) -> pd.DataFrame:
     return out
 
 
+def volume_unreported(snapshot) -> bool:
+    """The live bar carries no volume (0 or missing): the data provider has
+    not reported it yet, or — NSE indices on Yahoo — never does. That is
+    "not measured", not "quiet", so the volume gates are bypassed rather than
+    refusing with "volume 0 is below 1.5x the average"."""
+    return not (snapshot.volume or 0)
+
+
 def _volume_ok(snapshot, multiple: float) -> bool:
+    if volume_unreported(snapshot):
+        return True
     return snapshot.avg_volume > 0 and snapshot.volume >= snapshot.avg_volume * multiple
+
+
+def _volume_note(snapshot, text: str) -> str:
+    return ("volume not reported on the live bar (feed lag or an index) — the "
+            "volume check is bypassed" if volume_unreported(snapshot) else text)
+
+
+def _hm(hhmm: str) -> int:
+    h, _, m = str(hhmm).partition(":")
+    return int(h) * 60 + int(m or 0)
+
+
+def volume_multiple(cfg, base: float, when) -> float:
+    """The RVOL a volume gate asks for at `when` (market time): between
+    technical.midday_rvol.from and .to (10:30-14:00) a requirement above
+    technical.midday_rvol.min (1.2x) is lowered to it — volume tapers
+    naturally at midday, and 1.5x there refused sound setups."""
+    mid = cfg.get("technical.midday_rvol") or {}
+    if not mid or not mid.get("enabled", True) or when is None:
+        return base
+    floor = float(mid.get("min", 1.2))
+    t = when.hour * 60 + when.minute
+    if _hm(mid.get("from", "10:30")) <= t < _hm(mid.get("to", "14:00")) and base > floor:
+        return floor
+    return base
 
 
 def _base(symbol: str, df: pd.DataFrame, strategy: SetupType) -> Setup:
@@ -124,7 +159,9 @@ class OpeningRangeBreakout(Strategy):
             return setup
 
         snapshot = ta.compute(df5, self.cfg)
-        multiple = float(self.cfg.get("strategies.orb_vwap.volume_multiple", 1.5))
+        multiple = volume_multiple(
+            self.cfg, float(self.cfg.get("strategies.orb_vwap.volume_multiple", 1.5)),
+            df5.index[-1])
         bar = df5.iloc[-1]
         high, low = levels.opening_range_high, levels.opening_range_low
 
@@ -151,8 +188,8 @@ class OpeningRangeBreakout(Strategy):
         ]
 
         if _volume_ok(snapshot, multiple):
-            setup.confirmations.append(
-                f"volume {snapshot.volume:,.0f} is {snapshot.rvol:.1f}x the average")
+            setup.confirmations.append(_volume_note(
+                snapshot, f"volume {snapshot.volume:,.0f} is {snapshot.rvol:.1f}x the average"))
         else:
             setup.blockers.append(
                 f"volume {snapshot.volume:,.0f} is below {multiple}x the "
@@ -237,9 +274,10 @@ class VwapEmaPullback(Strategy):
             f"{rejection} taking out the previous candle's "
             f"{'high' if long_side else 'low'}",
         ]
-        if _volume_ok(snapshot, float(self.cfg.get(
-                "strategies.vwap_ema_pullback.volume_multiple", 1.0))):
-            setup.confirmations.append(f"volume {snapshot.rvol:.1f}x average")
+        if _volume_ok(snapshot, volume_multiple(self.cfg, float(self.cfg.get(
+                "strategies.vwap_ema_pullback.volume_multiple", 1.0)), df5.index[-1])):
+            setup.confirmations.append(_volume_note(snapshot,
+                                                    f"volume {snapshot.rvol:.1f}x average"))
 
         setup.underlying_support = snapshot.vwap
         setup.invalidation_note = (
@@ -280,7 +318,9 @@ class LiquiditySweepReversal(Strategy):
 
         snapshot = ta.compute(df5, self.cfg)
         sweep, bar = df5.iloc[-2], df5.iloc[-1]
-        multiple = float(self.cfg.get("strategies.liquidity_sweep.volume_multiple", 1.5))
+        multiple = volume_multiple(
+            self.cfg, float(self.cfg.get("strategies.liquidity_sweep.volume_multiple", 1.5)),
+            df5.index[-1])
 
         swept_low = (sweep["low"] < levels.premarket_low
                      and bar["close"] > levels.premarket_low
@@ -306,8 +346,8 @@ class LiquiditySweepReversal(Strategy):
             f"({snapshot.close:.2f} vs {snapshot.vwap:.2f})",
         ]
         if _volume_ok(snapshot, multiple):
-            setup.confirmations.append(
-                f"volume {snapshot.rvol:.1f}x average on the reclaim")
+            setup.confirmations.append(_volume_note(
+                snapshot, f"volume {snapshot.rvol:.1f}x average on the reclaim"))
         else:
             setup.blockers.append(
                 f"the reclaim came on {snapshot.rvol:.1f}x volume, below "
@@ -596,15 +636,15 @@ class CandlestickAtLevel(Strategy):
              f"at {level.source} ({level.price:.2f}) — {level.kind}"),
             f"price took out {found.trigger:.2f}",
         ]
-        volume_multiple = float(self.cfg.get(
-            "strategies.candlestick_at_level.volume_multiple", 1.0))
-        if _volume_ok(snapshot, volume_multiple):
-            setup.confirmations.append(
-                f"volume {snapshot.rvol:.1f}x average — institutional "
-                f"commitment, not a thin wick")
-        elif volume_multiple > 1.0:
+        needed = volume_multiple(self.cfg, float(self.cfg.get(
+            "strategies.candlestick_at_level.volume_multiple", 1.0)), df5.index[-1])
+        if _volume_ok(snapshot, needed):
+            setup.confirmations.append(_volume_note(
+                snapshot, f"volume {snapshot.rvol:.1f}x average — institutional "
+                          f"commitment, not a thin wick"))
+        elif needed > 1.0:
             setup.blockers.append(
-                f"volume {snapshot.rvol:.1f}x is below {volume_multiple}x — "
+                f"volume {snapshot.rvol:.1f}x is below {needed}x — "
                 f"a pattern without participation is a false break waiting "
                 f"to happen")
 

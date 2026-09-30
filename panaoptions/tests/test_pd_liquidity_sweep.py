@@ -1,6 +1,6 @@
 """The Previous Day Liquidity Sweep and the execution-filter changes.
 
-  1. A 5m candle sweeps the PDL (calls) / PDH (puts) within 0.25% and the
+  1. A 5m candle sweeps the PDL (calls) / PDH (puts) within 0.50% and the
      NEXT candle closes back inside, as a tweezer or swing; rising call/put OI.
   2. Premium x NSE lot everywhere (HDFCBANK 650, INFY 400).
   3. 09:15-10:00 IST: 0-4 DTE contracts may quote up to 12% wide.
@@ -151,7 +151,7 @@ def test_a_reversal_signal_without_the_sweep_is_refused(cfg, only_sweep):
     flat = TODAY[:2] + [(99.4, 99.5, 99.1, 99.2), (99.2, 99.4, 99.1, 99.3)]  # no sweep
     why, _ = confluence.check(setup, session(bars(flat)),
                               fno.OiRead(900, 500, 400, 0, "x"), cfg, frame(bars(flat)))
-    assert "no sweep of the previous-day low (PDL) within 0.25%" in why
+    assert "no sweep of the previous-day low (PDL) within 0.5%" in why
 
 
 # --------------------------------------------------------------------------- #

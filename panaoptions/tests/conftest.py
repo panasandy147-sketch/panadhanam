@@ -88,6 +88,9 @@ def cfg(tmp_path, monkeypatch):
                              "max_capital_deployed_pct": 20.0,
                              "index_max_capital_deployed_pct": 25.0,
                              "max_total_deployed_pct": 45.0})
+    # The midday RVOL window (1.2x from 10:30): the RVOL tests are written
+    # against the 1.5x gate; tests/test_no_trade_audit.py tests the window.
+    cfg.data["technical"]["midday_rvol"] = {"enabled": False}
     # Likewise the previous-day go/no-go on the candlestick strategies;
     # tests/test_go_no_go.py tests it.
     cfg.data["fno"].setdefault("go_no_go", {})["enabled"] = False

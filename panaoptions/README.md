@@ -64,7 +64,7 @@ contract picker, not the strategy.
 
 | Agent | Reads | Hard veto |
 |---|---|---|
-| Technical | 5m trigger vs 15m trend, relative volume | RVOL below 1.5x (bar or session) |
+| Technical | 5m trigger vs 15m trend, relative volume | RVOL below 1.5x (bar or session); 1.2x from 10:30 to 14:00 (`technical.midday_rvol`); bypassed when the live bar reports no volume (feed lag, or an NSE index) |
 | Derivatives & Flow | the chosen contract, put/call ratio, IV percentile, unusual flow | no contract qualified |
 | Macro & Sentiment | the symbol's headlines, ES/NQ futures | high-impact catalyst against the trade; futures ≥1.5% against |
 | CMIO | weighted score × learned strategy weight ≥ 0.55 | any veto above |
@@ -636,7 +636,7 @@ a window runs past the square-off, where it would be clipped.
 
 The institutional failed breakout, asked first.
 - **LONG_CALL:** a 5-minute candle (a Tweezer Bottom or a swing low) within
-  **0.25%** of the previous day's low **sweeps below the PDL**, and the very
+  **0.50%** of the previous day's low **sweeps below the PDL**, and the very
   next candle **closes back inside** yesterday's range, with **call open
   interest rising**.
 - **LONG_PUT:** the mirror at the previous day's high, with **put open
@@ -918,7 +918,7 @@ Candlestick-at-a-Level and Liquidity Sweep strategies, are taken only here:
 
 How "at" the level is judged is `fno.confluence.mode`:
 - **`sweep`** (the default): a 5-minute candle sweeps through the level by no
-  more than 0.25% (`proximity_pct`), and the next candle closes back inside
+  more than 0.50% (`proximity_pct`; 0.25% before 30 Sept), and the next candle closes back inside
   yesterday's range. The stop then moves to that candle's wick (plus 2
   ticks), and 1:3 is measured from there.
 - **`touch`** (the old rule): the pattern's extreme within 0.15 ATR.

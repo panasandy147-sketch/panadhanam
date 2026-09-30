@@ -54,6 +54,19 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
     relaxes the RVOL gate from 1.5x to 1.3x (agents/consensus.py).
     """
     min_rvol, override = consensus.rvol_floor(cfg, signal, flow)
+    # Midday (10:30-14:00 market time) the gate is technical.midday_rvol.min.
+    from panaoptions.engine.strategies import volume_multiple
+    when = None
+    try:
+        from zoneinfo import ZoneInfo
+        when = setup.ts.astimezone(ZoneInfo(cfg.timezone)) if setup.ts.tzinfo else setup.ts
+    except Exception:                                   # noqa: BLE001
+        when = None
+    midday = volume_multiple(cfg, min_rvol, when)
+    if midday < min_rvol:
+        override = (override + "; " if override else "") + (
+            f"midday RVOL gate {min_rvol:g}x → {midday:g}x")
+        min_rvol = midday
     bar_rvol = float(setup.indicators.rvol or 0.0)
     rvol = max(bar_rvol, float(screen_rvol or 0.0))
     want = 1 if signal.long else -1
@@ -64,6 +77,7 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
                              "screen_rvol": round(float(screen_rvol or 0), 2),
                              "trend_15m": trend})
     unmeasured = bool(candles) and not any(float(c.volume or 0) > 0 for c in candles)
+    lagging = bool(candles) and not unmeasured and not float(candles[-1].volume or 0)
     if unmeasured:
         # The NSE indices carry no volume on the feed: 0.00x is "not
         # measured", not "quiet", and vetoing on it barred NIFTY, BANKNIFTY
@@ -71,6 +85,12 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
         result.data["rvol_unmeasured"] = True
         result.reasons.append("RVOL not measurable (no volume in the feed for this "
                               "index) — the volume gate does not apply")
+    elif lagging and rvol < min_rvol:
+        # The live bar's volume is 0 / missing: the provider has not reported
+        # it yet. Not a reason to refuse — the gate is bypassed and says so.
+        result.data["rvol_unmeasured"] = True
+        result.reasons.append("the live bar's volume is not reported yet (feed lag) — "
+                              "the RVOL gate is bypassed")
     elif rvol < min_rvol:
         result.veto = True
         result.reasons.append(

@@ -76,7 +76,7 @@ def test_the_sweep_and_execution_rules_are_on_the_page(cfg):
     doc = rules.build(cfg, capital=4000)
     rows = {r["setting"]: r for s in doc["sections"] for r in s.get("rules", [])}
     assert rows["fno.confluence.mode / proximity_pct / touch_atr"]["value"] == "sweep"
-    assert "0.25%" in rows["fno.confluence.mode / proximity_pct / touch_atr"]["text"]
+    assert "0.5%" in rows["fno.confluence.mode / proximity_pct / touch_atr"]["text"]
     assert rows["contracts.single_leg_grace"]["value"] == "100%"
     assert rows["contracts.fallback_order / debit_spread / liquidity"]["value"] == "0.25"
     text = json.dumps(doc)
