@@ -178,3 +178,13 @@ def test_the_desk_writes_the_summary_during_the_session_and_after_the_close(cfg,
     desk._refresh_audit(t0 + timedelta(hours=6), final=True)   # after the close
     desk._refresh_audit(t0 + timedelta(hours=7), final=True)   # nothing new
     assert len(wrote) == 3
+
+
+def test_india_trades_the_sweep_alone_when_open_interest_cannot_be_read():
+    """NSE's chain is refused and the estimated chain has no OI: on 30 Sept
+    'OI unknown' refused all five fired setups. US chains carry OI: unchanged."""
+    from panaoptions.config import Config
+    india, us = Config(market="IN"), Config()
+    assert india.get("fno.confluence.when_oi_unknown") == "allow"
+    assert "pd_liquidity_sweep" in india.get("fno.confluence.strategies")
+    assert us.get("fno.confluence.when_oi_unknown") == "block"

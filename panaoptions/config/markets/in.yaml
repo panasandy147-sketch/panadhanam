@@ -102,6 +102,14 @@ auto_watchlist:
 
 fno:
   ingest_from: "09:00"        # the previous session's map, cached before 09:15
+  confluence:
+    # NSE refuses the option chain from most home connections, and the
+    # ESTIMATED chain the desk falls back to has no open interest — so with
+    # "block" every PDH/PDL sweep was refused for "OI unknown" and India could
+    # never trade (30 Sept: 5 of 5 fired setups). The sweep alone decides
+    # when OI cannot be read; rising OI still has to agree when it can. This
+    # is also all the backtest ever checked (history has no OI).
+    when_oi_unknown: "allow"
 
 premarket:
   # The pre-open auction ends 09:08; screen from 09:10 on the gap it set.
