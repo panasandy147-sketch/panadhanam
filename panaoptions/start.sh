@@ -83,8 +83,9 @@ echo "Dashboard → $URL"
 echo "Leave this window open — Ctrl+C stops the desk."
 echo
 
-# Give uvicorn a moment to bind before pointing a browser at it.
-( sleep 4
+# Give uvicorn a moment to bind before pointing a browser at it. NO_BROWSER=1
+# (auto_update.sh sets it) restarts without opening another tab.
+[ -n "${NO_BROWSER:-}" ] || ( sleep 4
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) explorer.exe "$URL" || : ;;
     Darwin)               open "$URL" ;;

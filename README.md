@@ -76,6 +76,26 @@ required.**
 
 ---
 
+### Keeping both desks up to date on their own
+
+    ./auto_update.sh                   # leave it running in its own Git Bash window
+
+It starts panadhanam (:8000) and panaoptions (:8100) if they are not already
+running. Every 30 minutes (`--interval 900` for 15) it checks this branch on
+GitHub:
+- **Nothing new:** it does nothing.
+- **New commits:** it runs `git pull`, then restarts both desks on the new
+  code without opening another browser tab. A dashboard already open
+  reconnects by itself, and each desk restores the day's trade count, open
+  positions and any lockout.
+- **A pull that fails** (for example a locally edited file): the desks keep
+  the code they have, and it tries again next time.
+
+It only reads from GitHub: nothing is pushed, and nothing on this machine is
+opened to the internet. Its own log is in `logs/auto_update.log`, and each
+desk writes to `logs/panadhanam.log` and `logs/panaoptions.log`. Closing its
+window stops the desks it started.
+
 ## Two markets: India and the US
 
 Toggle between 🇮🇳 **India (NSE)** and 🇺🇸 **US (NYSE/NASDAQ)** from the top-left

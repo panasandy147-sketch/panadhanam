@@ -59,6 +59,8 @@ open_browser() {
     *)                    command -v xdg-open >/dev/null && xdg-open "$URL" ;;
   esac
 }
-open_browser >/dev/null 2>&1 &
+# NO_BROWSER=1 (auto_update.sh sets it): restart without opening another tab —
+# the dashboard already open reconnects by itself.
+[ -n "${NO_BROWSER:-}" ] || open_browser >/dev/null 2>&1 &
 
 exec "$PY" run.py

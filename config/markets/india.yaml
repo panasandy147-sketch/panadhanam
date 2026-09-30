@@ -22,6 +22,11 @@ market:
 # TOTAL_CAPITAL_IN in .env (or Capital → edit while on India) overrides it.
 risk:
   total_capital: 350000
+  # Target snapping at the PDH/PDL is OFF on India (on for the US): on the
+  # 20-session replay the snapped India trades averaged -0.17R, and India's
+  # result with the account rules went -1% -> -4%. Under 3R of room to the
+  # PDH/PDL an India trade is refused, as before.
+  target_snap: {enabled: false}
   # The high-notional index options that get the 25% premium flex.
   index_symbols: ["NIFTY 50", "NIFTY BANK", "FINNIFTY", "NIFTY", "BANKNIFTY"]
 
