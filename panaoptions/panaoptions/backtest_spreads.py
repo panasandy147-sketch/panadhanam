@@ -634,6 +634,7 @@ def _gate(setup: Any, session: Any, tape: list[Any], cfg: Any) -> str:
         beyond = found["wick"] - ticks * tick if long else found["wick"] + ticks * tick
         setup.underlying_support = (min(setup.underlying_support or beyond, beyond) if long
                                     else max(setup.underlying_support or beyond, beyond))
+    reward.widen_stop(setup, cfg)
     target, _, why, _ = reward.project(setup, session, cfg, sweep=is_sweep)
     if why:
         return f"reward:risk: {why}"
