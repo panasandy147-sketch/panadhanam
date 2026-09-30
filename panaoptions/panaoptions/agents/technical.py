@@ -63,7 +63,15 @@ async def vote(signal: AlphaSignal, setup: Setup, candles: list[Candle],
                        data={"rvol": round(rvol, 2), "bar_rvol": round(bar_rvol, 2),
                              "screen_rvol": round(float(screen_rvol or 0), 2),
                              "trend_15m": trend})
-    if rvol < min_rvol:
+    unmeasured = bool(candles) and not any(float(c.volume or 0) > 0 for c in candles)
+    if unmeasured:
+        # The NSE indices carry no volume on the feed: 0.00x is "not
+        # measured", not "quiet", and vetoing on it barred NIFTY, BANKNIFTY
+        # and FINNIFTY options for good.
+        result.data["rvol_unmeasured"] = True
+        result.reasons.append("RVOL not measurable (no volume in the feed for this "
+                              "index) — the volume gate does not apply")
+    elif rvol < min_rvol:
         result.veto = True
         result.reasons.append(
             f"relative volume {rvol:.2f}x is below {min_rvol:g}x (bar "

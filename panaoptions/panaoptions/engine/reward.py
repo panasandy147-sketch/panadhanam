@@ -17,6 +17,8 @@ from typing import Any
 
 from panaoptions.models import Direction
 
+_SLACK = 0.01          # R — rounding, not a looser rule
+
 _ROOM = {
     "previous_day": (("previous_high", "previous-day high"), ("previous_low", "previous-day low")),
     "opening_range": (("opening_range_high", "opening range high"),
@@ -68,7 +70,10 @@ def project(setup: Any, levels: Any, cfg: Any,
     # past a nearer natural target is not accepted for them.
     strict = {str(s).lower() for s in (cfg.get("risk.own_target_strategies") or [])}
     if strict & {setup.strategy.name.lower(), str(setup.strategy.value).lower()}:
-        if own_r + 1e-6 < need:
+        # 0.01R of slack: the strategy rounds its stop and target to 4
+        # decimals, and an exact 3R target read 2.9999R and was refused as
+        # "only 3.0R ... needs 1:3".
+        if own_r + _SLACK < need:
             return 0.0, round(own_r, 2), (
                 f"the strategy's own target {own:,.2f} is only {own_r:.1f}R on a risk "
                 f"of {risk:,.2f} — {setup.strategy.value} needs a verified "
@@ -77,7 +82,7 @@ def project(setup: Any, levels: Any, cfg: Any,
             where = min(blockers)[1]
             return 0.0, room_r, (f"only {room_r:.1f}R of room before the {where}, short "
                                  f"of its own {own_r:.1f}R target {own:,.2f}"), ""
-    if own_r >= need and own_r <= room_r:
+    if own_r + _SLACK >= need and own_r <= room_r:
         return own, round(own_r, 2), "", f"target {own:,.2f} = {own_r:.1f}R (the strategy's own)"
     return (round(projected, 4), need, "",
             f"target {projected:,.2f} = 1:{need:g} on a risk of {risk:,.2f} to "

@@ -34,6 +34,7 @@ class PreMarketRead(BaseModel):
     last_price: float = 0.0
     gap_pct: float = 0.0
     rvol: float = 0.0
+    rvol_unmeasured: bool = False      # an index with no volume in the feed
     passed: bool = False
     reasons: list[str] = Field(default_factory=list)
 

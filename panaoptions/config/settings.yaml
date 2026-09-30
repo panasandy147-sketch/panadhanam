@@ -617,6 +617,16 @@ backtest:
     days: 20
     walk_forward: true
 
+audit:
+  # journal/audit/YYYY-MM-DD.md: the buys, sells and hard-risk skips, the
+  # pre-market screen, every fired setup NOT taken and why (F&O confluence,
+  # committee, ML filter, no contract), and each strategy's checks — so a
+  # day with no trade still says what was tried and why.
+  # A setup that stays valid is refused every minute; log it once per:
+  refusal_repeat_minutes: 30
+  # Rewrite the day's summary at most this often during the session.
+  summary_every_minutes: 5
+
 journal:
   # Grade every closed trade the moment it closes, and write a card to
   # journal/cards/. Process over outcome: a winning trade that broke a rule

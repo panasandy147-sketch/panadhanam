@@ -10,6 +10,18 @@ five numbers, the committee's votes and reasons, the Risk Gatekeeper's
 checks, and the options-flow and volume-profile reads.
 SELL: each fill of the exit (scale-outs included), the realised P&L, how it
 ended, and how long it was held.
+SKIP: a setup that fired and a HARD risk gate refused (reward:risk, no
+affordable contract, the Risk Gatekeeper, sizing).
+REFUSED: a setup that fired and was not bought for any other reason — the
+F&O confluence rule, the committee vote, the ML filter, no contract. Once
+per symbol, side, strategy and reason per `audit.refusal_repeat_minutes`,
+not every minute it stays valid.
+SCREEN: the pre-market screen — who passed, or why nobody did (nothing is
+hunted until a symbol passes).
+
+The day's .md is rewritten through the session even when nothing traded,
+with a per-strategy tally of what was checked and why it did not fire — so
+"no trades today" always has its reasons written down.
 
 Read by the weekly review, the Friday reflection and by you on the weekend.
 """
@@ -129,6 +141,40 @@ def record_skip(cfg: Any, symbol: str, side: str, reason: str, *,
         "market": getattr(cfg, "market", "US"), **(detail or {})})
 
 
+def record_refusal(cfg: Any, symbol: str, side: str, gate: str, reason: str, *,
+                   strategy: str = "", pattern: str = "",
+                   detail: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A setup that fired and was NOT bought, refused by a gate that is not a
+    hard risk failure: the F&O confluence rule, the committee, the model."""
+    return _write(cfg, {
+        "event": "REFUSED", "trade_id": None, "symbol": symbol, "side": side,
+        "execution": "NOT_TAKEN", "gate": gate, "strategy": strategy,
+        "pattern": pattern, "reason": str(reason)[:600],
+        "market": getattr(cfg, "market", "US"), **(detail or {})})
+
+
+def record_screen(cfg: Any, reads: list[Any], summary: str) -> dict[str, Any]:
+    """The pre-market screen's result: nothing is hunted until a name passes."""
+    return _write(cfg, {
+        "event": "SCREEN", "trade_id": None, "market": getattr(cfg, "market", "US"),
+        "passed": [r.symbol for r in reads if r.passed], "summary": summary,
+        "reads": [{"symbol": r.symbol, "passed": r.passed,
+                   "gap_pct": r.gap_pct, "rvol": r.rvol,
+                   "reasons": list(r.reasons)} for r in reads]})
+
+
+def refresh_day(cfg: Any, day: date | None = None) -> None:
+    """Rewrite the day's readable audit (.md) — even with no events, so a day
+    without a trade still says what was looked at and why nothing was bought."""
+    day = day or clock.now(cfg.timezone).date()
+    try:
+        folder = audit_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{day.isoformat()}.md").write_text(day_markdown(day), encoding="utf-8")
+    except OSError as exc:
+        log.warning("could not write the audit summary: %s", exc)
+
+
 def entries(day: date | None = None, since: date | None = None,
             until: date | None = None) -> list[dict[str, Any]]:
     folder = audit_dir()
@@ -161,16 +207,23 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
     out = []
     for day in sorted(grouped):
         rows = []
+        screen = None
         for e in sorted(grouped[day], key=lambda x: str(x.get("ts") or "")):
-            if e.get("event") == "SKIP":
+            if e.get("event") == "SCREEN":
+                screen = e.get("summary")
+                continue
+            if e.get("event") in ("SKIP", "REFUSED"):
+                gate = f"[{e.get('gate')}] " if e.get("gate") else ""
                 rows.append({
-                    "time": str(e.get("market_time") or "")[11:16], "event": "SKIP",
+                    "time": str(e.get("market_time") or "")[11:16],
+                    "event": e.get("event"),
                     "trade_id": None, "symbol": e.get("symbol"), "side": e.get("side"),
-                    "execution": "SKIPPED_HARD_RISK", "contract": "",
+                    "execution": e.get("execution") or "SKIPPED_HARD_RISK",
+                    "contract": "",
                     "strategy": e.get("strategy"), "pattern": e.get("pattern"),
                     "quantity": None, "price": None, "cost": None, "stop": None,
                     "option_stop": None, "target": None, "pnl": None,
-                    "held_minutes": None, "reason": e.get("reason") or "",
+                    "held_minutes": None, "reason": gate + (e.get("reason") or ""),
                     "estimated": False})
                 continue
             buy = e.get("event") == "BUY"
@@ -199,10 +252,12 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
             })
         sells = [r for r in rows if r["event"] == "SELL"]
         skips = [r for r in rows if r["event"] == "SKIP"]
+        refused = [r for r in rows if r["event"] == "REFUSED"]
         wd = date.fromisoformat(day).strftime("%a") if len(day) == 10 else ""
         out.append({"date": day, "weekday": wd, "events": rows,
-                    "buys": len(rows) - len(sells) - len(skips), "sells": len(sells),
-                    "skipped": len(skips),
+                    "buys": sum(1 for r in rows if r["event"] == "BUY"),
+                    "sells": len(sells),
+                    "skipped": len(skips), "refused": len(refused), "screen": screen,
                     "spreads": sum(1 for r in rows if r["event"] == "BUY"
                                    and "SPREAD" in str(r.get("execution") or "")),
                     "wins": sum(1 for r in sells if (r["pnl"] or 0) > 0),
@@ -214,19 +269,62 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
 def by_trade(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for e in events:
-        if e.get("event") == "SKIP":
+        if e.get("event") not in ("BUY", "SELL"):
             continue
         out.setdefault(str(e.get("trade_id")), {})[
             "sell" if e.get("event") == "SELL" else "buy"] = e
     return out
 
 
+def _checks_markdown(day: date) -> list[str]:
+    """Every strategy's checks today: how often it looked, how often it
+    fired, and the commonest reasons it did not."""
+    try:
+        from panaoptions.ledger import store
+        rows = store.checks(day.isoformat())
+    except Exception:                                  # noqa: BLE001
+        return []
+    if not rows:
+        return ["## What each strategy saw", "",
+                "No strategy was asked today — nothing passed the screen, the desk "
+                "was not running in the entry window, or it was locked out.", ""]
+    per: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        p = per.setdefault(r["strategy"], {"checked": 0, "fired": 0, "why": []})
+        p["checked"] += int(r["n"])
+        if r["outcome"] == "fired":
+            p["fired"] += int(r["n"])
+        else:
+            p["why"].append((int(r["n"]), r["reason"]))
+    out = ["## What each strategy saw", "",
+           "Counted once per symbol per cycle (a cycle a minute), so the numbers are "
+           "minute-by-minute looks, not separate setups.", "",
+           "| Strategy | Checked | Fired | Commonest reasons it did not fire |",
+           "|---|---|---|---|"]
+    for name, p in sorted(per.items(), key=lambda x: -x[1]["checked"]):
+        why = "; ".join(f"{w} ({n})" for n, w in sorted(p["why"], reverse=True)[:3])
+        out.append(f"| {name} | {p['checked']} | {p['fired']} | {why.replace('|', '/')} |")
+    out.append("")
+    return out
+
+
 def day_markdown(day: date) -> str:
-    trades = by_trade(entries(day))
-    skips = [e for e in entries(day) if e.get("event") == "SKIP"]
+    events = entries(day)
+    trades = by_trade(events)
+    skips = [e for e in events if e.get("event") == "SKIP"]
+    refused = [e for e in events if e.get("event") == "REFUSED"]
+    screens = [e for e in events if e.get("event") == "SCREEN"]
     lines = [f"# Audit — {day.isoformat()}", "",
              f"{len(trades)} trade(s), written at the fill and at the exit; "
-             f"{len(skips)} setup(s) skipped by a hard risk gate.", ""]
+             f"{len(skips)} setup(s) skipped by a hard risk gate; "
+             f"{len(refused)} fired setup(s) not taken for another reason.", ""]
+    if screens:
+        last = screens[-1]
+        lines += ["## Pre-market screen", "",
+                  f"{str(last.get('market_time', ''))[11:16]} — {last.get('summary')}", ""]
+        lines += [f"- {r['symbol']}: {'PASSED' if r.get('passed') else 'not passed'} — "
+                  f"{'; '.join(r.get('reasons') or [])}" for r in last.get("reads") or []]
+        lines.append("")
     for tid, t in trades.items():
         b, s = t.get("buy") or {}, t.get("sell") or {}
         head = b or s
@@ -264,4 +362,11 @@ def day_markdown(day: date) -> str:
                   f"{e.get('side')} {e.get('pattern') or e.get('strategy')}: "
                   f"[{e.get('gate')}] {e.get('reason')}" for e in skips]
         lines.append("")
+    if refused:
+        lines += ["## Fired but not taken — other gates", ""]
+        lines += [f"- {str(e.get('market_time', ''))[11:16]} {e.get('symbol')} "
+                  f"{e.get('side')} {e.get('pattern') or e.get('strategy')}: "
+                  f"[{e.get('gate')}] {e.get('reason')}" for e in refused]
+        lines.append("")
+    lines += _checks_markdown(day)
     return "\n".join(lines)

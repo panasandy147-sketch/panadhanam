@@ -73,6 +73,12 @@ class OptionsDesk:
         self.screened: list[PreMarketRead] = []
         self._screened_on: str = ""
         self._screened_at: datetime | None = None
+        # The audit log: which screen result was last written, when the day's
+        # summary was last rewritten, and when each refusal was last logged.
+        self._screen_logged: tuple[str, tuple[str, ...]] | None = None
+        self._audit_refreshed: datetime | None = None
+        self._audit_dirty = False
+        self._refusals_logged: dict[tuple, datetime] = {}
         # Opening range and pre-market extremes, per symbol, for today.
         self._levels: dict[str, Any] = {}
         self._levels_on: str = ""
@@ -538,6 +544,7 @@ class OptionsDesk:
 
         if phase == "closed":
             await self._square_off(now)
+            self._refresh_audit(now, final=True)
             await self._maybe_write_daily_review()
             await self._maybe_write_weekly_review()
             store.save_session(today, self.risk.state)
@@ -555,9 +562,17 @@ class OptionsDesk:
             self._screened_on = today
             self._screened_at = now
             passed = [r.symbol for r in self.screened if r.passed]
+            summary = self._screen_summary(passed)
             self.activity.add(
-                "screen.done", self._screen_summary(passed),
+                "screen.done", summary,
                 level="good" if passed else "info", ts=now)
+            # Into the audit log the first time today and whenever who passed
+            # changes — not every minute of a re-screen that finds nothing.
+            logged = (today, tuple(passed))
+            if self._screen_logged != logged:
+                self._screen_logged = logged
+                from panaoptions import audit
+                audit.record_screen(self.cfg, self.screened, summary)
 
         # 4. Tightening is a clock event, not a phase one. The entry window now
         # runs to the last strategy's close, which is well past the tighten
@@ -569,6 +584,7 @@ class OptionsDesk:
         if phase == "entry_window":
             hunted = await self._hunt(now)
             result["actions"].extend(hunted)
+            self._refresh_audit(now)
 
         store.save_session(today, self.risk.state)
         return result
@@ -710,6 +726,9 @@ class OptionsDesk:
                     store.save_signal_seen(
                         signal_id, now, symbol, setup.direction.value, False,
                         f"model probability {probability:.2f} below {floor:.2f}")
+                    self._record_refusal(symbol, option_side(setup.direction), setup,
+                                         "ML filter", f"model probability "
+                                         f"{probability:.2f} below {floor:.2f}", now)
                     actions.append(f"{symbol}: model vetoed ({probability:.0%})")
                     continue
 
@@ -750,6 +769,7 @@ class OptionsDesk:
                                             "pattern": setup.pattern, "side": side})
                     self.activity.add("confluence.refused", f"{symbol} {side} — {why}",
                                       level="warn", ts=now)
+                    self._record_refusal(symbol, side, setup, "F&O confluence", why, now)
                     continue
                 # A reversal confirmed by the sweep: the stop moves to the sweep
                 # candle's extreme wick, and 1:3 is measured from there.
@@ -821,6 +841,9 @@ class OptionsDesk:
                     level="bad" if hard else "warn", ts=now)
                 if hard:
                     self._record_skip(symbol, side, setup, "contract ladder", search.note)
+                else:
+                    self._record_refusal(symbol, side, setup, "contract",
+                                         search.note or "no contract qualified", now)
                 log.info("%s setup fired but no contract qualified. %s",
                          symbol, search.note)
                 continue
@@ -836,6 +859,9 @@ class OptionsDesk:
                     if verdict.gate is not None and not verdict.gate.approved:
                         self._record_skip(symbol, side, setup, "Risk Gatekeeper",
                                           verdict.gate.reason)
+                    else:
+                        self._record_refusal(symbol, side, setup, "committee",
+                                             verdict.summary(), now)
                     self._candidate_refused(symbol, verdict.reason)
                     store.save_signal_seen(signal_id, now, symbol,
                                            setup.direction.value, False,
@@ -936,6 +962,42 @@ class OptionsDesk:
         audit.record_skip(self.cfg, symbol, side, reason, strategy=setup.strategy.value,
                           pattern=setup.pattern, gate=gate,
                           detail={"spot": setup.indicators.close})
+
+    def _record_refusal(self, symbol: str, side: str, setup, gate: str, reason: str,
+                        now: datetime) -> None:
+        """A fired setup a softer gate refused, into the audit log — once per
+        symbol, side, strategy and reason per `audit.refusal_repeat_minutes`,
+        since a setup that stays valid is refused again every minute."""
+        from panaoptions import audit
+        key = (now.date().isoformat(), symbol, side, setup.strategy.value, gate,
+               store._generic(reason))
+        repeat = float(self.cfg.get("audit.refusal_repeat_minutes", 30) or 0)
+        last = self._refusals_logged.get(key)
+        if last is not None and (now - last).total_seconds() < repeat * 60:
+            return
+        self._refusals_logged[key] = now
+        audit.record_refusal(self.cfg, symbol, side, gate, reason,
+                             strategy=setup.strategy.value, pattern=setup.pattern,
+                             detail={"spot": setup.indicators.close})
+
+    def _refresh_audit(self, now: datetime, final: bool = False) -> None:
+        """Rewrite today's audit summary every few minutes of the session (and
+        once after the close), so it exists and says why even on a day with
+        no trade."""
+        from panaoptions import audit
+        every = float(self.cfg.get("audit.summary_every_minutes", 5) or 5)
+        last = self._audit_refreshed
+        if final:
+            # After the close: only if the session left something unwritten.
+            if not self._audit_dirty:
+                return
+        elif (last is not None and last.date() == now.date()
+              and (now - last).total_seconds() < every * 60):
+            self._audit_dirty = True
+            return
+        self._audit_dirty = False
+        self._audit_refreshed = now
+        audit.refresh_day(self.cfg, now.date())
 
     def _window_note(self, now: datetime) -> str:
         """Why nothing was judged, and when that changes."""

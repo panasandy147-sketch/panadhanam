@@ -77,7 +77,10 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   ", ".join(getattr(cfg, "symbols", None) or g("universe.symbols", []) or []),
                   "the Watchlist box on the dashboard (or universe.symbols)"),
             _rule("Pre-market screen: relative volume at least",
-                  f"{g('premarket.min_rvol', 1.5)}x the 20-day average",
+                  f"{g('premarket.min_rvol', 1.5)}x the 20-day average, paced on the "
+                  f"market's own session ({g('session.market_open', '09:30')}–"
+                  f"{g('session.market_close', '16:00')}). An index with no volume in "
+                  f"the feed (NIFTY, BANKNIFTY, FINNIFTY) is judged on the gap alone",
                   "premarket.min_rvol"),
             _rule("Pre-market screen: gap from yesterday's close at least",
                   _pct(g("premarket.min_gap_pct", 1.0)), "premarket.min_gap_pct"),
@@ -113,7 +116,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                 _rule("Technical agent: 5m trigger vs the 15m trend; relative "
                       "volume (trigger bar or session, whichever is higher) must "
                       "be at least",
-                      f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below",
+                      f"{g('agents.technical.min_rvol', 1.5)}x — hard veto below "
+                      f"(not applied to an index with no volume in the feed)",
                       "agents.technical.min_rvol"),
                 _rule("Volume profile confluence on every signal: a call at the "
                       "VAL or POC, or a put at the VAH or POC, scores "
