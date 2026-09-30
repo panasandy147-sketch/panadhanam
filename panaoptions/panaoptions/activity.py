@@ -44,6 +44,13 @@ NOTABLE_KINDS = frozenset({
     "vote.refused", "vote.approved",
 })
 
+# Shown under "Trades and decisions only" too — each symbol's "no trade, and
+# why" every cycle, and why nothing was hunted (window, limits) — so the
+# decisions view moves every minute as panadhanam's does. Kept in their own
+# rolling buffer: a day of these must never push a trade out of the log.
+ROLLING_KINDS = frozenset({"cycle.done", "hunt.skip"})
+MAX_ROLLING = 300
+
 
 @dataclass(frozen=True)
 class Event:
@@ -68,6 +75,7 @@ class ActivityLog:
                  notable_limit: int = MAX_NOTABLE) -> None:
         self._events: deque[Event] = deque(maxlen=limit)
         self._notable: deque[Event] = deque(maxlen=notable_limit)
+        self._rolling: deque[Event] = deque(maxlen=MAX_ROLLING)
         self._seq = 0
 
     def add(self, kind: str, detail: str = "", level: str = "info",
@@ -78,6 +86,8 @@ class ActivityLog:
         self._events.append(event)
         if event.notable:
             self._notable.append(event)
+        elif kind in ROLLING_KINDS:
+            self._rolling.append(event)
         return event
 
     def recent(self, limit: int = 60, notable_only: bool = False
@@ -88,7 +98,8 @@ class ActivityLog:
         though the chatter around it has long since rolled off.
         """
         if notable_only:
-            chosen = list(self._notable)
+            chosen = sorted(list(self._notable) + list(self._rolling),
+                            key=lambda e: e.seq)
         else:
             seen = {e.seq for e in self._events}
             chosen = list(self._events) + [e for e in self._notable
@@ -103,6 +114,7 @@ class ActivityLog:
     def clear(self) -> None:
         self._events.clear()
         self._notable.clear()
+        self._rolling.clear()
 
     def __len__(self) -> int:
         return len(self._events)

@@ -706,6 +706,15 @@ class OptionsDesk:
                         f"{symbol} {attempt.strategy.value} — "
                         + (attempt.blockers[0] if attempt.blockers else "no setup"),
                         ts=now)
+                # One line per symbol per cycle for the decisions view, as
+                # panadhanam shows it: no trade, and each strategy's reason.
+                self.activity.add(
+                    "cycle.done",
+                    f"{symbol} — no trade: " + "; ".join(
+                        f"{a.strategy.value}: "
+                        + (a.blockers[0] if a.blockers else "no setup")[:110]
+                        for a in attempts)[:700],
+                    ts=now)
                 # Record every strategy that looked and passed, with its
                 # reason. The rejections are the half that tells you whether
                 # a rule is selective or simply impossible.

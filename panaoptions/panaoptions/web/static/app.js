@@ -842,7 +842,7 @@ function renderAuditDays(r) {
 function renderActivity(d, decisionsOnly) {
   const events = d.events || [];
   $("activity-meta").textContent = events.length
-    ? (decisionsOnly ? `${events.length} of ${d.decisions} decisions today`
+    ? (decisionsOnly ? `${d.decisions} decision(s) today · each symbol's check every minute`
                      : `${events.length} of the last ${d.count}`)
     : "";
   /* On a 1-minute desk the scanning chatter is thirteen events a minute, so

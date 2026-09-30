@@ -230,3 +230,20 @@ def test_symbol_by_symbol_the_data_figures_and_each_strategys_verdict(cfg, monke
     assert "ORB + VWAP: no — no close beyond the opening range (101.00–99.00)" in text
     assert "PD Liquidity Sweep: **FIRED** LONG PDL Sweep — Tweezer Bottom — entry 100.60, " \
            "stop 99.90, target 102.70" in text
+
+
+def test_the_decisions_view_moves_every_cycle_without_evicting_trades():
+    """panadhanam shows each symbol's 'no trade: why' every minute; so does
+    panaoptions now — in a rolling buffer the trades cannot be pushed out of."""
+    from panaoptions.activity import MAX_ROLLING, ActivityLog
+    log = ActivityLog(notable_limit=5)
+    log.add("trade.open", "EXECUTED SPY call")
+    for i in range(MAX_ROLLING + 50):
+        log.add("cycle.done", f"SPY — no trade: ORB + VWAP: no close beyond the range {i}")
+        log.add("setup.pass", "chatter")                 # still hidden
+    shown = log.recent(1000, notable_only=True)
+    kinds = [e["kind"] for e in shown]
+    assert "trade.open" in kinds and "setup.pass" not in kinds
+    assert kinds.count("cycle.done") == MAX_ROLLING
+    assert shown[0]["detail"].endswith(str(MAX_ROLLING + 49))    # newest first
+    assert log.notable_count == 1                                 # decisions, not checks
