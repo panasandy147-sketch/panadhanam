@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.brokers.base import BrokerAdapter
@@ -26,6 +26,24 @@ _FNO_SAVED: dict[tuple[str, str], dict] = {}
 from app.indicators.derivatives import enrich_chain
 
 log = get_logger("data.market")
+
+
+def completed_bars(bars: list, timeframe: str, now: datetime | None = None) -> list:
+    """Drop a last INTRADAY bar that has not closed yet (its start plus the
+    timeframe is still in the future). Daily and longer bars are kept: the
+    previous-day levels already read completed days only."""
+    unit = {"m": 1, "h": 60}.get(str(timeframe)[-1:], 0)
+    try:
+        minutes = int(str(timeframe)[:-1]) * unit
+    except ValueError:
+        minutes = 0
+    if not minutes or not bars:
+        return bars
+    last = bars[-1].ts
+    now = now or datetime.now(timezone.utc)
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return bars[:-1] if last + timedelta(minutes=minutes) > now else bars
 
 
 class MarketDataService:
@@ -110,6 +128,12 @@ class MarketDataService:
         candles = {}
         for tf, res in zip(candle_tasks.keys(), candle_results):
             candles[tf] = [] if isinstance(res, Exception) else res
+        # CLOSED intraday bars only (technical.completed_bars_only): the feed's
+        # last bar is still forming, and a pattern, a volume surge or a
+        # sweep's reclaim judged on it is judged on a minute of a five-minute
+        # candle. The replay always used closed bars. Exits follow the quote.
+        if bool(tech.get("completed_bars_only", True)):
+            candles = {tf: completed_bars(bars, tf) for tf, bars in candles.items()}
 
         chain = None
         if chain_task is not None:

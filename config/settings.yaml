@@ -345,6 +345,9 @@ weights:
 # TECHNICAL ANALYSIS
 # --------------------------------------------------------------------------
 technical:
+  # The analysts judge CLOSED intraday candles only: the feed's last bar is
+  # still forming (Yahoo includes it). Exits follow the live quote.
+  completed_bars_only: true
   timeframes: ["1m", "5m", "15m", "1d"]
   primary_timeframe: "5m"
   emas: [9, 20, 21, 50]      # 20: the trend-pullback level (fno_confluence)
