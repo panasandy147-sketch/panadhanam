@@ -71,6 +71,7 @@ class Dispatcher:
             await bus.publish(Topic.POSITION_UPDATE, {
                 "event": "opened" if order.ok else "order_failed",
                 "signal_id": signal.id,
+                "order_tag": signal.order_tag,
                 "symbol": signal.instrument.symbol,
                 "tradingsymbol": signal.instrument.tradingsymbol,
                 "side": signal.side.value if hasattr(signal.side, "value") else str(signal.side),

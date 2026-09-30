@@ -68,9 +68,14 @@ risk:
   # re-entries on the same ticker in a choppy session (the XOM / AVGO runs).
   one_position_per_symbol: true
   reentry_cooldown_minutes: 60
-  # The stop sits at least this many ATRs (primary timeframe) from entry. A
-  # structural level inside a normal bar's range is hit by noise alone.
-  min_stop_atr: 1.0
+  # The stop sits at least max(min_stop_atr x ATR, min_stop_pct % of the
+  # price) from entry — a structural level inside a normal bar's range is hit
+  # by noise alone. Since 30 Sept 2026 (was 1.0 x ATR, no % floor): on the
+  # 20-session replay with the pyramid, India -0.38% -> +1.31% (DD 1.75% ->
+  # 0.64%), US +1.76% -> +6.41% (DD 5.0% -> 3.89%). The target is 3R from the
+  # widened stop; the size shrinks to keep the 1% risk.
+  min_stop_atr: 1.5
+  min_stop_pct: 0.75
   # Cap each position at max exposure / max_open_positions, so a tight stop
   # cannot size one trade into the whole limit and crowd out the rest.
   split_exposure_across_positions: true
@@ -187,6 +192,17 @@ consensus:
   # At least one of these must agree with the trade. News and macro are
   # mostly market-wide, so alone they would put the same trade on every name.
   lead_analysts: ["candlestick", "derivatives", "volume_profile"]
+  # The strict 2-analyst quorum: the candlestick trigger at +/-primary_min AND
+  # one confirmer at +/-confirm_min the same way. OFF: on the 20-session
+  # replay it left 5 of 4,085 India setups and 0 of 3,687 US (the volume
+  # profile rarely votes, and India's chain has no OI for the derivatives
+  # analyst) — it would stop the desk. The model synthesis obeys it when on.
+  quorum:
+    enabled: false
+    primary: "candlestick"
+    primary_min: 0.35
+    confirmers: ["volume_profile", "derivatives", "macro_flow", "news_sentiment"]
+    confirm_min: 0.25
   # No counter-trend trades: no long below VWAP or into a falling (stacked)
   # 15-minute trend, no short above VWAP or into a rising one.
   trend_filter: true

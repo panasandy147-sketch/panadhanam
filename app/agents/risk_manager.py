@@ -215,6 +215,20 @@ def _sane(level: float, spot: float, bullish: bool, atr: float) -> bool:
     return not (atr > 0 and distance > 5 * atr)
 
 
+def stop_floor(cfg: Any, price: float, atr: float) -> tuple[float, str]:
+    """The nearest a stop may sit: max(risk.min_stop_atr x ATR,
+    risk.min_stop_pct % of the price). (0.0, '') when both are off."""
+    floor_atr = float(cfg.get("risk.min_stop_atr", 0) or 0)
+    floor_pct = float(cfg.get("risk.min_stop_pct", 0) or 0)
+    by_atr = floor_atr * atr if atr > 0 else 0.0
+    by_pct = floor_pct / 100.0 * price if price > 0 else 0.0
+    if by_atr <= 0 and by_pct <= 0:
+        return 0.0, ""
+    if by_pct > by_atr:
+        return by_pct, f"{floor_pct:g}% of the price ({price:,.2f})"
+    return by_atr, f"{floor_atr:g}x ATR ({atr:.2f})"
+
+
 def underlying_stop(cfg: Any, *, spot: float, bullish: bool, atr: float,
                     candles_5m: list[Any] | None = None, tick: float = 0.01,
                     named_level: float | None = None) -> UnderlyingStop:
@@ -227,7 +241,8 @@ def underlying_stop(cfg: Any, *, spot: float, bullish: bool, atr: float,
       3. `risk.atr_stop_multiplier` (1.5) x ATR from the price,
       4. a percentage fallback when there is no ATR either.
 
-    Then never inside the noise: at least `risk.min_stop_atr` x ATR away.
+    Then never inside the noise: at least max(`risk.min_stop_atr` x ATR,
+    `risk.min_stop_pct` % of the price) away (stop_floor).
     """
     ticks = int(cfg.get("risk.structural_stop_ticks", 2))
     offset = float(tick or 0.01) * ticks
@@ -254,12 +269,11 @@ def underlying_stop(cfg: Any, *, spot: float, bullish: bool, atr: float,
         stop = UnderlyingStop(round(placed, 4), "percent",
                               f"{pct:.2f}% fallback → {placed:.2f}")
 
-    floor_atr = float(cfg.get("risk.min_stop_atr", 0) or 0)
-    if atr > 0 and floor_atr > 0 and abs(spot - stop.level) < floor_atr * atr:
-        placed = spot - floor_atr * atr if bullish else spot + floor_atr * atr
+    floor, what = stop_floor(cfg, spot, atr)
+    if floor > 0 and abs(spot - stop.level) < floor:
+        placed = spot - floor if bullish else spot + floor
         stop = UnderlyingStop(round(placed, 4), stop.method,
-                              stop.note + f", widened to {floor_atr:g}x ATR "
-                                          f"({atr:.2f}) — inside normal noise")
+                              stop.note + f", widened to {what} — inside normal noise")
     return stop
 
 

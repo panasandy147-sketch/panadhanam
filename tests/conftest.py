@@ -59,6 +59,10 @@ def cfg():
     # older tests trade symbols they name themselves. test_screener.py tests it.
     for settings in (c._base_settings, c.settings):
         settings.setdefault("screener", {})["enabled"] = False
+        # The stop floor (max(1.5 ATR, 0.75% of price) since 30 Sept): the
+        # sizing and stop tests are written against the old 1.0 x ATR floor.
+        # tests/test_execution_upgrade.py tests the shipped one.
+        settings.setdefault("risk", {}).update(min_stop_atr=1.0, min_stop_pct=0)
     return c
 
 

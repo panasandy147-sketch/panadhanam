@@ -105,11 +105,15 @@ class CMIOAgent(BaseAgent):
             w = float(weights.get(r.agent_id, 1.0)) * max(r.confidence, 0.05)
             numerator += r.score * w
             denominator += w
-            if abs(r.score) >= 0.25:
-                confirmations.append(f"{r.agent_id}: {r.bias.value.lower()} ({r.score:+.2f})")
-
         composite = numerator / denominator if denominator else 0.0
         composite = max(-1.0, min(1.0, composite))
+        # A confirmation AGREES with the call: an analyst at -0.40 under a
+        # bullish composite is a conflict, not a confirmation (it was counted
+        # as one, by size alone).
+        for r in active:
+            if r.agent_id != "fundamental" and abs(r.score) >= 0.25 \
+                    and (r.score > 0) == (composite > 0) and composite != 0:
+                confirmations.append(f"{r.agent_id}: {r.bias.value.lower()} ({r.score:+.2f})")
 
         # --- conflict detection ---
         directional = [r for r in active if abs(r.score) >= 0.25 and r.agent_id != "fundamental"]
@@ -182,10 +186,14 @@ class CMIOAgent(BaseAgent):
                              f"sweep ({against})")
             against = ""
 
+        quorum_miss = self._quorum_miss(active, composite, consensus) \
+            if bias != Bias.NEUTRAL else ""
+
         proceed = (bias != Bias.NEUTRAL
                    and len(confirmations) >= min_conf
                    and abs(composite) >= min_score
-                   and led and not against and not news_vetoed and not vp_veto)
+                   and led and not against and not news_vetoed and not vp_veto
+                   and not quorum_miss)
 
         reasons = []
         if news_vetoed:
@@ -201,6 +209,8 @@ class CMIOAgent(BaseAgent):
             reasons.append(f"composite {composite:+.2f} inside the neutral band (±{min_score})")
         if len(confirmations) < min_conf:
             reasons.append(f"only {len(confirmations)} confirmations, need {min_conf}")
+        if quorum_miss:
+            reasons.append(quorum_miss)
 
         rationale = (
             f"Weighted vote of {len(active)} analysts → {composite:+.3f}. "
@@ -297,6 +307,34 @@ class CMIOAgent(BaseAgent):
         return "No explicit counter-argument identified — treat that as a warning, not comfort."
 
     @staticmethod
+    def _quorum_miss(active: list[AgentReport], composite: float,
+                     consensus: dict[str, Any]) -> str:
+        """The 2-analyst quorum (consensus.quorum): the PRIMARY trigger
+        (candlestick at +/-0.35 or stronger, the trade's way) AND at least one
+        CONFIRMING analyst (volume profile, derivatives, macro, news) at
+        +/-0.25 or stronger the same way. '' when met or switched off."""
+        q = consensus.get("quorum") or {}
+        if not q.get("enabled", False):
+            return ""
+        sign = 1 if composite > 0 else -1
+        primary = str(q.get("primary", "candlestick"))
+        p_min = float(q.get("primary_min", 0.35))
+        c_min = float(q.get("confirm_min", 0.25))
+        confirmers = list(q.get("confirmers") or
+                          ["volume_profile", "derivatives", "macro_flow", "news_sentiment"])
+        lead = next((r for r in active if r.agent_id == primary), None)
+        if lead is None or lead.score * sign < p_min:
+            return (f"quorum: the {primary} trigger must be {'+' if sign > 0 else '-'}"
+                    f"{p_min:g} or stronger this way (it is "
+                    f"{(lead.score if lead else 0.0):+.2f}) — one analyst never trades alone")
+        agree = [r for r in active if r.agent_id in confirmers and r.score * sign >= c_min]
+        if not agree:
+            return (f"quorum: {primary} {lead.score:+.2f} has no second analyst "
+                    f"({', '.join(confirmers)}) at {'+' if sign > 0 else '-'}{c_min:g} "
+                    f"or stronger the same way — one analyst never trades alone")
+        return ""
+
+    @staticmethod
     def _decision(bias: Bias, score: float, confirmations: list[str],
                   conflicts: list[str], rationale: str, counter: str,
                   proceed: bool, abstained: list[str] | None = None) -> dict[str, Any]:
@@ -369,6 +407,11 @@ class CMIOAgent(BaseAgent):
         proceed = (d.proceed and bias != Bias.NEUTRAL
                    and len(d.confirmations) >= min_conf
                    and abs(d.composite_score) >= min_score)
+        # Nor skip the 2-analyst quorum: it is judged on the analysts' own
+        # scores, whatever the model's composite.
+        active = [r for r in reports if r.data_available]
+        if proceed and self._quorum_miss(active, d.composite_score, consensus):
+            proceed = False
 
         return {
             "bias": bias,

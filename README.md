@@ -291,6 +291,8 @@ blindly trusted.
 | Option premium per trade | 20% ($800); **25% ($1,000) on SPY/QQQ/DIA** | `risk.max_capital_deployed_pct` / `index_max_capital_deployed_pct` |
 | Option spread | refused above 7% of mid | `risk.max_spread_pct_of_mid` |
 | Option stop | on the **underlying**: 5m swing low/high ± 2 ticks, else 1.5× ATR — never the premium | `risk.swing_lookback_bars`, `atr_stop_multiplier` |
+| Stop floor | never closer than max(1.5× ATR, 0.75% of the price); the target is 3R from the widened stop and the size shrinks to keep 1% risk | `risk.min_stop_atr`, `min_stop_pct` |
+| 2-analyst quorum | candlestick ±0.35 AND one of volume profile / derivatives / macro / news ±0.25 the same way — built, **off** (it would have left 5 of 4,085 India setups, 0 of 3,687 US) | `consensus.quorum.enabled` |
 | News veto | polarity beyond ±0.60 against the trade = absolute veto | `consensus.news_veto_polarity` |
 | Max open positions | 5 | `risk.max_open_positions` |
 | Stop-loss sanity | rejected if too tight (noise) or too wide (ill-defined) | `risk.min/max_stop_distance_pct` |

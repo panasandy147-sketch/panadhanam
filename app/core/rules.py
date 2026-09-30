@@ -224,6 +224,15 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("At least one of these must agree (news or macro alone never trades)",
                   ", ".join(g("consensus.lead_analysts") or []) or "any",
                   "consensus.lead_analysts"),
+            _rule("2-analyst quorum: the "
+                  f"{g('consensus.quorum.primary', 'candlestick')} trigger at "
+                  f"±{g('consensus.quorum.primary_min', 0.35)} or stronger AND one of "
+                  + ", ".join(g("consensus.quorum.confirmers") or
+                              ["volume_profile", "derivatives", "macro_flow", "news_sentiment"])
+                  + f" at ±{g('consensus.quorum.confirm_min', 0.25)} the same way",
+                  "on" if g("consensus.quorum.enabled", False) else
+                  "off (backtest: it would have left 5 of 4,085 India and 0 of 3,687 US "
+                  "setups)", "consensus.quorum"),
             _rule("Macro must agree with the direction",
                   "yes" if g("consensus.require_macro_alignment", False) else "no",
                   "consensus.require_macro_alignment"),
@@ -349,9 +358,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "more than 5 ATR away, the stop is this many ATR instead",
                   f"{g('risk.atr_stop_multiplier', 1.5)} × ATR(14)",
                   "risk.atr_stop_multiplier"),
-            _rule("…and never closer than this many ATRs (a level inside a normal "
-                  "bar's range is hit by noise alone); size shrinks to keep the risk",
-                  f"{g('risk.min_stop_atr', 0)} × ATR", "risk.min_stop_atr"),
+            _rule("…and never closer than the larger of these (a level inside a "
+                  "normal bar's range is hit by noise alone); the target is 3R from "
+                  "the widened stop and the size shrinks to keep the 1% risk",
+                  f"{g('risk.min_stop_atr', 0)} × ATR or "
+                  f"{g('risk.min_stop_pct', 0)}% of the price",
+                  "risk.min_stop_atr / risk.min_stop_pct"),
             _rule("Stop distance must be between",
                   f"{_pct(g('risk.min_stop_distance_pct', 0.15))} and "
                   f"{_pct(g('risk.max_stop_distance_pct', 3.0))} of the price "

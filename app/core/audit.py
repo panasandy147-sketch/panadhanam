@@ -104,7 +104,7 @@ def record_buy(cfg: Any, signal: Any, order: dict[str, Any] | None = None) -> di
                       "confirmations": signal.confirmations, "rationale": rationale,
                       "counter_argument": signal.counter_argument})
     return _write(cfg, {
-        "event": "BUY" if side == "BUY" else "SELL_SHORT",
+        "event": "BUY" if side == "BUY" else "SELL_SHORT", "order_tag": "BASE_ENTRY",
         "signal_id": signal.id, "code_version": signal.code_version or code_version(),
         "setup": getattr(signal, "setup", "") or None,
         "symbol": inst.symbol, "tradingsymbol": inst.tradingsymbol,
@@ -157,7 +157,7 @@ def record_add(cfg: Any, row: dict[str, Any], *, level: int, quantity: int, pric
                note: str, refused: str = "") -> dict[str, Any]:
     """A pyramid add to a winning position (or the stop step alone)."""
     return _write(cfg, {
-        "event": "ADD", "signal_id": row.get("id"), "symbol": row.get("symbol"),
+        "event": "ADD", "order_tag": "PYRAMID_ADD", "signal_id": row.get("id"), "symbol": row.get("symbol"),
         "tradingsymbol": row.get("tradingsymbol"), "side": row.get("side"),
         "level": level, "quantity": quantity, "price": round(float(price), 4),
         "stop_loss": round(float(new_stop), 4), "avg_entry": round(float(avg_entry), 4),

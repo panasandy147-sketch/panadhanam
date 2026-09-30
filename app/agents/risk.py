@@ -844,11 +844,10 @@ class RiskManager:
         # less than a normal bar's range — and gets hit by nothing but the
         # tape wiggling, twice in a morning. The stop goes at least
         # risk.min_stop_atr x ATR away; the size shrinks to keep the risk.
-        floor_atr = float(self.cfg.get("risk.min_stop_atr", 0) or 0)
-        if atr > 0 and floor_atr > 0 and abs(entry - stop) < floor_atr * atr:
-            stop = (entry - floor_atr * atr if bias == Bias.BULLISH
-                    else entry + floor_atr * atr)
-            note += f", widened to {floor_atr:g}x ATR ({atr:.2f}) — the level sat inside normal noise"
+        floor, what = guard.stop_floor(self.cfg, entry, atr)
+        if floor > 0 and abs(entry - stop) < floor:
+            stop = entry - floor if bias == Bias.BULLISH else entry + floor
+            note += f", widened to {what} — the level sat inside normal noise"
 
         stop_points = abs(entry - stop)
         target = (entry + stop_points * min_rr if bias == Bias.BULLISH

@@ -248,6 +248,10 @@ class TradeSignal(BaseModel):
     # The named setup behind the trade, when there is one ("PD Liquidity
     # Sweep"): it decides the stop, the target and whether a time stop applies.
     setup: str = ""
+    # BASE_ENTRY for a new position; PYRAMID_ADD for a Standard Pyramid
+    # scale-in (+50% at +1R, +25% at +2R). "One position per symbol" stops
+    # BASE_ENTRY orders only.
+    order_tag: str = "BASE_ENTRY"
     regime: Regime | None = None
     # The code that placed it, so results can be read per version.
     code_version: str = ""

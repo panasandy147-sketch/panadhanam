@@ -357,7 +357,8 @@ class OutcomeTracker:
                          refused=refused[0] if refused else "")
         log.info("PYRAMID %s — %s", row["symbol"], add.note)
         await bus.publish(Topic.POSITION_UPDATE, {
-            "event": "pyramid_add", "signal_id": row["id"], "symbol": row["symbol"],
+            "event": "pyramid_add", "order_tag": "PYRAMID_ADD",
+            "signal_id": row["id"], "symbol": row["symbol"],
             "side": row["side"], "level": add.level, "quantity": add.quantity,
             "price": add.price, "stop_loss": add.new_stop, "avg_entry": state.avg_entry,
             "total_quantity": state.qty, "target": state.target, "note": add.note})
@@ -372,12 +373,12 @@ class OutcomeTracker:
             return
         try:
             from app.core.models import Side, TradeSignal
-            sig = TradeSignal.model_validate(payload)
+            sig = TradeSignal.model_validate({**payload, "order_tag": "PYRAMID_ADD"})
             side = Side.BUY if row["side"] == "BUY" else Side.SELL
             order = await self.broker.place_order(
                 sig.instrument, side, int(add.quantity), float(add.price),
                 order_type="MARKET", product=self.cfg.get("execution.product", "MIS"),
-                stop_loss=add.new_stop, tag=f"pyramid-L{add.level}")
+                stop_loss=add.new_stop, tag=f"PYRAMID_ADD-L{add.level}")
             log.info("pyramid add order %s: %s", "placed" if order.ok else "FAILED",
                      order.message or order.order_id)
         except Exception as exc:                        # noqa: BLE001 - never breaks polling
