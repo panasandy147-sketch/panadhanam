@@ -222,6 +222,13 @@ class OptionsDesk:
             self._watch_refreshing = False
 
         ranked, refused = auto_watchlist.rank(found, self.cfg, now, restrict)
+        # Only names whose options can actually be bought: on 30 Sept 75 fired
+        # setups were refused because every contract on a $13-18 name was
+        # wider than the 7% spread rule.
+        if ranked and bool(self.cfg.get("auto_watchlist.options_liquidity_check", True)):
+            ranked, thin = await auto_watchlist.drop_illiquid(
+                self.feed, self.cfg, ranked, held, today)
+            refused.update(thin)
         fallback = [str(s).upper() for s in
                     self.cfg.get("auto_watchlist.always_consider", []) or []] or current
         sel = auto_watchlist.select(current, ranked, held, self.cfg,
@@ -822,6 +829,11 @@ class OptionsDesk:
 
             # The 1:3 gate: a projected target at least 3x the distance to the
             # invalidation, with open road to it.
+            widened = reward.widen_stop(setup, self.cfg)
+            if widened:
+                setup.confirmations.append(widened)
+                signal_a = replace(signal_a,
+                                   invalidation_level=float(setup.underlying_support))
             target, rr, why, note = reward.project(setup, session_levels, self.cfg,
                                                    sweep=is_sweep)
             if why:

@@ -657,6 +657,64 @@ def pool_for(cfg: Any, current: list[str], held: list[str]) -> tuple[list[str], 
     return _dedup(pinned + base + list(current) + list(held)), restrict
 
 
+_liquidity_seen: dict[tuple[str, str], str] = {}
+
+
+async def options_liquidity(feed: Any, cfg: Any, c: Candidate) -> str:
+    """'' when the name's near-the-money options can be traded — at least one
+    call AND one put with a bid and a spread within
+    contracts.max_spread_pct_of_mid (7%), in the desk's expiry window — else
+    why not. A chain that cannot be read is not held against the name."""
+    min_dte = int(cfg.get("contracts.min_dte", 0) or 0)
+    max_dte = int(cfg.get("contracts.max_dte", 14) or 14)
+    cap = float(cfg.get("contracts.max_spread_pct_of_mid", 7.0) or 7.0)
+    try:
+        chain = await feed.chain_for_window(c.symbol, c.price, min_dte, max_dte)
+    except Exception:                                   # noqa: BLE001 - fail open
+        return ""
+    if not chain:
+        return ""
+    near = [k for k in chain
+            if (k.delta is not None and 0.25 <= abs(k.delta) <= 0.60)
+            or (k.delta is None and c.price and abs(k.strike - c.price) <= 0.05 * c.price)]
+    ok = {k.right.value for k in near if (k.bid or 0) > 0 and k.spread_pct_of_mid <= cap}
+    if {"CALL", "PUT"} <= ok:
+        return ""
+    best = min((k.spread_pct_of_mid for k in near if (k.bid or 0) > 0), default=None)
+    missing = " and ".join(sorted({"CALL", "PUT"} - ok)).lower()
+    return (f"options too thin to trade: no {missing} near the money within the "
+            f"{cap:g}% spread rule" + (f" (tightest {best:.0f}%)" if best is not None else
+                                        " (no bids)"))
+
+
+async def drop_illiquid(feed: Any, cfg: Any, ranked: dict[str, Candidate],
+                        keep: list[str], day: str) -> tuple[dict[str, Candidate], dict[str, str]]:
+    """Check the best-scored names' options (auto_watchlist.liquidity_check_top,
+    default 2x the list size) and drop the thin ones. Pinned and held names are
+    never checked; one answer per name per day."""
+    import asyncio
+    pinned = {str(s).upper() for s in cfg.get("auto_watchlist.pinned", []) or []}
+    skip = pinned | {str(s).upper() for s in keep}
+    top = int(cfg.get("auto_watchlist.liquidity_check_top", 0) or 0) or \
+        2 * int(cfg.get("auto_watchlist.size", 10))
+    order = sorted(ranked.values(), key=lambda c: c.score, reverse=True)
+    todo = [c for c in order[:top] if c.symbol not in skip
+            and (day, c.symbol) not in _liquidity_seen]
+
+    async def one(c: Candidate) -> None:
+        _liquidity_seen[(day, c.symbol)] = await options_liquidity(feed, cfg, c)
+
+    if todo:
+        try:
+            await asyncio.wait_for(asyncio.gather(*(one(c) for c in todo)),
+                                   timeout=float(cfg.get("auto_watchlist.liquidity_timeout", 30)))
+        except TimeoutError:
+            pass                                      # unchecked names stay in
+    thin = {c.symbol: _liquidity_seen[(day, c.symbol)] for c in order[:top]
+            if _liquidity_seen.get((day, c.symbol))}
+    return {s: c for s, c in ranked.items() if s not in thin}, thin
+
+
 def rank(found: dict[str, Candidate], cfg: Any, now: datetime,
          restrict: set[str] | None) -> tuple[dict[str, Candidate], dict[str, str]]:
     """Score every priced name; return the eligible ones and why others fell."""

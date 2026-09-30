@@ -111,6 +111,13 @@ auto_watchlist:
   # the options are thin. Liquid names only.
   min_price: 10
   max_price: 600
+  # And only names whose OPTIONS can be bought: at least one call and one put
+  # near the money with a bid and a spread inside contracts.
+  # max_spread_pct_of_mid (7%). The top 2x-the-list-size names are checked,
+  # once a day each; pinned and held names never are; a chain that cannot be
+  # read is not held against a name. (30 Sept: 75 fired setups refused on
+  # $13-18 names whose every contract was wider than 7%.)
+  options_liquidity_check: true
   min_avg_volume: 2000000
   min_market_cap: 5000000000
   move_full_pct: 3.0        # a 3% move scores the trend part in full

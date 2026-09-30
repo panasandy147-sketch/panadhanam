@@ -76,6 +76,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             _rule("Symbols the desk watches",
                   ", ".join(getattr(cfg, "symbols", None) or g("universe.symbols", []) or []),
                   "the Watchlist box on the dashboard (or universe.symbols)"),
+            _rule("Auto watchlist: only names whose options can be bought — a call AND a "
+                  "put near the money with a bid and a spread within "
+                  f"{g('contracts.max_spread_pct_of_mid', 7.0)}% (SPY, QQQ and held "
+                  "names are not checked)",
+                  "on" if g("auto_watchlist.options_liquidity_check", True) else "off",
+                  "auto_watchlist.options_liquidity_check"),
             _rule("Pre-market screen: relative volume at least",
                   f"{g('premarket.min_rvol', 1.5)}x the 20-day average, paced on the "
                   f"market's own session ({g('session.market_open', '09:30')}–"

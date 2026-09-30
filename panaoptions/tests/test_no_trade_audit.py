@@ -333,3 +333,30 @@ def test_the_desk_judges_closed_candles_only(cfg, monkeypatch):
     cfg.data["technical"]["completed_bars_only"] = False
     got, _ = asyncio.run(desk._tape("SPY", t0 + timedelta(minutes=12)))
     assert len(got) == 3
+
+
+def test_the_watchlist_keeps_only_names_whose_options_can_be_bought(cfg):
+    from panaoptions import auto_watchlist as aw
+    from panaoptions.models import OptionContract, OptionRight
+
+    def k(sym, right, bid, ask, delta=0.45):
+        return OptionContract(symbol=sym, right=right, strike=20, expiry="2026-10-09",
+                              dte=9, bid=bid, ask=ask, delta=delta)
+
+    class Feed:
+        async def chain_for_window(self, sym, spot, lo, hi):
+            if sym == "THIN":          # 0.20 x 0.40: 67% wide
+                return [k(sym, OptionRight.CALL, 0.20, 0.40), k(sym, OptionRight.PUT, 0.20, 0.40)]
+            if sym == "CALLS":         # liquid calls, no liquid put
+                return [k(sym, OptionRight.CALL, 1.00, 1.04), k(sym, OptionRight.PUT, 0, 0.5)]
+            if sym == "DOWN":
+                raise RuntimeError("chain source down")
+            return [k(sym, OptionRight.CALL, 1.00, 1.04), k(sym, OptionRight.PUT, 0.98, 1.02, -0.45)]
+
+    ranked = {s: aw.Candidate(symbol=s, price=20.0, score=10 - i)
+              for i, s in enumerate(["GOOD", "THIN", "CALLS", "DOWN", "SPY", "HELD"])}
+    kept, thin = asyncio.run(aw.drop_illiquid(Feed(), cfg, ranked, ["HELD"], "2026-09-30"))
+    # SPY (pinned) and HELD (held) are never checked; DOWN's chain failed.
+    assert set(kept) == {"GOOD", "DOWN", "SPY", "HELD"}
+    assert "no call and put" in thin["THIN"] and "(tightest 67%)" in thin["THIN"]
+    assert "no put" in thin["CALLS"]
