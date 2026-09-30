@@ -138,16 +138,35 @@ every cycle and stored once a day (`fno_daily`):
   Unwinding.
 
 A trade driven by a reversal pattern (tweezer bottom or top, double
-rejection, hammer, engulfing, star) is taken only at the previous day's
-level:
-- **Bullish:** after the PDL is swept and rejected, with call open interest
-  rising.
-- **Bearish:** after the PDH is tested and rejected, with put open interest
-  rising.
+rejection, hammer, engulfing, star) depends on the tape's regime
+(`fno_confluence.regime_rules`, since 30 Sept 2026):
+- **Rangebound (or volatile), or against the trend:** only at the previous
+  day's level — within **0.25%** of it (`rangebound_proximity_pct`):
+  - **Bullish:** after the PDL is swept and rejected, with call open
+    interest rising.
+  - **Bearish:** after the PDH is tested and rejected, with put open
+    interest rising.
 
-With no real chain, `fno_confluence.when_oi_unknown: block` refuses it. The
-target is set at **1:3** (`risk.min_reward_risk`). A trade is refused when
-the previous-day high (long) or low (short) sits inside that target.
+  With no real chain, `fno_confluence.when_oi_unknown: block` refuses it.
+- **With the trend** (a long in `trending_up`, a short in `trending_down`):
+  no PDH/PDL needed. The pattern must form on a pullback within **0.30%**
+  (`trend_pullback_pct`) of the intraday VWAP, the session POC or the 9/20
+  EMA, with the close back on the trend side.
+
+The target is set at **1:3** (`risk.min_reward_risk`). When the previous-day
+high (long) or low (short) sits inside it:
+- **2.2R to 3R of room** (`risk.target_snap`): the trade is taken, with the
+  target snapped 2 ticks inside that level.
+- **Under 2.2R:** refused.
+
+A symbol already held is not re-scanned for a new entry
+(`system.skip_held_symbols`): the position manager runs its stop, target and
+Standard Pyramid adds. "One position per symbol" stops new BASE entries
+only; pyramid adds (+50% at +1R, +25% at +2R) go ahead, never onto a loser.
+
+**Band B promotion** (`screener.band_b_promotion`): a Band B name may enter
+in the morning window when its regime trends its way and its composite score
+is ±0.85 or stronger.
 
 See [docs/PAPER-TRADING.md](docs/PAPER-TRADING.md).
 

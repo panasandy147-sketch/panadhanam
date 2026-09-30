@@ -98,6 +98,12 @@ class _Broker:
         return Quote(symbol=symbol, last_price=self.price)
 
 
+async def _mine(tracker, signal_id):
+    """This test's events only: the DB is shared, and a position another test
+    left open can reach its own stop in the same poll."""
+    return [e for e in await tracker.poll() if e.get("signal_id") == signal_id]
+
+
 @pytest.mark.asyncio
 async def test_the_tracker_adds_moves_the_stop_and_exits_all_at_3r(pcfg):
     from app.learning.outcomes import OutcomeTracker
@@ -116,14 +122,15 @@ async def test_the_tracker_adds_moves_the_stop_and_exits_all_at_3r(pcfg):
 
     for price in (100.2, 101.0, 102.0):
         broker.price = price
-        assert await tracker.poll() == []
+        assert [e for e in await _mine(tracker, "SIG-PYR")
+                if e["event"] == "closed"] == []
     row = db.get_signal("SIG-PYR")
     assert row["quantity"] == 175 and row["stop_loss"] == 101.0 and row["target"] == 103.0
     state = json.loads(row["payload"])["pyramid"]
     assert [a["level"] for a in state["adds"]] == [1, 2]
 
     broker.price = 103.0                                  # +3R from the base
-    closed = await tracker.poll()
+    closed = [e for e in await _mine(tracker, "SIG-PYR") if e["event"] == "closed"]
     assert closed and closed[0]["status"] == "CLOSED_TARGET"
     assert closed[0]["r_multiple"] == pytest.approx(4.25, abs=0.01)   # vs the BASE 1R
     assert closed[0]["pnl"] == pytest.approx(425.0, abs=0.5)
@@ -147,7 +154,7 @@ async def test_after_level_one_a_reversal_exits_all_at_the_base_entry(pcfg):
         broker.price = price
         await tracker.poll()
     broker.price = 99.95                                  # back through the base entry
-    closed = await tracker.poll()
+    closed = [e for e in await _mine(tracker, "SIG-PYR2") if e["event"] == "closed"]
     assert closed[0]["status"] == "CLOSED_STOP"
     assert closed[0]["r_multiple"] == pytest.approx(-0.5, abs=0.01)   # not -1R
 

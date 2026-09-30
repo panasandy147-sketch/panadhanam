@@ -297,6 +297,19 @@ class TradingEngine:
             targets, ready = await self.focus.targets(cycle_id, news_items, macro_snap)
         outcomes: list[dict[str, Any]] = []
 
+        # A symbol already held is MANAGED, not re-scanned: no fresh entry
+        # evaluation for it (the risk desk would only refuse it as "Already
+        # holding"). Its stop, target and Standard Pyramid adds (+50% at +1R,
+        # +25% at +2R) belong to the position manager — outcomes.poll() below.
+        if bool(self.cfg.get("system.skip_held_symbols", True)):
+            held = {str(r["symbol"]).upper() for r in db.open_signals()}
+            for symbol in [t for t in targets if t.upper() in held]:
+                outcomes.append({
+                    "symbol": symbol, "held": True, "signal": None, "signal_id": None,
+                    "rejected": ["held — managed by the position manager (stop, "
+                                 "target, pyramid adds); no new entry scan"]})
+            targets = [t for t in targets if t.upper() not in held]
+
         # Fetch every symbol's data concurrently, then decide one at a time.
         # Fetching one after another made a 60-name watchlist take longer
         # than the cycle; deciding one at a time is still required, because

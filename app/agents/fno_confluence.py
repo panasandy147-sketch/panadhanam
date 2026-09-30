@@ -16,8 +16,21 @@
                                  put open interest rising.
                       No open interest in the chain: fno_confluence.
                       when_oi_unknown decides (block by default).
-  room_reason()       The 1:3 target must have open road: no PDH (long) or
-                      PDL (short) inside 3R of the underlying entry.
+                      By REGIME (fno_confluence.regime_rules):
+                        rangebound (and volatile): the pattern's extreme
+                                 within rangebound_proximity_pct (0.25%) of
+                                 the PDL (longs) / PDH (shorts), rejected;
+                        trending_up long / trending_down short: no PDH/PDL
+                                 needed — a PULLBACK within
+                                 trend_pullback_pct (0.30%) of the intraday
+                                 VWAP, the session POC or the 9/20 EMA, with
+                                 the close back on the trend side.
+                      A reversal AGAINST the trend keeps the PDH/PDL rule.
+  room_snap()         The 1:3 target must have open road to the PDH (long) /
+                      PDL (short). 3R or more of room: the 3R target. From
+                      risk.target_snap.min_r (2.2R) to 3R: approved, with the
+                      target snapped `ticks` (2) inside the level. Less: refused.
+  room_reason()       room_snap()'s refusal alone.
 """
 from __future__ import annotations
 
@@ -115,15 +128,26 @@ def confluence_reason(ctx: Any, bias: Bias, reports: list[AgentReport], cfg: Any
     prev = ind.get("previous_day") or {}
     primary = ind.get("primary") or {}
     long = bias == Bias.BULLISH
+    close = float(primary.get("last_close") or (ctx.quote.last_price if ctx.quote else 0.0))
+    candles = (ctx.candles or {}).get(str(cfg.get("technical.primary_timeframe", "5m"))) or []
+    recent = candles[-int(cfg.get("fno_confluence.lookback_bars", 3)):]
+    regime = str(primary.get("regime") or getattr(getattr(ctx, "regime", None), "value", "")
+                 or "")
+    regime_rules = bool(cfg.get("fno_confluence.regime_rules", False))
+    if regime_rules and ((long and regime == "trending_up")
+                         or (not long and regime == "trending_down")):
+        return _pullback_reason(ctx, pattern, long, regime, close, recent, reports, cfg)
     level = prev.get("low" if long else "high")
     name = "previous-day low (PDL)" if long else "previous-day high (PDH)"
     if not level:
         return f"{pattern}: no {name} to confirm against"
-    close = float(primary.get("last_close") or (ctx.quote.last_price if ctx.quote else 0.0))
     atr = float(primary.get("atr") or 0.0)
-    tol = max(atr * float(cfg.get("fno_confluence.touch_atr", 0.15)), close * 0.0005)
-    candles = (ctx.candles or {}).get(str(cfg.get("technical.primary_timeframe", "5m"))) or []
-    recent = candles[-int(cfg.get("fno_confluence.lookback_bars", 3)):]
+    if regime_rules:
+        # Rangebound (or a reversal against the trend): at the level, within
+        # rangebound_proximity_pct of it (or through it).
+        tol = level * float(cfg.get("fno_confluence.rangebound_proximity_pct", 0.25)) / 100
+    else:
+        tol = max(atr * float(cfg.get("fno_confluence.touch_atr", 0.15)), close * 0.0005)
     if long:
         extreme = min((c.low for c in recent), default=close)
         touched, held = extreme <= level + tol, close > level
@@ -149,25 +173,79 @@ def confluence_reason(ctx: Any, bias: Bias, reports: list[AgentReport], cfg: Any
     return ""
 
 
-def room_reason(ctx: Any, bias: Bias, entry: float, stop: float, cfg: Any) -> str:
-    """'' when the 1:N target has open road on the underlying, else why not."""
+def _pullback_reason(ctx: Any, pattern: str, long: bool, regime: str, close: float,
+                     recent: list[Any], reports: list[AgentReport], cfg: Any) -> str:
+    """A reversal pattern WITH the trend: valid on a pullback to the intraday
+    VWAP, the session POC or the 9/20 EMA (within trend_pullback_pct), the
+    close back on the trend side. No PDH/PDL, no open-interest condition."""
+    primary = (ctx.indicators or {}).get("primary") or {}
+    levels: dict[str, float] = {}
+    for key, label in (("vwap", "VWAP"), ("ema9", "9 EMA"), ("ema20", "20 EMA")):
+        if primary.get(key):
+            levels[label] = float(primary[key])
+    if "20 EMA" not in levels and primary.get("ema21"):
+        levels["20 EMA"] = float(primary["ema21"])
+    for r in reports:
+        profiles = (r.extra or {}).get("profiles") if r.agent_id == "volume_profile" else None
+        if profiles:
+            prof = profiles.get("current") or profiles.get("prior") or {}
+            if prof.get("poc"):
+                levels["session POC"] = float(prof["poc"])
+    if not levels:
+        return f"{pattern} in a {regime} tape, but there is no VWAP / POC / EMA to pull back to"
+    pct = float(cfg.get("fno_confluence.trend_pullback_pct", 0.30))
+    extreme = (min((c.low for c in recent), default=close) if long
+               else max((c.high for c in recent), default=close))
+    near = []
+    for label, lvl in levels.items():
+        gap = abs(extreme - lvl) / lvl * 100 if lvl else 99.0
+        on_side = close > lvl if long else close < lvl
+        if gap <= pct and on_side:
+            return ""
+        near.append(f"{label} {lvl:,.2f} ({gap:.2f}% away{'' if on_side else ', wrong side'})")
+    return (f"{pattern} in a {regime} tape is taken on a pullback within {pct:g}% of the "
+            f"VWAP, session POC or 9/20 EMA with the close back on the trend side — "
+            f"{'long' if long else 'short'} extreme {extreme:,.2f}, close {close:,.2f}: "
+            + "; ".join(near))
+
+
+def room_snap(ctx: Any, bias: Bias, entry: float, stop: float, cfg: Any,
+              tick: float = 0.01) -> tuple[str, float | None, float]:
+    """(why refused, snapped underlying target or None, room in R).
+
+    3R or more of room to the PDH (long) / PDL (short): the standard target
+    (None). Between risk.target_snap.min_r (2.2R) and 3R: approved, the target
+    snapped `ticks` inside the level. Less: refused."""
     need = float(cfg.get("risk.min_risk_reward", 3.0) or 0)
     if need <= 0 or not bool(cfg.get("fno_confluence.room_check", True)):
-        return ""
+        return "", None, 0.0
     risk = abs(entry - stop)
     prev = (ctx.indicators or {}).get("previous_day") or {}
     if risk <= 0 or not prev:
-        return ""
+        return "", None, 0.0
     long = bias == Bias.BULLISH
     level = prev.get("high" if long else "low")
     if not level:
-        return ""
+        return "", None, 0.0
     ahead = (level - entry) if long else (entry - level)
     if ahead <= risk * 0.25:
-        return ""                                   # already through it
+        return "", None, 0.0                            # already through it
     room = ahead / risk
-    if room < need:
-        label = "previous-day high" if long else "previous-day low"
-        return (f"only {room:.1f}R of room before the {label} {level:,.2f} — the "
-                f"1:{need:g} target sits beyond it")
-    return ""
+    if room >= need:
+        return "", None, room
+    label = "previous-day high" if long else "previous-day low"
+    snap_min = float(cfg.get("risk.target_snap.min_r", 2.2) or 0)
+    if bool(cfg.get("risk.target_snap.enabled", False)) and snap_min and room >= snap_min:
+        ticks = int(cfg.get("risk.target_snap.ticks", 2))
+        target = level - ticks * tick if long else level + ticks * tick
+        return "", round(target, 4), round(((target - entry) if long else (entry - target))
+                                           / risk, 3)
+    floor = (f" (a target between {snap_min:g}R and {need:g}R is snapped inside it)"
+             if bool(cfg.get("risk.target_snap.enabled", False)) else "")
+    return (f"only {room:.1f}R of room before the {label} {level:,.2f} — the "
+            f"1:{need:g} target sits beyond it{floor}"), None, room
+
+
+def room_reason(ctx: Any, bias: Bias, entry: float, stop: float, cfg: Any) -> str:
+    """'' when the 1:N target has open road on the underlying, else why not."""
+    return room_snap(ctx, bias, entry, stop, cfg)[0]

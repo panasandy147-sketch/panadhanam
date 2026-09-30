@@ -92,8 +92,13 @@ class RiskManager:
     # ------------------------------------------------------------------ #
     # Gate checks
     # ------------------------------------------------------------------ #
-    def symbol_checks(self, symbol: str) -> list[str]:
+    def symbol_checks(self, symbol: str, order: str = "BASE_ENTRY") -> list[str]:
         """Reasons THIS symbol may not be traded now.
+
+        `order` is BASE_ENTRY (a new position) or PYRAMID_ADD (a Standard
+        Pyramid scale-in, +50% at +1R and +25% at +2R, to a position already
+        held). "One position per symbol" and the re-entry cooldown stop BASE
+        entries only; an add is still refused if the position is losing.
 
         A setup stays valid for several cycles, and nothing stopped the desk
         opening it again each time — LLY was held twice at once, and NFLX and
@@ -111,6 +116,8 @@ class RiskManager:
             cur = self.cfg.market.currency_symbol
             reasons.append(f"No averaging down: {symbol} is held in a drawdown "
                            f"({cur}{losing:,.2f} open) — size is never added to a loser")
+        if order == "PYRAMID_ADD":
+            return reasons
         if bool(self.cfg.get("risk.one_position_per_symbol", True)):
             if held:
                 reasons.append(f"Already holding {symbol} — one position per symbol")
@@ -126,7 +133,8 @@ class RiskManager:
     # Today's screened watchlist and the entry windows
     # ------------------------------------------------------------------ #
     def screener_checks(self, symbol: str, bias: Bias,
-                        indicators: dict[str, Any]) -> list[str]:
+                        indicators: dict[str, Any],
+                        composite_score: float = 0.0) -> list[str]:
         """Only today's screened names, only in their window:
         Band A 09:30-11:15, nothing 11:15-13:30, Band A/B VWAP pullbacks
         13:30-14:45 (IST; the US desk uses its own clock). A Band B name also
@@ -157,9 +165,14 @@ class RiskManager:
         elif where == "closed":
             out.append(f"Outside the entry windows ({spans[0]} Band A; {spans[2]} "
                        f"Band A/B VWAP pullbacks)")
-        elif where == "morning" and row["band"] != "A":
+        elif where == "morning" and row["band"] != "A" and not self._band_b_promoted(
+                bias, indicators, composite_score):
             out.append(f"{symbol} is Band B — Band B enters only in the afternoon "
-                       f"VWAP-pullback window ({spans[2]})")
+                       f"VWAP-pullback window ({spans[2]}), unless it is trending "
+                       f"its way with a composite of ±"
+                       f"{g('screener.band_b_promotion.min_composite', 0.85)} or more "
+                       f"(now {composite_score:+.2f}, "
+                       f"{((indicators or {}).get('primary') or {}).get('regime', 'unknown')})")
         elif where == "afternoon" and not scr.is_vwap_pullback(
                 indicators, long, float(g("screener.vwap_pullback_atr", 0.5))):
             out.append(f"Afternoon window ({spans[2]}) takes VWAP pullbacks only — "
@@ -230,6 +243,23 @@ class RiskManager:
         return {"trades_today": trades, "realised_pnl": round(realised, 2),
                 "locked": self.state.halted}
 
+    def _band_b_promoted(self, bias: Bias, indicators: dict[str, Any],
+                         composite_score: float) -> bool:
+        """Dynamic Band B promotion: a Band B name may enter in the MORNING
+        window when its regime trends its way (trending_up for a long,
+        trending_down for a short) and the composite is at least
+        screener.band_b_promotion.min_composite (0.85) that way."""
+        g = self.cfg.get
+        if not bool(g("screener.band_b_promotion.enabled", False)):
+            return False
+        regime = str(((indicators or {}).get("primary") or {}).get("regime") or "")
+        floor = float(g("screener.band_b_promotion.min_composite", 0.85))
+        if bias == Bias.BULLISH:
+            return regime == "trending_up" and composite_score >= floor
+        if bias == Bias.BEARISH:
+            return regime == "trending_down" and composite_score <= -floor
+        return False
+
     def approve_add(self, symbol: str, open_pnl: float, add_notional: float,
                     add_risk: float = 0.0) -> list[str]:
         """Reasons a pyramid ADD to a held position is refused ([] = approved).
@@ -241,6 +271,11 @@ class RiskManager:
         self.roll_day_if_needed()
         reasons: list[str] = []
         cur = self.cfg.market.currency_symbol
+        # The per-symbol rules for an ADD: "one position per symbol" does not
+        # apply (the position is the point); no averaging down does.
+        self.position_pnl[symbol.upper()] = open_pnl
+        reasons.extend(r for r in self.symbol_checks(symbol, order="PYRAMID_ADD")
+                       if not r.startswith("No averaging down"))
         if open_pnl < 0:
             reasons.append(f"No averaging down: {symbol} is in a drawdown "
                            f"({cur}{open_pnl:,.2f} open) — the add is refused")
@@ -374,7 +409,8 @@ class RiskManager:
         # ---- desk-level gates ----
         reasons.extend(self.desk_checks())
         reasons.extend(self.symbol_checks(ctx.symbol))
-        reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {}))
+        reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {},
+                                            composite_score))
 
         # ---- can this instrument actually be bought? ----
         if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):
@@ -420,15 +456,36 @@ class RiskManager:
         # A sweep's target is defined by the setup (VWAP or 3R): the far side
         # of yesterday's range is where a failed breakout rotates to, not a
         # wall, so the room check does not apply to it.
-        why = ("" if sweep is not None
-               else fno_confluence.room_reason(ctx, bias, u_entry, u_stop, self.cfg))
-        if why:
-            reasons.append(f"Reward:risk — {why}")
+        snapped_r = None
+        if sweep is None:
+            tick = float(self.cfg.instrument_meta(ctx.symbol).get("tick_size", 0) or 0) or (
+                0.05 if self.cfg.market.lot_based else 0.01)
+            why, snapped, room = fno_confluence.room_snap(ctx, bias, u_entry, u_stop,
+                                                          self.cfg, tick)
+            if why:
+                reasons.append(f"Reward:risk — {why}")
+            elif snapped is not None:
+                # 2.2-3R of room to the PDH/PDL: take the trade with the
+                # target snapped just inside the level instead of refusing it.
+                snapped_r = room
+                if instrument.instrument_type in {InstrumentType.CALL, InstrumentType.PUT}:
+                    target = entry + (entry - stop_loss) * room
+                else:
+                    target = snapped
+                level = ((ctx.indicators or {}).get("previous_day") or {}).get(
+                    "high" if bias == Bias.BULLISH else "low")
+                signal.target = round(target, 2)
+                signal.confirmations = list(signal.confirmations) + [
+                    f"target snapped {int(self.cfg.get('risk.target_snap.ticks', 2))} "
+                    f"ticks inside the previous-day {'high' if bias == Bias.BULLISH else 'low'} "
+                    f"{level:,.2f} → {snapped:,.2f} ({room:.2f}R)"]
 
         # ---- risk:reward ----
         reward_points = abs(target - entry)
         rr = reward_points / stop_points if stop_points > 0 else 0.0
         min_rr = float(self.cfg.get("risk.min_risk_reward", 2.0))
+        if snapped_r is not None:
+            min_rr = min(min_rr, float(self.cfg.get("risk.target_snap.min_r", 2.2)))
         max_rr = float(self.cfg.get("risk.max_risk_reward", 10.0))
         # Compared at the precision it is printed at. The desk places its own
         # target at exactly min_rr, and float error or rounding the prices to

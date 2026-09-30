@@ -8,6 +8,9 @@ system:
   timezone: "Asia/Kolkata"
   # How often the CMIO runs a full analysis cycle during market hours.
   cycle_seconds: 60
+  # A symbol already held is not re-scanned for a new entry: the position
+  # manager runs its stop, target and Standard Pyramid adds.
+  skip_held_symbols: true
   # Pre-market scan (fundamental filter + macro/gap read) runs once at this time.
   premarket_scan_time: "08:45"
   market_open: "09:15"
@@ -85,6 +88,13 @@ risk:
   # the trade is refused when the previous-day high (long) or low (short) sits
   # inside it (fno_confluence.room_check). Was 1.5.
   min_risk_reward: 3.0
+  # Room to the PDH (long) / PDL (short): 3R or more -> the 3R target; from
+  # min_r to 3R -> approved with the target snapped `ticks` inside the level
+  # (RBLX's 2.7R was refused before); under min_r -> refused.
+  target_snap:
+    enabled: true
+    min_r: 2.2
+    ticks: 2
   max_risk_reward: 10.0          # sanity ceiling (implausible targets rejected)
   # Stop loss must be a real structural level, not a round number guess.
   min_stop_distance_pct: 0.15    # SL closer than this = "ill-defined", rejected
@@ -261,6 +271,10 @@ screener:
   run_at: "09:00"
   history_days: 40
   vwap_pullback_atr: 0.5
+  # Dynamic Band B promotion: a Band B name may enter in the MORNING window
+  # when its regime trends its way (trending_up long / trending_down short)
+  # and its composite is +min_composite or more (-min_composite for a short).
+  band_b_promotion: {enabled: true, min_composite: 0.85}
   band_a: {size: 5, min_atr_pct: 2.0, min_rvol: 1.2}
   band_b: {size: 5, min_atr_pct: 2.0, min_rvol: 1.5,
            long_close_location: 0.80, short_close_location: 0.20}
@@ -317,7 +331,7 @@ weights:
 technical:
   timeframes: ["1m", "5m", "15m", "1d"]
   primary_timeframe: "5m"
-  emas: [9, 21, 50]
+  emas: [9, 20, 21, 50]      # 20: the trend-pullback level (fno_confluence)
   rsi_period: 14
   atr_period: 14
   vwap: true
@@ -378,6 +392,16 @@ fno_confluence:
   lookback_bars: 3           # the sweep / test within the last N bars
   # No real chain (no OI): block the reversal (strict) or allow on price alone.
   when_oi_unknown: "block"
+  # By regime (since 30 Sept 2026 — the midday logs refused sound trend
+  # trades for not being at yesterday's high/low):
+  #   rangebound / volatile   the pattern at the PDL (longs) / PDH (shorts),
+  #                           within rangebound_proximity_pct, with the OI rule
+  #   trending_up long,       no PDH/PDL: a pullback within trend_pullback_pct
+  #   trending_down short     of VWAP, the session POC or the 9/20 EMA
+  #   against the trend       the rangebound rule
+  regime_rules: true
+  rangebound_proximity_pct: 0.25
+  trend_pullback_pct: 0.30
   # Refuse a trade whose 1:3 target lies beyond the previous-day high (long) or
   # low (short).
   room_check: true

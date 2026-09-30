@@ -299,10 +299,23 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   "the PDH with put OI rising",
                   "on" if g("fno_confluence.enabled", False) else "off",
                   "fno_confluence.enabled"),
-            _rule("'At' the PDH / PDL means within",
-                  f"{g('fno_confluence.touch_atr', 0.15)} × ATR, in the last "
-                  f"{g('fno_confluence.lookback_bars', 3)} bars",
-                  "fno_confluence.touch_atr / lookback_bars"),
+            *([_rule("By regime — rangebound (and volatile): the reversal's extreme "
+                     "within this of the PDL (longs) / PDH (shorts), closed back inside, "
+                     "with the OI rule below",
+                     f"{g('fno_confluence.rangebound_proximity_pct', 0.25)}%, in the last "
+                     f"{g('fno_confluence.lookback_bars', 3)} bars",
+                     "fno_confluence.regime_rules / rangebound_proximity_pct"),
+               _rule("By regime — trending_up longs / trending_down shorts: no PDH/PDL "
+                     "needed; the pattern must form on a pullback within this of the "
+                     "intraday VWAP, the session POC or the 9/20 EMA, closing back on the "
+                     "trend side (no OI condition). Against the trend: the rangebound rule",
+                     f"{g('fno_confluence.trend_pullback_pct', 0.30)}%",
+                     "fno_confluence.trend_pullback_pct")]
+              if g("fno_confluence.regime_rules", False) else
+              [_rule("'At' the PDH / PDL means within",
+                     f"{g('fno_confluence.touch_atr', 0.15)} × ATR, in the last "
+                     f"{g('fno_confluence.lookback_bars', 3)} bars",
+                     "fno_confluence.touch_atr / lookback_bars")]),
             _rule("When the chain has no real open interest",
                   g("fno_confluence.when_oi_unknown", "block"),
                   "fno_confluence.when_oi_unknown"),
@@ -311,6 +324,13 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   f"{g('risk.min_risk_reward', 3.0)} target",
                   "on" if g("fno_confluence.room_check", True) else "off",
                   "fno_confluence.room_check"),
+            _rule("Target snapping: with less than 1:"
+                  f"{g('risk.min_risk_reward', 3.0)} of room but at least this much, the "
+                  f"trade is approved and the target snapped "
+                  f"{g('risk.target_snap.ticks', 2)} ticks inside the PDH (long) / PDL "
+                  f"(short); less room is refused",
+                  (f"{g('risk.target_snap.min_r', 2.2)}R" if g("risk.target_snap.enabled", False)
+                   else "off"), "risk.target_snap"),
         ],
     })
 
@@ -412,6 +432,11 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   f"{'on' if g('risk.one_position_per_symbol', True) else 'off'}, "
                   f"{g('risk.reentry_cooldown_minutes', 0)} min",
                   "risk.one_position_per_symbol / reentry_cooldown_minutes"),
+            _rule("A held symbol is not re-scanned for a new entry: the position "
+                  "manager runs its stop, target and pyramid adds. 'One position per "
+                  "symbol' blocks BASE entries only — pyramid adds are allowed",
+                  "on" if g("system.skip_held_symbols", True) else "off",
+                  "system.skip_held_symbols"),
             _rule("Portfolio heat: total lost if EVERY open position hit its stop "
                   "together, at most (a new trade takes what room is left)",
                   (f"{_pct(g('risk.max_portfolio_heat_pct'))} = "
@@ -452,6 +477,12 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                       f" (shorts only)", "one side", "screener.band_b"),
                 _rule("Morning window: Band A entries only",
                       f"{w.get('morning_from')}–{w.get('morning_to')}", "screener.windows"),
+                _rule("Band B promotion: a Band B name may enter in the morning window "
+                      "when its regime trends its way (trending_up long / trending_down "
+                      "short) and its composite is at least ± this",
+                      (f"{g('screener.band_b_promotion.min_composite', 0.85)}"
+                       if g("screener.band_b_promotion.enabled", False) else "off"),
+                      "screener.band_b_promotion"),
                 _rule("Midday freeze: no new entries (the chop filter)",
                       f"{w.get('morning_to')}–{w.get('afternoon_from')}", "screener.windows"),
                 _rule("Afternoon window: Band A/B VWAP pullbacks only (trend side, "
