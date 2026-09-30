@@ -41,6 +41,23 @@ from panaoptions.risk.guardrails import RiskManager
 log = get_logger("app")
 
 
+def completed_bars(candles: list, timeframe: str, now: datetime) -> list:
+    """Drop a last bar that has not closed yet (its start + the timeframe is
+    still in the future)."""
+    from datetime import timedelta
+    unit = {"m": 1, "h": 60}.get(timeframe[-1:], 0)
+    try:
+        minutes = int(timeframe[:-1]) * unit
+    except ValueError:
+        minutes = 0
+    if not minutes or not candles:
+        return candles
+    last = candles[-1].ts
+    if last.tzinfo is None and now.tzinfo is not None:
+        last = last.replace(tzinfo=now.tzinfo)
+    return candles[:-1] if last + timedelta(minutes=minutes) > now else candles
+
+
 class OptionsDesk:
     def __init__(self, cfg: Config | None = None, feed: Any | None = None) -> None:
         self.cfg = cfg or get_config()
@@ -1062,9 +1079,20 @@ class OptionsDesk:
                 f"{wait} minute{'s' if wait != 1 else ''}")
 
     async def _tape(self, symbol: str, now: datetime):
-        """One symbol's candles and session levels, fetched together."""
-        candles = await self.feed.candles(
-            symbol, self.cfg.get("technical.timeframe", "5m"))
+        """One symbol's candles and session levels, fetched together.
+
+        COMPLETED candles only (technical.completed_bars_only): the feed's last
+        5-minute bar is still forming, and judging a pattern on it — as the
+        desk did until 30 Sept — meant the VWAP pullback's rejection candle
+        was never seen closed (0 fired live, 62 on the same day's replay),
+        the PD sweep's reclaim close was a moving target, and a bar's volume
+        was measured a minute in ("volume below 1.5x the average", 695 times).
+        The backtests always judged closed bars; now the desk does too.
+        Stops and exits are untouched: they follow the live price."""
+        tf = str(self.cfg.get("technical.timeframe", "5m"))
+        candles = await self.feed.candles(symbol, tf)
+        if candles and bool(self.cfg.get("technical.completed_bars_only", True)):
+            candles = completed_bars(candles, tf, now)
         levels = await self._levels_for(symbol, now)
         return candles, levels
 

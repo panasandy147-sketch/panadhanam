@@ -180,6 +180,11 @@ premarket:
 
 technical:
   timeframe: "5m"
+  # Strategies judge CLOSED candles only — the feed's last bar is still
+  # forming. On a forming bar the VWAP pullback never fired live (0 on 30
+  # Sept; 62 on the same day's replay) and volume read a minute in looked
+  # thin. The backtests always used closed bars. Exits follow the live price.
+  completed_bars_only: true
   trend_timeframe: "15m"
   fast_ema: 9
   slow_ema: 20

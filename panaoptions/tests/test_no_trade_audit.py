@@ -305,3 +305,31 @@ def test_the_shipped_sweep_band_is_half_a_percent_everywhere(tmp_path, monkeypat
     assert c.get("strategies.pd_liquidity_sweep.proximity_pct") == 0.50
     assert c.get("fno.confluence.proximity_pct") == 0.50
     assert c.get("technical.midday_rvol.min") == 1.2
+
+
+def test_the_desk_judges_closed_candles_only(cfg, monkeypatch):
+    """The feed's last 5m bar is still forming: it is dropped for the hunt."""
+    from panaoptions.app import OptionsDesk, completed_bars
+    t0 = datetime(2026, 9, 30, 10, 0, tzinfo=ET)
+    bars = [Candle(ts=t0 + timedelta(minutes=5 * i), open=1, high=1, low=1, close=1,
+                   volume=1) for i in range(3)]                       # 10:00, 10:05, 10:10
+    assert len(completed_bars(bars, "5m", t0 + timedelta(minutes=14))) == 2   # 10:10 forming
+    assert len(completed_bars(bars, "5m", t0 + timedelta(minutes=15))) == 3   # closed at 10:15
+    assert len(completed_bars(bars, "1m", t0 + timedelta(minutes=10, seconds=30))) == 2
+
+    from tests.test_app import FakeFeed
+    desk = OptionsDesk(cfg=cfg, feed=FakeFeed())
+
+    async def candles(symbol, tf="5m", **k):
+        return bars
+
+    async def levels(symbol, now):
+        return None
+
+    monkeypatch.setattr(desk.feed, "candles", candles)
+    monkeypatch.setattr(desk, "_levels_for", levels)
+    got, _ = asyncio.run(desk._tape("SPY", t0 + timedelta(minutes=12)))
+    assert len(got) == 2
+    cfg.data["technical"]["completed_bars_only"] = False
+    got, _ = asyncio.run(desk._tape("SPY", t0 + timedelta(minutes=12)))
+    assert len(got) == 3
