@@ -544,9 +544,16 @@ volatility breakout**.
   bail-out), else the stop, else the close of the 4th session.
 - **Options:** 21–45 days to expiry, so time decay is small over a few days.
 
-To turn it on, add `SWING_DESK=on` to the root `.env`. `auto_update.sh` then
-starts it with its own book, journal and learned weights (`data/swing`,
-`journal/swing`), covering both markets in turn. Re-run its evidence any time:
+To start it, open a third Git Bash window and run:
+
+    cd panaoptions
+    ./start_swing.sh            # then open http://127.0.0.1:8102
+
+It keeps its own book, journal and learned weights (`data/swing`,
+`journal/swing`) and covers both markets in turn. Closing the window stops
+it; open positions stay in its book and are picked up on the next start.
+If you use `auto_update.sh` instead, add `SWING_DESK=on` to the root `.env`
+and it starts the desk for you. Re-run its evidence any time:
 
     ../.venv/Scripts/python.exe run.py --swing-backtest
 
