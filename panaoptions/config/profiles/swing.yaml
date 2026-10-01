@@ -59,7 +59,12 @@ risk:
 
 # The names the breakout was backtested on (India: markets/in.yaml's list,
 # which the backtest used too). A fixed list, not the auto top 10.
+# GLD — gold, on the SPDR Gold ETF's liquid options — has the strongest
+# evidence of all: option R +0.20 / +0.16 per trade over two years of hourly
+# bars and +0.20 on the last 60 days of 5-minute bars (151 / 151 / 28
+# trades). Gold rose through 2025-26, which flatters a breakout.
 universe:
-  symbols: ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD", "MSFT", "AMZN", "META", "GOOGL"]
+  symbols: ["GLD", "SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD", "MSFT", "AMZN", "META",
+            "GOOGL"]
 auto_watchlist:
   enabled: false

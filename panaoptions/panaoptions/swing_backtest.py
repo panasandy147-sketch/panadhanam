@@ -35,6 +35,8 @@ GROUPS = {
     "IN": ["^NSEI", "^NSEBANK", "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
            "TCS.NS", "SBIN.NS", "AXISBANK.NS"],
     "GOLD": ["GC=F"],
+    "GLD": ["GLD"],                 # the US gold ETF the swing desk trades
+    "GOLDBEES": ["GOLDBEES.NS"],    # India's gold ETF (panadhanam's gold desk)
 }
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
 
