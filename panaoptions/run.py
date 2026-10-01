@@ -442,6 +442,54 @@ async def _missed(market: str | None, days: int) -> int:
     return 0
 
 
+async def _session_report(market: str | None, days: int, symbols: str | None) -> int:
+    """The last `days` sessions replayed through today's rules — what fired,
+    what the desk would have taken, and how each ended — for both markets or
+    the one asked for. Built from market data alone, so it runs anywhere
+    (the daily cloud check); the desk's own audit log stays on its machine."""
+    from collections import Counter
+
+    from panaoptions import backtest_spreads as bt
+    from panaoptions import markets, validate
+    from panaoptions.data.provider import make_feed
+
+    home = get_config().market
+    try:
+        for code in ([market.upper()] if market else ["US", "IN"]):
+            cfg = _backtest_cfg(code, "Session report")
+            cur = cfg.currency
+            names = ([s.strip().upper() for s in symbols.split(",")] if symbols
+                     else list(cfg.symbols))
+            now = clock.now(cfg.timezone)
+            async with make_feed(cfg) as feed:
+                items = await bt.scan_history(names, days, feed, cfg, now)
+                results = await bt.replay(items, feed, cfg)
+            taken, skipped, locked, dd = validate.simulate(results, cfg, None)
+            print(f"\n== {cfg.market_name} — last {days} session(s), {len(names)} symbols, "
+                  f"capital {cur}{cfg.capital:,.0f} ==")
+            fired = Counter((str(r.ts)[:10], r.strategy) for r in results)
+            for (day, strategy), n in sorted(fired.items()):
+                print(f"  fired  {day}  {strategy:28s} {n}")
+            print("\n  Taken under today's rules:")
+            for x in taken:
+                print(f"  {x.entry[:16]}  {x.symbol:10s} {x.side:9s} {x.strategy:24s} "
+                      f"{x.contract:28s} x{x.quantity:<3d} {x.r:+.2f}R "
+                      f"{cur}{x.pnl:+,.0f}  {x.exit_reason}")
+            if not taken:
+                print("  (none)")
+            wins = sum(1 for x in taken if x.pnl > 0)
+            net = sum(x.pnl for x in taken)
+            avg = sum(x.r for x in taken) / len(taken) if taken else 0.0
+            print(f"\n  {len(taken)} trade(s), {wins} won, net {cur}{net:+,.0f} "
+                  f"({net / cfg.capital * 100:+.2f}%), {avg:+.2f}R a trade, "
+                  f"max drawdown {dd:.1f}%, locked-out days {len(locked)}")
+            if skipped:
+                print("  Not taken: " + "; ".join(f"{k} ({v})" for k, v in skipped.most_common()))
+    finally:
+        markets.activate(home)
+    return 0
+
+
 def _suggest_fix() -> int:
     """Print the one command that resolves the first finding carrying one.
 
@@ -1072,6 +1120,10 @@ def main() -> None:
                         help="follow the refused setups of the last DAYS audited "
                              "sessions to the close (default 1), with the coach's "
                              "read, into each day's audit (--market)")
+    parser.add_argument("--session-report", nargs="?", const=1, type=int,
+                        metavar="DAYS",
+                        help="the last DAYS sessions (default 1) replayed through "
+                             "today's rules: fired, taken, R and P&L (--market, --symbols)")
     parser.add_argument("--check-candles", action="store_true",
                         help="per symbol: candle source, last closed bar, stale or not "
                              "(--market, --symbols)")
@@ -1135,6 +1187,9 @@ def main() -> None:
         raise SystemExit(_reflect())
     if args.why:
         raise SystemExit(_why(args.market))
+    if args.session_report:
+        raise SystemExit(asyncio.run(_session_report(args.market, args.session_report,
+                                                     args.symbols)))
     if args.missed:
         raise SystemExit(asyncio.run(_missed(args.market, args.missed)))
     if args.check_candles:

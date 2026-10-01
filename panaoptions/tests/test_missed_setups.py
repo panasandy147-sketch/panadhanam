@@ -117,3 +117,43 @@ def test_the_coach_stays_silent_when_the_model_is_off(cfg):
 def test_the_friday_reflection_tunes_the_pd_sweep_too():
     from panaoptions.learning import reflect
     assert "pd_liquidity_sweep" in reflect.STRATEGIES
+
+
+def test_the_session_report_prints_fired_taken_and_totals(cfg, monkeypatch, capsys):
+    import run
+    from panaoptions import backtest_spreads as bt
+    from panaoptions import validate
+    from panaoptions.validate import Taken
+
+    class _Ctx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *a):
+            return False
+
+    class R:
+        ts, strategy = "2026-09-29T10:05", "PD Liquidity Sweep"
+
+    async def scan(*a, **k):
+        return ["x"]
+
+    async def replay(items, feed, cfg):
+        return [R()]
+
+    win = Taken("SPY", "2026-09-29T10:05-04:00", "2026-09-29T11:00-04:00", "LONG_CALL",
+                "PD Liquidity Sweep", "PDL Sweep", "SPY 2026-10-02 500C", 2, 80.0, 240.0,
+                3.0, "TARGET")
+    monkeypatch.setattr(run, "get_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("panaoptions.data.provider.make_feed", lambda c: _Ctx())
+    monkeypatch.setattr(bt, "scan_history", scan)
+    monkeypatch.setattr(bt, "replay", replay)
+    from collections import Counter
+    monkeypatch.setattr(validate, "simulate",
+                        lambda results, c, edge: ([win], Counter({"daily trade limit (3)": 2}),
+                                                  set(), 1.2))
+    assert asyncio.run(run._session_report("US", 1, "SPY")) == 0
+    out = capsys.readouterr().out
+    assert "fired  2026-09-29  PD Liquidity Sweep" in out
+    assert "+3.00R" in out and "1 trade(s), 1 won, net $+240" in out
+    assert "daily trade limit (3) (2)" in out
