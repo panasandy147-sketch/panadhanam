@@ -68,7 +68,7 @@ strategies:
     from: "09:45"
     to:   "15:00"
   poc_bounce:
-    enabled: true               # TRIAL from 1 Oct (the user's call)
+    enabled: false              # off again 1 Oct: -1.01R a trade over 40 sessions
     from: "10:00"
     to:   "15:00"
   # TRIAL from 1 Oct (the user's call): on, as on the default desk.

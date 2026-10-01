@@ -503,9 +503,10 @@ strategies:
     # OFF: the worst strategy in every backtest run — US -1.08R a trade at a
     # 10% win rate, India -0.32R (validation, 29 Sept 2026). Re-enable with
     # true and re-run `python run.py --backtest` to see whether it earns back.
-    # TRIAL from 1 Oct 2026, the user's call: ON for the US (paper) as for
-    # India, against the backtests above. Set false to end it.
-    enabled: true
+    # OFF again for the US from 1 Oct 2026 (the user's call): -1.01R a trade
+    # over 40 sessions on the 0DTE desk, a loser in every test. India runs its
+    # own trial (markets/in.yaml).
+    enabled: false
     from: "10:00"
     to:   "15:45"
     away_atr: 1.0

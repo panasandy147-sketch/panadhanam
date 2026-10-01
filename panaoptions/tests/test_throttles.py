@@ -287,13 +287,15 @@ def test_poc_bounce_is_off_on_the_profiles_and_on_trial_on_the_default_desk():
     assert cfg.get("strategies.poc_bounce.enabled") is False
     assert cfg.get("strategies.va_rejection.enabled") is False
     z = Config(profile="zerodte")          # the user's desk: on trial too
-    for key in ("poc_bounce", "va_rejection", "volatility_breakout"):
+    for key in ("va_rejection", "volatility_breakout"):
         assert z.get(f"strategies.{key}.enabled") is True
+    assert z.get("strategies.poc_bounce.enabled") is False     # off again 1 Oct
     from panaoptions.engine.strategies import ALL
     from panaoptions.models import SetupType as ST
     cfg = Config()
     enabled = {cls(cfg).name for cls in ALL if cls(cfg).enabled}
-    assert {ST.POC_BOUNCE, ST.VA_REJECTION, ST.VOLATILITY_BREAKOUT} <= enabled
+    assert {ST.VA_REJECTION, ST.VOLATILITY_BREAKOUT} <= enabled
+    assert ST.POC_BOUNCE not in enabled                       # off again 1 Oct
     assert ST.ORB_VWAP not in enabled
 
 
