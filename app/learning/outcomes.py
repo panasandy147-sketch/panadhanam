@@ -85,9 +85,12 @@ class OutcomeTracker:
                     log.info("TIME STOP %s — no bounce within %s min, exiting at market",
                              row["symbol"],
                              self.cfg.get("risk.time_stop_minutes", 30))
+                # What closed it, as recorded in the audit's exit_detail: a
+                # stop or target hit was labelled "time_stop" (1 Oct, India).
                 closed.append(await self._close(
                     row, exit_price, status,
-                    "square_off" if timed_out else "time_stop"))
+                    "stop" if hit_stop else "target" if hit_target
+                    else "square_off" if timed_out else "time_stop"))
             else:
                 direction = 1 if is_long else -1
                 if self.risk is not None:
@@ -160,7 +163,7 @@ class OutcomeTracker:
                  "side": row["side"],
                  "status": status.value, "pnl": round(pnl, 2),
                  "r_multiple": round(r_multiple, 3),
-                 "exit_price": round(exit_price, 2),
+                 "exit_price": round(exit_price, 2), "exit_detail": detail,
                  "exit_reason": why_sold({
                      **row, "status": status.value, "exit_detail": detail,
                      "exit_price": round(exit_price, 2),

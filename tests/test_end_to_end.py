@@ -281,6 +281,7 @@ async def test_hitting_the_target_sells_for_a_profit_and_says_so(engine, monkeyp
     closed = await engine.outcomes.poll()
     [trade] = [c for c in closed if c["signal_id"] == row["id"]]
     assert trade["status"] == SignalStatus.CLOSED_TARGET.value
+    assert trade["exit_detail"] == "target"
     assert trade["pnl"] > 0
     assert trade["r_multiple"] == pytest.approx(row["risk_reward"], abs=0.05)
     assert trade["exit_price"] == pytest.approx(row["target"])
@@ -295,6 +296,8 @@ async def test_hitting_the_stop_sells_for_one_r_and_says_so(engine, monkeypatch)
     closed = await engine.outcomes.poll()
     [trade] = [c for c in closed if c["signal_id"] == row["id"]]
     assert trade["status"] == SignalStatus.CLOSED_STOP.value
+    # 1 Oct: a stop hit was recorded as exit_detail "time_stop"
+    assert trade["exit_detail"] == "stop"
     assert trade["pnl"] < 0
     # A stop is a planned loss of 1R — not more, because the exit is AT the stop.
     assert trade["r_multiple"] == pytest.approx(-1.0, abs=0.01)
