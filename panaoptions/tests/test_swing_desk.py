@@ -248,3 +248,26 @@ def test_the_backtest_walks_entry_stop_and_the_first_profitable_open():
     assert t["long"] and t["how"] == "FIRST_PROFITABLE_OPEN" and t["held"] == 1
     assert round(t["ur"], 2) == 0.5          # entry 102, stop 100, out at 103
     assert t["or"] is not None and t["or"] > 0
+
+
+def test_the_swing_desk_hunts_its_whole_list_without_the_screen(cfg, monkeypatch):
+    import asyncio
+
+    from panaoptions.models import PreMarketRead
+    now = datetime(2026, 9, 30, 10, 30, tzinfo=ET)
+    desk = _desk(cfg, monkeypatch, now)
+    cfg.data["universe"]["symbols"] = ["SPY", "QQQ", "AAPL"]
+    desk.screened = [PreMarketRead(symbol=s, passed=False) for s in ("SPY", "QQQ", "AAPL")]
+    seen = []
+
+    async def tape(symbol, now):
+        seen.append(symbol)
+        raise RuntimeError("no tape in this test")   # read, then skipped
+    monkeypatch.setattr(desk, "_tape", tape)
+    asyncio.run(desk._hunt(now))
+    assert sorted(seen) == ["AAPL", "QQQ", "SPY"]
+    # with the screen asked for, nothing that failed it is read
+    cfg.data["swing"]["use_screen"] = True
+    seen.clear()
+    asyncio.run(desk._hunt(now))
+    assert seen == []

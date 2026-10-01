@@ -28,6 +28,7 @@
 
 swing:
   enabled: true
+  use_screen: false        # hunt the whole list (the backtest had no screen)
   strategies: ["volatility_breakout"]
   k: 0.5
   trend_days: 20
@@ -55,3 +56,10 @@ risk:
   stop_mode: "underlying"
   disaster_stop_pct: 60.0  # a 30-day option moves less; the open is the stop
   max_hold_minutes: null
+
+# The names the breakout was backtested on (India: markets/in.yaml's list,
+# which the backtest used too). A fixed list, not the auto top 10.
+universe:
+  symbols: ["SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD", "MSFT", "AMZN", "META", "GOOGL"]
+auto_watchlist:
+  enabled: false

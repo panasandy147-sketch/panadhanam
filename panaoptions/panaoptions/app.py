@@ -679,7 +679,14 @@ class OptionsDesk:
                 ts=now)
             return []
 
-        candidates = [r.symbol for r in self.screened if r.passed]
+        if self.cfg.get("swing.enabled", False) and not bool(
+                self.cfg.get("swing.use_screen", False)):
+            # The swing desk hunts its whole list: the breakout was
+            # backtested without the 1% gap / RVOL screen, and a quiet open
+            # is exactly where its range expansion starts.
+            candidates = list(self.cfg.symbols)
+        else:
+            candidates = [r.symbol for r in self.screened if r.passed]
         if not candidates:
             self.activity.add("hunt.skip", "nothing passed the pre-market screen",
                               ts=now)
