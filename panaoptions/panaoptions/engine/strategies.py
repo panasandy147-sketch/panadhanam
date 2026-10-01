@@ -96,6 +96,98 @@ def volume_multiple(cfg, base: float, when) -> float:
     return base
 
 
+def rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder's RSI."""
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+    out = 100 - 100 / (1 + gain / loss.where(loss > 0))
+    out = out.where(loss > 0, 100.0)                     # no losses: 100
+    return out.where((gain > 0) | (loss > 0), 50.0)      # no movement: 50
+
+
+def perdices_check(df5: pd.DataFrame, long: bool, cfg) -> tuple[str, str]:
+    """Pau Perdices' pullback (2025 World Cup of Forex champion): with the
+    trend, the pullback retraces fib_min..fib_max (38.2-50%) of the impulse
+    before it, and RSI diverges at the pullback's extreme. ('', note) when it
+    holds, else (why not, '')."""
+    g = cfg.get
+    look = int(g("strategies.vwap_ema_pullback.perdices.lookback_bars", 24))
+    lo_f = float(g("strategies.vwap_ema_pullback.perdices.fib_min", 0.382))
+    hi_f = float(g("strategies.vwap_ema_pullback.perdices.fib_max", 0.5))
+    win = df5.iloc[-look:]
+    if len(win) < 10:
+        return "too few bars to measure the impulse", ""
+    highs, lows = win["high"].to_numpy(), win["low"].to_numpy()
+    if long:
+        top = int(highs.argmax())
+        if top < 2 or top >= len(win) - 1:
+            return "no impulse high followed by a pullback", ""
+        base, peak = float(lows[:top + 1].min()), float(highs[top])
+        pull = float(lows[top:].min())
+        depth = (peak - pull) / (peak - base) if peak > base else 0.0
+    else:
+        bot = int(lows.argmin())
+        if bot < 2 or bot >= len(win) - 1:
+            return "no impulse low followed by a pullback", ""
+        base, peak = float(highs[:bot + 1].max()), float(lows[bot])
+        pull = float(highs[bot:].max())
+        depth = (pull - peak) / (base - peak) if base > peak else 0.0
+    if not lo_f <= depth <= hi_f:
+        return (f"the pullback retraced {depth:.0%} of the impulse — Perdices "
+                f"wants {lo_f:.0%}-{hi_f:.0%}"), ""
+    note = f"pullback retraced {depth:.0%} of the impulse {base:.2f}-{peak:.2f}"
+    if bool(g("strategies.vwap_ema_pullback.perdices.rsi_divergence", True)):
+        r = rsi(df5["close"], int(g("strategies.vwap_ema_pullback.perdices.rsi_period", 14)))
+        half = max(3, look // 4)
+        recent, before = df5.iloc[-half:], df5.iloc[-look:-half]
+        r_recent, r_before = r.iloc[-half:], r.iloc[-look:-half]
+        if long:
+            p_now, p_then = recent["low"].min(), before["low"].min()
+            q_now, q_then = r_recent[recent["low"].idxmin()], r_before[before["low"].idxmin()]
+            # regular (lower low, higher RSI) or hidden (higher low, lower RSI)
+            div = (p_now < p_then and q_now > q_then) or (p_now > p_then and q_now < q_then)
+        else:
+            p_now, p_then = recent["high"].max(), before["high"].max()
+            q_now, q_then = r_recent[recent["high"].idxmax()], r_before[before["high"].idxmax()]
+            div = (p_now > p_then and q_now < q_then) or (p_now < p_then and q_now > q_then)
+        if not div:
+            return "no RSI divergence at the pullback", ""
+        note += f"; RSI divergence ({q_then:.0f} -> {q_now:.0f})"
+    return "", note
+
+
+def td_setup(close: pd.Series) -> tuple[int, int]:
+    """DeMark TD Setup counts on the latest bar: (buy, sell). A buy count
+    rises while each close is below the close 4 bars earlier; 9 is a
+    completed buy setup (selling exhaustion), and the mirror for a sell."""
+    buy = sell = 0
+    c = close.to_numpy()
+    for i in range(4, len(c)):
+        buy = buy + 1 if c[i] < c[i - 4] else 0
+        sell = sell + 1 if c[i] > c[i - 4] else 0
+    return buy, sell
+
+
+def demark_check(df5: pd.DataFrame, long: bool, cfg) -> tuple[str, str]:
+    """Kevin McCormick (2021 World Cup futures champion) times reversals with
+    DeMark's Sequential: a reversal long only after a completed TD buy setup
+    (9 closes each below the close 4 earlier) within `within_bars`, a short
+    only after a completed sell setup."""
+    within = int(cfg.get("demark.within_bars", 3))
+    need = int(cfg.get("demark.count", 9))
+    close = df5["close"]
+    best = 0
+    for k in range(within):
+        cut = close.iloc[: len(close) - k] if k else close
+        b, s = td_setup(cut.iloc[-60:])
+        best = max(best, b if long else s)
+    if best >= need:
+        return "", f"DeMark TD {'buy' if long else 'sell'} setup {best} — the prior move is exhausted"
+    return (f"no completed DeMark TD {'buy' if long else 'sell'} setup ({best} of "
+            f"{need}) — the move it reverses is not exhausted"), ""
+
+
 def _base(symbol: str, df: pd.DataFrame, strategy: SetupType) -> Setup:
     return Setup(symbol=symbol, ts=df.index[-1].to_pydatetime(), strategy=strategy)
 
@@ -263,6 +355,14 @@ class VwapEmaPullback(Strategy):
                 f"{'high' if long_side else 'low'}")
             return setup
 
+        if bool(self.cfg.get("strategies.vwap_ema_pullback.perdices.enabled", False)):
+            why, note = perdices_check(df5, long_side, self.cfg)
+            if why:
+                setup.blockers.append(why)
+                return setup
+        else:
+            note = ""
+
         setup.direction = Direction.LONG if long_side else Direction.SHORT
         setup.indicators = snapshot
         setup.pattern = rejection
@@ -273,7 +373,7 @@ class VwapEmaPullback(Strategy):
             f"pullback into the {'9 EMA' if abs(snapshot.close - snapshot.ema_fast) < abs(snapshot.close - snapshot.vwap) else 'VWAP'}",
             f"{rejection} taking out the previous candle's "
             f"{'high' if long_side else 'low'}",
-        ]
+        ] + ([note] if note else [])
         if _volume_ok(snapshot, volume_multiple(self.cfg, float(self.cfg.get(
                 "strategies.vwap_ema_pullback.volume_multiple", 1.0)), df5.index[-1])):
             setup.confirmations.append(_volume_note(snapshot,
@@ -426,6 +526,13 @@ def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
                 attempts.append(skipped)
                 continue
         setup = strategy.evaluate(symbol, df5, df15, levels)
+        if (setup.triggered and bool(cfg.get("demark.enabled", False))
+                and strategy.key in set(cfg.get("demark.strategies") or [])):
+            why, note = demark_check(df5, setup.direction is Direction.LONG, cfg)
+            if why:
+                setup.blockers.append(why)
+            else:
+                setup.confirmations.append(note)
         if strategy.key in gated and setup.triggered and sweep:
             want = Direction.LONG if sweep["direction"] > 0 else Direction.SHORT
             if setup.direction is not want:

@@ -366,6 +366,11 @@ strategies:
     to:   "15:45"
     volume_multiple: 1.0
     touch_atr: 0.35      # how close to the line counts as a pullback
+    # Pau Perdices (2025 World Cup of Forex champion): only a pullback of
+    # fib_min-fib_max of the impulse before it, with RSI diverging at its
+    # extreme. Off until the walk-forward says it earns.
+    perdices: {enabled: false, lookback_bars: 24, fib_min: 0.382, fib_max: 0.5,
+               rsi_divergence: true, rsi_period: 14}
   liquidity_sweep:
     enabled: true
     from: "09:45"
@@ -792,6 +797,18 @@ strategy_weights:
   va_rejection: 1.0
   lvn_acceleration: 1.0
   poc_bounce: 1.0
+
+# Kevin McCormick (2021 World Cup futures champion) times reversals with
+# DeMark's Sequential. On: the reversal strategies listed take a long only
+# after a completed TD buy setup (9 closes each below the close 4 bars
+# earlier) within within_bars, a short only after a sell setup. Off until
+# the walk-forward says it earns.
+demark:
+  enabled: false
+  count: 9
+  within_bars: 3
+  strategies: ["pd_liquidity_sweep", "liquidity_sweep", "va_rejection", "poc_bounce",
+               "candlestick_at_level"]
 
 learning:
   # After every close: each fired setup the desk refused is followed on the
