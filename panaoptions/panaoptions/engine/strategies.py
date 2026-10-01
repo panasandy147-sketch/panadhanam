@@ -511,11 +511,8 @@ def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
     gated = pd_gate_strategies(cfg)
     sweep: dict | None | bool = False           # not looked yet
 
-    only = set(cfg.get("swing.strategies") or []) if cfg.get("swing.enabled", False) else set()
     for cls in ALL:
         strategy = cls(cfg)
-        if only and strategy.key not in only:
-            continue
         if not strategy.enabled or not strategy.in_window(df5):
             continue
         if strategy.key in gated:
@@ -966,11 +963,12 @@ class VolatilityBreakout(Strategy):
 
     name = SetupType.VOLATILITY_BREAKOUT
     window = ("09:45", "14:30")
+    swing = False               # SwingBreakout: the 1-4 day edition
 
     def evaluate(self, symbol, df5, df15, levels) -> Setup:
         setup = _base(symbol, df5, self.name)
         g = self.cfg.get
-        swing = bool(g("swing.enabled", False))
+        swing = self.swing
         k = float(g("swing.k", 0.5) if swing else g("strategies.volatility_breakout.k", 0.5))
         prev_range = float(levels.previous_high or 0) - float(levels.previous_low or 0)
         if prev_range <= 0:
@@ -1008,6 +1006,9 @@ class VolatilityBreakout(Strategy):
                            and snapshot.ema_fast < snapshot.ema_slow)
         if not (long_break or short_break):
             setup.blockers.append(
+                f"no first touch today of open {day_open:.2f} ± {k:g} x yesterday's "
+                f"range {prev_range:.2f} ({down:.2f} / {up:.2f}) with the "
+                f"{int(g('swing.trend_days', 20))}-day trend" if swing else
                 f"no fresh 5m close beyond open {day_open:.2f} ± {k:g} x yesterday's "
                 f"range {prev_range:.2f} ({down:.2f} / {up:.2f}) with VWAP and the EMAs")
             return setup
@@ -1019,8 +1020,11 @@ class VolatilityBreakout(Strategy):
         side = "above" if long_break else "below"
         setup.entry_trigger = float(bar["close"])
         if swing:
+            setup.swing = True
             setup.min_dte_override = int(g("swing.min_dte", 21))
             setup.max_dte_override = int(g("swing.max_dte", 45))
+            setup.delta_band = (float(g("swing.min_delta", 0.40)),
+                                float(g("swing.max_delta", 0.55)))
         setup.key_level = level
         setup.key_level_source = f"open {'+' if long_break else '-'} {k:g} x previous range"
         setup.confirmations = [
@@ -1060,6 +1064,50 @@ def _daily_slope(df5: pd.DataFrame, days: int) -> float | None:
 
 
 VolatilityBreakout._daily_slope = staticmethod(_daily_slope)
+
+
+class SwingBreakout(VolatilityBreakout):
+    """The volatility breakout as the swing book trades it (`swing.*`): held
+    1-4 days on a 21-45 day option, beside the same-day strategies.
+
+    As backtested on two years of hourly bars: the first bar whose HIGH
+    (LOW) reaches today's open +/- swing.k x yesterday's range, with the
+    swing.trend_days trend, no VWAP / EMA condition; stop today's open; out
+    at the first later session that OPENS in profit, else the stop, else
+    after swing.max_hold_days sessions. Not in ALL: the desk hunts it over
+    its own list (swing.symbols) with evaluate_swing, screen or no screen.
+    """
+
+    name = SetupType.SWING_BREAKOUT
+    window = ("09:45", "15:30")
+    swing = True
+
+    @property
+    def opens(self) -> time:
+        return self._parse(self.cfg.get("swing.from", self.window[0]))
+
+    @property
+    def closes(self) -> time:
+        return self._parse(self.cfg.get("swing.to", self.window[1]))
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.cfg.get("swing.enabled", False))
+
+
+def evaluate_swing(symbol: str, candles: list[Candle], levels: SessionLevels,
+                   cfg) -> tuple[Setup | None, list[Setup]]:
+    """The swing book's check on one symbol: (setup or None, [attempt]) —
+    the same shape as evaluate_all, so the desk takes both the same way."""
+    strategy = SwingBreakout(cfg)
+    if not strategy.enabled:
+        return None, []
+    df5 = localise(ta.to_frame(candles),
+                   str(cfg.get("session.timezone", "America/New_York")))
+    if len(df5) < 21 or not strategy.in_window(df5):
+        return None, []
+    setup = strategy.evaluate(symbol, df5, ta.resample(df5, "15min"), levels)
+    return (setup if setup.triggered else None), [setup]
 
 LAST: list[type[Strategy]] = [VolatilityBreakout]   # after every other family
 

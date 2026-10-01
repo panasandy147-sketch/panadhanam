@@ -840,3 +840,51 @@ notify:
   discord_webhook_url: ""
   telegram_bot_token: ""
   telegram_chat_id: ""
+
+# ==========================================================================
+# The swing book — 1-4 day options beside the same-day strategies, in the
+# same desk and the same paper account (on in profiles/zerodte.yaml).
+#
+# One strategy, the one with evidence: Larry Williams' volatility breakout,
+# k 0.5 x yesterday's range, only with the 20-day trend. On two years of
+# hourly bars (Oct 2024 - Sep 2026, ~30-day at-the-money options, Black-
+# Scholes) it made, per trade: US +0.16R then +0.05R, India +0.20R then
+# +0.12R, gold (GLD) +0.20R then +0.16R — a small edge, positive in every
+# market in both years. `python run.py --swing-backtest` re-runs it.
+#
+#   Entry  the first 5m bar today whose high reaches open + k x yesterday's
+#          range (calls; puts: the low reaches open - k x range), the
+#          trend_days trend agreeing — on every name in `symbols`, screen
+#          or no screen (the backtest had none)
+#   Stop   today's open, on the underlying, every bar until it closes
+#   Exit   the first later session that OPENS in profit (Williams'
+#          bail-out), else the stop, else the close of the max_hold_days-th
+#          session. Never the same-day exits: no 15:45 square-off, no
+#          scale-out or trail, no time stop, no breakeven tighten.
+#   Option min_dte-max_dte days to expiry (never a shorter fallback),
+#          min_delta-max_delta, up to max_contract_price a share
+#   Room   its own max_open slots, outside risk.max_open_trades and
+#          risk.max_daily_trades; the account-wide caps (2% risk a trade,
+#          max_total_deployed_pct, the 3% daily breaker) still apply
+#
+# On Auto, a swing position open when its market closes is parked in that
+# market's book while the other market trades, and picked up again at its
+# next session.
+# ==========================================================================
+swing:
+  enabled: false
+  only: false              # true: the swing book alone (profile swing)
+  symbols: []              # empty: the desk's universe
+  max_open: 2
+  k: 0.5
+  trend_days: 20
+  from: "09:45"
+  to: "15:30"
+  first_profitable_open: true
+  max_hold_days: 4
+  min_dte: 21
+  max_dte: 45
+  min_delta: 0.40
+  max_delta: 0.55
+  max_contract_price: 20.00   # $2,000 a contract
+  disaster_stop_pct: 60.0     # the backstop on the premium; the open is the stop

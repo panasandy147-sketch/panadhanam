@@ -678,32 +678,59 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     })
 
     if g("swing.enabled", False):
+        alone = bool(g("swing.only", False))
+        symbols = list(g("swing.symbols") or []) or list(getattr(cfg, "symbols", []) or [])
         sections.insert(0, {
-            "title": "The swing desk (1-4 day options)",
-            "intro": ("This desk holds positions overnight. One strategy, the one "
-                      "with evidence on two years of hourly bars in the US, India and "
-                      "gold: Larry Williams' volatility breakout, exited by his "
-                      "first-profitable-open rule."),
+            "title": "The swing book (1-4 day options)",
+            "intro": (("This desk trades the swing book alone. " if alone else
+                       "Beside the same-day strategies, in the same paper account, "
+                       "this desk holds a few positions overnight. ")
+                      + "One strategy, the one with evidence on two years of hourly "
+                      "bars in the US, India and gold: Larry Williams' volatility "
+                      "breakout, exited by his first-profitable-open rule."),
             "rules": [
+                _rule("Hunted on every one of these, screen or no screen",
+                      ", ".join(symbols) or "—", "swing.symbols"),
                 _rule("Entry: the first 5m bar today whose high reaches today's open + "
                       "this share of yesterday's range (calls; puts: the low reaches "
                       "the open minus it)", f"{g('swing.k', 0.5)} x range", "swing.k"),
                 _rule("Only with the trend: yesterday's close against the close this "
                       "many sessions before", f"{g('swing.trend_days', 20)} days",
                       "swing.trend_days"),
+                _rule("Entries between", f"{g('swing.from', '09:45')}–{g('swing.to', '15:30')}",
+                      "swing.from / swing.to"),
                 _rule("Stop: today's open, on the underlying, checked every bar until "
-                      "the trade closes", "the open", "strategies.volatility_breakout"),
+                      "the trade closes", "the open", "swing"),
                 _rule("Exit: the first later session that OPENS in profit (Larry "
                       "Williams' bail-out)",
                       "on" if g("swing.first_profitable_open", True) else "off",
                       "swing.first_profitable_open"),
                 _rule("…else closed at the end of this session (the entry day is 0)",
                       g("swing.max_hold_days", 4), "swing.max_hold_days"),
-                _rule("Options: days to expiry (theta is small over a few days)",
+                _rule("Options: days to expiry (theta is small over a few days; never "
+                      "a shorter fallback)",
                       f"{g('swing.min_dte', 21)}–{g('swing.max_dte', 45)}",
                       "swing.min_dte / swing.max_dte"),
-                _rule("No intraday scale-out or trail, and no 1:3 room check", "—",
-                      "risk.scale_out_r / room_check"),
+                _rule("Options: delta", f"{g('swing.min_delta', 0.40)}–"
+                      f"{g('swing.max_delta', 0.55)}", "swing.min_delta / swing.max_delta"),
+                _rule("Options: the most a contract may cost a share",
+                      f"{cfg.currency if hasattr(cfg, 'currency') else '$'}"
+                      f"{float(g('swing.max_contract_price', 20.0)):,.2f}",
+                      "swing.max_contract_price"),
+                _rule("Swing positions held at once (their own slots, outside the "
+                      "same-day open and daily limits)", g("swing.max_open", 2),
+                      "swing.max_open"),
+                _rule("Premium backstop (the open is the real stop)",
+                      f"{g('swing.disaster_stop_pct', 60)}%", "swing.disaster_stop_pct"),
+                _rule("Never the same-day exits: no square-off at the close, no "
+                      "scale-out or trail, no time stop, no breakeven tighten, no 1:3 "
+                      "room check", "—", "swing"),
+                _rule("Shared with the whole account: 2% risk a trade, the deployed "
+                      "ceiling, the daily circuit breaker", "—",
+                      "risk.max_risk_per_trade_pct / risk.max_total_deployed_pct"),
+                _rule("On Auto: a swing position open when its market closes is "
+                      "parked in that market's book while the other market trades",
+                      "—", "markets"),
             ],
         })
 

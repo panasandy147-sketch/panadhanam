@@ -442,14 +442,25 @@ class OptionsDesk:
                     "reason": f"unknown market {code!r}"}
         if code == self.cfg.market:
             return {"switched": False, "market": code, "reason": "already active"}
-        if self.ledger.open_trades:
+        held = list(self.ledger.open_trades.values())
+        # Swing positions held overnight are parked in their own market's
+        # book (each market has its own database) while the other market
+        # trades, and picked up again when it comes back: its session is
+        # over, so there is nothing to price or manage until then. A
+        # same-day position, or any position during its market's hours,
+        # still blocks the switch.
+        parking = bool(held) and all(t.hold_overnight for t in held) \
+            and not markets.in_hours(self.cfg.market)
+        if held and not parking:
             return {"switched": False, "market": self.cfg.market,
-                    "reason": (f"{len(self.ledger.open_trades)} position(s) open on "
+                    "reason": (f"{len(held)} position(s) open on "
                                f"{self.cfg.market} — they close by their own rules "
                                f"first; the new market's feed could not price them")}
         async with self._lock:
             old = self.feed
             previous = self.cfg.market
+            if parking:
+                store.save_open_book(held)
             self._rebuild(code, feed_factory or self._feed_factory)
             store.init()
             self._restore_open_book()
@@ -460,7 +471,11 @@ class OptionsDesk:
                 pass
         self.activity.add("market", f"switched {previous} → {code} "
                           f"({markets.NAMES.get(code, code)}), capital "
-                          f"{self.cfg.currency}{self.cfg.capital:,.0f}", level="good")
+                          f"{self.cfg.currency}{self.cfg.capital:,.0f}"
+                          + (f"; {len(held)} swing position(s) parked on {previous} "
+                             f"until its next session ("
+                             + ", ".join(t.contract_label for t in held) + ")"
+                             if parking else ""), level="good")
         log.info("market switched %s → %s", previous, code)
         return {"switched": True, "market": code, "feed_connected": connected}
 
@@ -497,8 +512,7 @@ class OptionsDesk:
         for trade in restored:
             self.ledger.open_trades[trade.id] = trade
         if restored:
-            self.risk.state.open_trades = len(self.ledger.open_trades)
-            self.risk.state.deployed = self.ledger._deployed()
+            self.ledger.sync_counts()
             labels = ", ".join(t.contract_label for t in restored)
             log.info("restored %d open position(s): %s", len(restored), labels)
             self.activity.add("restored", f"{len(restored)} open position(s) "
@@ -583,8 +597,7 @@ class OptionsDesk:
             if self.ledger.open_trades:
                 # Swing positions carried overnight still hold capital and a
                 # slot: a new day's counters start from them, not from zero.
-                self.risk.state.open_trades = len(self.ledger.open_trades)
-                self.risk.state.deployed = self.ledger._deployed()
+                self.ledger.sync_counts()
 
         phase = clock.session_phase(self.cfg, now)
         result: dict[str, Any] = {"phase": phase, "ts": now.isoformat(),
@@ -660,33 +673,46 @@ class OptionsDesk:
         if self.risk.state.halted:
             self.scanning = ""
             return []
+        # Two books share the desk: the same-day strategies on what passed
+        # the screen, within risk.max_open_trades / max_daily_trades, and the
+        # swing book (swing.enabled) on its own list within swing.max_open.
+        held = list(self.ledger.open_trades.values())
+        day_held = sum(1 for t in held if not t.hold_overnight)
+        swing_held = len(held) - day_held
+        swing_on = bool(self.cfg.get("swing.enabled", False))
+        day_on = not (swing_on and bool(self.cfg.get("swing.only", False)))
         max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
-        if max_daily and self.risk.state.trades_taken >= max_daily:
-            self.scanning = ""
+        max_open = int(self.cfg.get("risk.max_open_trades", 1))
+        swing_max = int(self.cfg.get("swing.max_open", 2) or 0)
+        day_room = day_on
+        if day_on and max_daily and self.risk.state.trades_taken >= max_daily:
+            day_room = False
             self.activity.add(
                 "hunt.skip", f"{self.risk.state.trades_taken} of {max_daily} trades "
                 f"taken today — the daily limit; no new entries until tomorrow", ts=now)
-            return []
-        max_open = int(self.cfg.get("risk.max_open_trades", 1))
-        if len(self.ledger.open_trades) >= max_open:
+        elif day_on and day_held >= max_open:
             # Not scanning anything, and the panel must not keep showing the
             # last symbol it looked at as though it still were.
-            self.scanning = ""
+            day_room = False
             self.activity.add(
                 "hunt.skip",
-                f"holding {len(self.ledger.open_trades)} of {max_open} "
+                f"holding {day_held} of {max_open} "
                 f"allowed — not looking for new trades until one closes",
                 ts=now)
+        swing_room = swing_on and swing_held < swing_max
+        if swing_on and not swing_room:
+            self.activity.add("hunt.skip", f"swing book full: {swing_held} of "
+                              f"{swing_max} held", ts=now)
+        if not (day_room or swing_room):
+            self.scanning = ""
             return []
 
-        if self.cfg.get("swing.enabled", False) and not bool(
-                self.cfg.get("swing.use_screen", False)):
-            # The swing desk hunts its whole list: the breakout was
-            # backtested without the 1% gap / RVOL screen, and a quiet open
-            # is exactly where its range expansion starts.
-            candidates = list(self.cfg.symbols)
-        else:
-            candidates = [r.symbol for r in self.screened if r.passed]
+        day_list = [r.symbol for r in self.screened if r.passed] if day_room else []
+        # The swing book hunts its whole list: the breakout was backtested
+        # without the 1% gap / RVOL screen, and a quiet open is exactly where
+        # its range expansion starts.
+        swing_list = self._swing_symbols() if swing_room else []
+        candidates = list(dict.fromkeys(day_list + swing_list))
         if not candidates:
             self.activity.add("hunt.skip", "nothing passed the pre-market screen",
                               ts=now)
@@ -708,6 +734,7 @@ class OptionsDesk:
         # Said once per cycle, not once per symbol: the window is the same for
         # all of them, and five copies of it would bury everything else.
         window_reported = False
+        day_full_reported = False
         judged = []
         for symbol, tape in zip(candidates, tapes, strict=False):
             if isinstance(tape, Exception):
@@ -720,15 +747,18 @@ class OptionsDesk:
                 why = self._stale.get(symbol) or "no candles from any source"
                 self.activity.add("hunt.skip", f"{symbol} — {why}", level="warn", ts=now)
                 continue
-            judged.append((symbol, candles, session_levels, *strategies.evaluate_all(
-                symbol, candles, session_levels, self.cfg)))
-            # Every strategy's check, tallied for `run.py --why`: which ones
-            # looked, how often they fired, and why not when they did not.
-            try:
-                store.tally_checks(now.date().isoformat(), judged[-1][4], symbol)
-            except Exception as exc:                    # noqa: BLE001
-                log.debug("could not tally the strategy checks: %s", exc)
-            self._maybe_look(symbol, candles, session_levels, judged[-1][4], now)
+            books = ([strategies.evaluate_all] if symbol in day_list else []) + (
+                [strategies.evaluate_swing] if symbol in swing_list else [])
+            for evaluate in books:
+                judged.append((symbol, candles, session_levels, *evaluate(
+                    symbol, candles, session_levels, self.cfg)))
+                # Every strategy's check, tallied for `run.py --why`: which
+                # ones looked, how often they fired, and why not when not.
+                try:
+                    store.tally_checks(now.date().isoformat(), judged[-1][4], symbol)
+                except Exception as exc:                # noqa: BLE001
+                    log.debug("could not tally the strategy checks: %s", exc)
+                self._maybe_look(symbol, candles, session_levels, judged[-1][4], now)
         # The best backtested edge first: when two symbols fire in the same
         # cycle and there is room for one, the better strategy gets it.
         from panaoptions import ranking
@@ -739,13 +769,22 @@ class OptionsDesk:
         for symbol, candles, session_levels, setup, attempts in judged:
             # Room can run out part-way through: three slots and four setups
             # means the fourth is refused, and that refusal belongs in the log
-            # rather than being silently skipped.
-            if len(self.ledger.open_trades) >= max_open:
-                self.activity.add(
-                    "hunt.skip",
-                    f"{max_open} position(s) open — {symbol} and anything "
-                    f"after it were not judged this cycle", ts=now)
-                break
+            # rather than being silently skipped. Each book has its own room.
+            swing_setup = bool(setup is not None and setup.swing)
+            open_now = list(self.ledger.open_trades.values())
+            if swing_setup and sum(t.hold_overnight for t in open_now) >= swing_max:
+                self.activity.add("hunt.skip", f"swing book full — {symbol}'s swing "
+                                  f"breakout was not judged this cycle", ts=now)
+                continue
+            if setup is not None and not swing_setup and sum(
+                    not t.hold_overnight for t in open_now) >= max_open:
+                if not day_full_reported:
+                    day_full_reported = True
+                    self.activity.add(
+                        "hunt.skip",
+                        f"{max_open} position(s) open — {symbol} and anything "
+                        f"after it were not judged this cycle", ts=now)
+                continue
 
             busy = self._symbol_busy(symbol, now)
             if busy:
@@ -1008,6 +1047,12 @@ class OptionsDesk:
 
         self.scanning = ""
         return actions
+
+    def _swing_symbols(self) -> list[str]:
+        """The swing book's list: swing.symbols for this market, else the
+        desk's universe."""
+        return [str(s).upper() for s in (self.cfg.get("swing.symbols") or [])] \
+            or list(self.cfg.symbols)
 
     async def _maybe_ingest_fno(self, now: datetime) -> None:
         """Map PDH/PDL/PDC, open interest and the build-up for every watched
@@ -1526,6 +1571,8 @@ class OptionsDesk:
         for trade in self.ledger.open_trades.values():
             if trade.breakeven_armed or trade.stop_price >= trade.entry_price:
                 continue
+            if trade.hold_overnight:
+                continue                # a swing trade exits by its own plan
             opened = trade.opened_at.astimezone(now.tzinfo) if (
                 trade.opened_at.tzinfo and now.tzinfo) else trade.opened_at
             if opened.timetz().replace(tzinfo=None) >= tighten_at:

@@ -85,6 +85,10 @@ def project(setup: Any, levels: Any, cfg: Any,
     if setup.strategy is SetupType.VOLATILITY_BREAKOUT and not bool(
             cfg.get("strategies.volatility_breakout.room_check", True)):
         sweep = True
+    # A swing setup's exit is the first profitable open, not a target, so
+    # the same-day room check never applies to it.
+    if getattr(setup, "swing", False):
+        sweep = True
     entry = float(setup.entry_trigger or setup.indicators.close)
     stop = float(setup.underlying_support or 0.0)
     risk = abs(entry - stop)

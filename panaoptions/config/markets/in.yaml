@@ -200,3 +200,13 @@ agents:
     # US index futures say little about an NSE session. No free feed serves
     # GIFT Nifty, so the futures read is off and headlines carry the agent.
     futures: []
+
+# The swing book on NSE: the names the breakout was backtested on (+0.20R
+# then +0.12R a trade over two years). Monthly expiries sit 4-5 weeks apart,
+# so the window is wider than the US 21-45 to always hold one.
+swing:
+  symbols: ["NIFTY", "BANKNIFTY", "RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS",
+            "SBIN", "AXISBANK"]
+  min_dte: 15
+  max_dte: 50
+  max_contract_price: 400.0   # ₹400 a share

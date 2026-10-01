@@ -66,6 +66,10 @@ class SetupType(str, Enum):
     PD_LIQUIDITY_SWEEP = "PD Liquidity Sweep"
     # Larry Williams' volatility breakout: today's open +/- k x yesterday's range.
     VOLATILITY_BREAKOUT = "Volatility Breakout"
+    # The same breakout held 1-4 days on a 21-45 day option (the swing book):
+    # the first touch of the level, with the 20-day trend, out at the first
+    # session that opens in profit.
+    SWING_BREAKOUT = "Swing Breakout (1-4 days)"
     OTHER = "Other"
 
 
@@ -125,6 +129,9 @@ class Setup(BaseModel):
     delta_band: tuple[float, float] | None = None
     min_dte_override: int = 0
     max_dte_override: int = 0
+    # A swing setup: held overnight, its own position slots (swing.max_open),
+    # its own contract ceiling (swing.max_contract_price), no same-day rules.
+    swing: bool = False
     # The win rate this pattern is published as having, if any. Carried so the
     # journal can hold the claim against what it actually did here; it never
     # influences sizing, and nothing in the risk path reads it.
@@ -291,6 +298,8 @@ class Signal(BaseModel):
     claimed_accuracy: float = 0.0
     confirmations: list[str] = Field(default_factory=list)
     ml_probability: float | None = None
+    # From a swing setup: the fill is held overnight (PaperTrade.hold_overnight).
+    hold_overnight: bool = False
 
     def cost(self, multiplier: int = 100) -> float:
         m = self.contract.multiplier or multiplier

@@ -71,15 +71,17 @@ class PaperLedger:
             underlying_entry=signal.underlying_at_entry,
             risk_r=round(abs(signal.underlying_at_entry - signal.underlying_support), 4)
             if signal.underlying_at_entry and signal.underlying_support else 0.0,
-            hold_overnight=bool(self.cfg.get("swing.enabled", False)),
+            hold_overnight=bool(getattr(signal, "hold_overnight", False)),
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
                                 price=fill_price, reason="ENTRY"))
 
         self.open_trades[trade.id] = trade
-        self.risk.state.open_trades = len(self.open_trades)
-        self.risk.state.deployed = self._deployed()
-        self.risk.state.trades_taken += 1
+        self.sync_counts()
+        # The day's trade limit is the same-day desk's; a swing entry has its
+        # own slots (swing.max_open) and does not use one of the day's.
+        if not trade.hold_overnight:
+            self.risk.state.trades_taken += 1
         log.info("OPEN %s x%d @ %.2f (stop %.2f, TP1 %.2f, TP2 %.2f)",
                  trade.contract_label, trade.quantity, fill_price,
                  trade.stop_price, trade.target_1, trade.target_2)
@@ -116,7 +118,7 @@ class PaperLedger:
         #    once the first target is banked the stop is at breakeven and the
         #    runner is free, which is the one position worth giving time to.
         limit = self.cfg.get("risk.max_hold_minutes")
-        if limit and not trade.breakeven_armed:
+        if limit and not trade.breakeven_armed and not trade.hold_overnight:
             held = (ts - trade.opened_at).total_seconds() / 60.0
             if held >= float(limit):
                 fills.append(self._exit(trade, contract_price, ts,
@@ -287,6 +289,14 @@ class PaperLedger:
         return out
 
     # ------------------------------------------------------------------ #
+    def sync_counts(self) -> None:
+        """Positions open (and of those, swing ones) and capital at work,
+        onto the risk state that the sizing rules read."""
+        self.risk.state.open_trades = len(self.open_trades)
+        self.risk.state.swing_open = sum(1 for t in self.open_trades.values()
+                                         if t.hold_overnight)
+        self.risk.state.deployed = self._deployed()
+
     def _deployed(self) -> float:
         """Capital at work right now, at entry cost.
 
@@ -318,8 +328,7 @@ class PaperLedger:
         trade.exit_reason = reason
         self.open_trades.pop(trade.id, None)
         self.closed.append(trade)
-        self.risk.state.open_trades = len(self.open_trades)
-        self.risk.state.deployed = self._deployed()
+        self.sync_counts()
         log.info("CLOSE %s @ %.2f (%s) — trade P&L %+.2f",
                  trade.contract_label, fill.price, reason.value,
                  trade.realised_pnl)

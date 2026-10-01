@@ -61,6 +61,11 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
     index_ceiling = cfg.get("contracts.index_max_contract_price")
     if index_ceiling and symbol.upper() in index_symbols(cfg):
         max_price = max(max_price, float(index_ceiling))
+    # A swing setup's 21-45 day contract costs more than a same-day one: its
+    # own ceiling (swing.max_contract_price) replaces the day desk's.
+    swing = bool(getattr(setup, "swing", False))
+    if swing and cfg.get("swing.max_contract_price"):
+        max_price = float(cfg.get("swing.max_contract_price"))
     multiplier = cfg.multiplier
 
     search = ContractSearch(symbol=symbol)
@@ -114,7 +119,8 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
                 f"${budget:,.0f} budget")
         found, tier, how, misses = _fallback(
             symbol, chain, want, min_dte, max_dte, min_delta, max_delta, max_spread,
-            min_price, max_price, budget, multiplier, cfg, wide)
+            min_price, max_price, budget, multiplier, cfg, wide,
+            shortest=min_dte if swing else None)
         if found is not None:
             search.chosen = found
             search.budget_fallback = True
@@ -164,14 +170,18 @@ def choose(symbol: str, chain: list[OptionContract], direction: Direction,
 
 
 def _fallback(symbol, chain, want, min_dte, max_dte, min_delta, max_delta,
-              max_spread, min_price, max_price, budget, multiplier, cfg, wide=None):
+              max_spread, min_price, max_price, budget, multiplier, cfg, wide=None,
+              shortest: int | None = None):
     """Walk the fallback ladder. Returns (contract, tier, how, misses).
 
     `misses` says, rung by rung, why each found nothing — the text of a
-    hard-risk skip.
+    hard-risk skip. `shortest`: the least time a fallback may take (a swing
+    setup passes its own minimum: a position held overnight must never end
+    up in a contract that expires before it is sold).
     """
     floor = float(cfg.get("contracts.budget_fallback_min_delta", 0.30) or 0)
-    shortest = min(int(cfg.get("contracts.min_dte", 7)), min_dte)
+    if shortest is None:
+        shortest = min(int(cfg.get("contracts.min_dte", 7)), min_dte)
     order = [str(x) for x in (cfg.get("contracts.fallback_order")
                               or DEFAULT_FALLBACK_ORDER)]
     misses: list[str] = []

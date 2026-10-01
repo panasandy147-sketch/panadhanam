@@ -530,30 +530,35 @@ silent fall back to the default — running one desk while believing you
 selected the other is the most expensive way this could fail — and the
 profile in force is printed by `--check-config` and shown on the dashboard.
 
-### The swing desk (1-4 day options, US and India)
+### The swing book (1-4 day options, US and India)
 
-A third desk beside the 0DTE one, on port 8102. It holds positions
-**overnight** and runs one strategy, the one with evidence: **Larry Williams'
-volatility breakout**.
+Part of the 0DTE desk on port 8100 (`swing:` in `config/settings.yaml`, on in
+`profiles/zerodte.yaml`): beside the same-day strategies, in the same paper
+account, it holds a few positions **overnight**. It runs one strategy, the
+one with evidence: **Larry Williams' volatility breakout**.
 
+- **Where:** every name on its own list, screen or no screen: GLD (gold)
+  and ten US megacaps; on India NIFTY, BANKNIFTY and seven large stocks.
 - **Entry:** the first 5m bar whose high reaches today's open + 0.5 ×
   yesterday's range (calls). Puts are the mirror. Only in the direction of the
   20-day trend.
 - **Stop:** today's open, on the underlying.
 - **Exit:** the first later session that opens in profit (Williams'
-  bail-out), else the stop, else the close of the 4th session.
-- **Options:** 21–45 days to expiry, so time decay is small over a few days.
+  bail-out), else the stop, else the close of the 4th session. None of the
+  same-day exits apply: no 15:45 square-off, no scale-out, no time stop.
+- **Options:** 21–45 days to expiry (India 15–50, for the monthly
+  expiries), so time decay is small over a few days. Never a shorter-dated
+  fallback, and up to $20 a share ($2,000 a contract; India ₹400).
+- **Room:** two swing positions at a time, in their own slots: they don't
+  use the day desk's 2 open / 3 a day. The 2% risk a trade, the 60%
+  deployed ceiling and the 3% daily circuit breaker cover the whole account.
+- **On Auto:** a swing position still open when its market closes is parked
+  in that market's book while the other market trades, and picked up again
+  at its next session. (Before, any open position stopped the switch.)
 
-To start it, open a third Git Bash window and run:
-
-    cd panaoptions
-    ./start_swing.sh            # then open http://127.0.0.1:8102
-
-It keeps its own book, journal and learned weights (`data/swing`,
-`journal/swing`) and covers both markets in turn. Closing the window stops
-it; open positions stay in its book and are picked up on the next start.
-If you use `auto_update.sh` instead, add `SWING_DESK=on` to the root `.env`
-and it starts the desk for you. Re-run its evidence any time:
+On the dashboard its trades show as **Swing Breakout (1-4 days)**. The
+`swing` profile (`PANAOPTIONS_PROFILE=swing`) runs the swing book alone.
+Re-run its evidence any time:
 
     ../.venv/Scripts/python.exe run.py --swing-backtest
 

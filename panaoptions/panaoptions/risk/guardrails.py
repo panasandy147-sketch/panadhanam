@@ -65,6 +65,9 @@ class DayState:
     wins: int = 0
     losses: int = 0
     open_trades: int = 0
+    # Of open_trades, the swing book's (held overnight): they have their own
+    # slots (swing.max_open) and do not use the day desk's.
+    swing_open: int = 0
     # Capital currently at work across every open position. Held here rather
     # than recomputed, because the sizing rule has to see the total before it
     # agrees to add to it.
@@ -165,24 +168,37 @@ class RiskManager:
         if self.state.halted:
             return self._reject(f"Desk halted: {self.state.halt_reason}")
 
-        max_open = int(self.cfg.get("risk.max_open_trades", 1))
-        if self.state.open_trades >= max_open:
-            return self._reject(
-                f"Already holding {self.state.open_trades} position(s) and the "
-                f"limit is {max_open}. One trade at a time is the rule that "
-                f"stops a bad morning compounding.")
+        swing = bool(getattr(setup, "swing", False))
+        if swing:
+            # The swing book: its own slots, outside the day desk's open and
+            # daily limits (a position held for days would otherwise take a
+            # same-day slot all week).
+            swing_max = int(self.cfg.get("swing.max_open", 2) or 0)
+            if self.state.swing_open >= swing_max:
+                return self._reject(
+                    f"Swing book full: {self.state.swing_open} of {swing_max} swing "
+                    f"position(s) held.")
+        else:
+            max_open = int(self.cfg.get("risk.max_open_trades", 1))
+            day_open = self.state.open_trades - self.state.swing_open
+            if day_open >= max_open:
+                return self._reject(
+                    f"Already holding {day_open} position(s) and the "
+                    f"limit is {max_open}. One trade at a time is the rule that "
+                    f"stops a bad morning compounding.")
 
-        max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
-        if max_daily and self.state.trades_taken >= max_daily:
-            return self._reject(
-                f"Daily trade limit: {self.state.trades_taken} of {max_daily} "
-                f"taken today. No more entries until tomorrow — over-trading is "
-                f"how a good morning is given back.")
-        from panaoptions import ranking
-        held_back = ranking.slot_refusal(self.cfg, setup.strategy, self.state.trades_taken,
-                                         ranking.live_edge(self.cfg))
-        if held_back:
-            return self._reject(f"Reserved slots: {setup.strategy.value} — {held_back}.")
+            max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
+            if max_daily and self.state.trades_taken >= max_daily:
+                return self._reject(
+                    f"Daily trade limit: {self.state.trades_taken} of {max_daily} "
+                    f"taken today. No more entries until tomorrow — over-trading is "
+                    f"how a good morning is given back.")
+            from panaoptions import ranking
+            held_back = ranking.slot_refusal(self.cfg, setup.strategy,
+                                             self.state.trades_taken,
+                                             ranking.live_edge(self.cfg))
+            if held_back:
+                return self._reject(f"Reserved slots: {setup.strategy.value} — {held_back}.")
 
         entry = contract.mid
         if entry <= 0:
@@ -258,6 +274,10 @@ class RiskManager:
         stop_pct = float(self.cfg.get(
             "risk.disaster_stop_pct" if underlying_mode else "risk.stop_loss_pct",
             45.0 if underlying_mode else 20.0))
+        if swing and self.cfg.get("swing.disaster_stop_pct"):
+            # A 30-day option moves less than a same-day one: the open on
+            # the underlying is the stop, this only the backstop.
+            stop_pct = float(self.cfg.get("swing.disaster_stop_pct"))
         tp1_pct = float(self.cfg.get("risk.take_profit_1_pct", 40.0))
         tp2_pct = float(self.cfg.get("risk.take_profit_2_pct", 70.0))
 
@@ -292,6 +312,7 @@ class RiskManager:
             pattern=setup.pattern, claimed_accuracy=setup.claimed_accuracy,
             confirmations=list(setup.confirmations),
             ml_probability=ml_probability,
+            hold_overnight=swing,
         )
 
         deployed = signal.cost(multiplier)

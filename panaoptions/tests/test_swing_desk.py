@@ -1,6 +1,8 @@
-"""The swing desk (profile swing): Larry Williams' volatility breakout held
-1-4 days on 21-45 day options, exited at the first profitable open, the stop
-on the underlying, or after swing.max_hold_days sessions."""
+"""The swing book, inside the 0DTE desk (swing.enabled) or alone (profile
+swing): Larry Williams' volatility breakout held 1-4 days on 21-45 day
+options, exited at the first profitable open, the stop on the underlying, or
+after swing.max_hold_days sessions — beside the same-day strategies, with its
+own slots, and parked in its own market's book across an Auto switch."""
 from __future__ import annotations
 
 import os
@@ -10,7 +12,14 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from panaoptions.engine import indicators as ta
-from panaoptions.engine.strategies import ALL, VolatilityBreakout, evaluate_all, localise
+from panaoptions.engine.strategies import (
+    ALL,
+    SwingBreakout,
+    VolatilityBreakout,
+    evaluate_all,
+    evaluate_swing,
+    localise,
+)
 from panaoptions.models import (
     Candle,
     Direction,
@@ -26,10 +35,12 @@ ET = ZoneInfo("America/New_York")
 
 
 def _swing(cfg):
-    cfg.data["swing"] = {"enabled": True, "strategies": ["volatility_breakout"], "k": 0.5,
-                         "trend_days": 20, "first_profitable_open": True,
-                         "max_hold_days": 4, "min_dte": 21, "max_dte": 45}
-    cfg.data["strategies"]["volatility_breakout"].update(enabled=True, room_check=False)
+    cfg.data["swing"] = {"enabled": True, "only": False, "symbols": [], "max_open": 2,
+                         "k": 0.5, "trend_days": 20, "from": "09:45", "to": "15:30",
+                         "first_profitable_open": True, "max_hold_days": 4,
+                         "min_dte": 21, "max_dte": 45, "min_delta": 0.40,
+                         "max_delta": 0.55, "max_contract_price": 20.0,
+                         "disaster_stop_pct": 60.0}
     return cfg
 
 
@@ -58,7 +69,7 @@ LEVELS = SessionLevels(previous_high=102.0, previous_low=98.0, previous_close=10
 
 def _eval(cfg, candles, levels=LEVELS):
     df5 = localise(ta.to_frame(candles), "America/New_York")
-    return VolatilityBreakout(cfg).evaluate("SPY", df5, ta.resample(df5, "15min"), levels)
+    return SwingBreakout(cfg).evaluate("SPY", df5, ta.resample(df5, "15min"), levels)
 
 
 # open 100, range 4, k 0.5 -> the line 102; the 3rd bar's high reaches it
@@ -71,6 +82,8 @@ def test_the_swing_breakout_takes_the_first_bar_whose_high_reaches_the_level(cfg
     assert s.triggered and s.direction is Direction.LONG and s.key_level == 102.0
     assert s.underlying_support == 100.0                       # the stop: today's open
     assert (s.min_dte_override, s.max_dte_override) == (21, 45)
+    assert s.swing and s.strategy is SetupType.SWING_BREAKOUT
+    assert s.delta_band == (0.40, 0.55)
     assert "swing" in s.pattern and any("held overnight" in c for c in s.confirmations)
 
 
@@ -84,24 +97,49 @@ def test_a_level_already_reached_earlier_today_is_not_taken_again(cfg):
     assert not _eval(_swing(cfg), _history(+0.5, later)).triggered
 
 
-def test_the_swing_desk_runs_only_its_own_strategies(cfg):
+def test_the_swing_book_is_its_own_check_beside_the_day_strategies(cfg):
     _swing(cfg)
-    for key in ("orb_vwap", "vwap_ema_pullback", "pd_liquidity_sweep"):
-        cfg.data["strategies"][key]["enabled"] = True
+    # the same-day check never runs the swing breakout ...
     _, attempts = evaluate_all("SPY", _history(+0.5, BREAK), LEVELS, cfg)
-    assert {a.strategy for a in attempts} <= {SetupType.VOLATILITY_BREAKOUT}
-    assert VolatilityBreakout in ALL
+    assert SetupType.SWING_BREAKOUT not in {a.strategy for a in attempts}
+    assert SwingBreakout not in ALL and VolatilityBreakout in ALL
+    # ... the swing book's own check does (in its window), and is off unless
+    # swing.enabled
+    assert evaluate_swing("SPY", _history(+0.5, BREAK), LEVELS, cfg) == (None, [])
+    cfg.data["swing"]["from"] = "09:30"              # the test's bars are 09:30-09:40
+    setup, [attempt] = evaluate_swing("SPY", _history(+0.5, BREAK), LEVELS, cfg)
+    assert setup is attempt and setup.swing
+    cfg.data["swing"]["enabled"] = False
+    assert evaluate_swing("SPY", _history(+0.5, BREAK), LEVELS, cfg) == (None, [])
 
 
-def test_the_profile_as_shipped(tmp_path, monkeypatch):
+def test_the_day_breakout_is_not_a_swing_trade(cfg):
+    _swing(cfg)
+    df5 = localise(ta.to_frame(_history(+0.5, BREAK)), "America/New_York")
+    s = VolatilityBreakout(cfg).evaluate("SPY", df5, ta.resample(df5, "15min"), LEVELS)
+    assert not s.swing and s.min_dte_override == 0
+
+
+def test_the_config_as_shipped(tmp_path, monkeypatch):
     from panaoptions import config as config_mod
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
+    # the 0DTE desk runs the swing book beside its day strategies
+    us = config_mod.Config(market="US", profile="zerodte")
+    assert us.get("swing.enabled") is True and not us.get("swing.only")
+    assert us.get("swing.symbols")[0] == "GLD" and us.get("swing.max_contract_price") == 20.0
+    assert us.get("contracts.max_contract_price") == 3.50        # the day desk's own
+    india = config_mod.Config(market="IN", profile="zerodte")
+    assert india.get("swing.enabled") is True and "NIFTY" in india.get("swing.symbols")
+    assert india.get("swing.max_contract_price") == 400.0
+    assert (india.get("swing.min_dte"), india.get("swing.max_dte")) == (15, 50)
+    # the swing profile: the book alone
     for market in ("US", "IN"):
         c = config_mod.Config(market=market, profile="swing")
-        assert c.get("swing.enabled") is True and c.get("swing.k") == 0.5
-        assert c.get("swing.strategies") == ["volatility_breakout"]
-        assert c.get("strategies.volatility_breakout.enabled") is True
-    assert config_mod.Config().get("swing.enabled") in (None, False)
+        assert c.get("swing.enabled") is True and c.get("swing.only") is True
+    # the other desks: off
+    monkeypatch.delenv("PANAOPTIONS_PROFILE", raising=False)
+    assert config_mod.Config(market="US").get("swing.enabled") is False
+    assert config_mod.Config(market="US", profile="scalp").get("swing.enabled") is False
 
 
 def test_a_second_desk_keeps_its_own_book_and_journal():
@@ -207,7 +245,7 @@ def test_a_new_day_keeps_the_carried_positions_on_the_books(cfg, monkeypatch):
     assert desk.risk.state.open_trades == 1 and desk.risk.state.deployed > 0
 
 
-def test_the_fill_is_flagged_for_overnight_only_on_the_swing_desk(cfg):
+def test_the_fill_is_flagged_for_overnight_only_from_a_swing_signal(cfg):
     from panaoptions.ledger.paper import PaperLedger
     from panaoptions.models import Signal
     from panaoptions.risk.guardrails import RiskManager
@@ -217,16 +255,24 @@ def test_the_fill_is_flagged_for_overnight_only_on_the_swing_desk(cfg):
                  direction=Direction.LONG, contract=c, quantity=1, entry_price=3.0,
                  stop_price=1.2, target_1=4, target_2=5, underlying_at_entry=102,
                  underlying_support=100)
-    assert not PaperLedger(cfg, RiskManager(cfg)).open(sig).hold_overnight
-    assert PaperLedger(_swing(cfg), RiskManager(cfg)).open(sig).hold_overnight
+    risk = RiskManager(cfg)
+    ledger = PaperLedger(_swing(cfg), risk)
+    assert not ledger.open(sig).hold_overnight
+    assert risk.state.trades_taken == 1 and risk.state.swing_open == 0
+    swing_sig = sig.model_copy(update={"id": "S2", "hold_overnight": True})
+    assert ledger.open(swing_sig).hold_overnight
+    # the swing entry has its own slots: not one of the day's trades
+    assert risk.state.trades_taken == 1
+    assert risk.state.open_trades == 2 and risk.state.swing_open == 1
 
 
 def test_the_rules_page_describes_the_swing_desk(cfg):
     from panaoptions import rules
-    titles = [s["title"] for s in rules.build(_swing(cfg))["sections"]]
-    assert titles[0] == "The swing desk (1-4 day options)"
+    sections = rules.build(_swing(cfg))["sections"]
+    assert sections[0]["title"] == "The swing book (1-4 day options)"
+    assert "Beside the same-day strategies" in sections[0]["intro"]
     cfg.data["swing"]["enabled"] = False
-    assert "The swing desk (1-4 day options)" not in [
+    assert "The swing book (1-4 day options)" not in [
         s["title"] for s in rules.build(cfg)["sections"]]
 
 
@@ -250,14 +296,15 @@ def test_the_backtest_walks_entry_stop_and_the_first_profitable_open():
     assert t["or"] is not None and t["or"] > 0
 
 
-def test_the_swing_desk_hunts_its_whole_list_without_the_screen(cfg, monkeypatch):
+def test_the_hunt_reads_the_screened_names_and_the_whole_swing_list(cfg, monkeypatch):
     import asyncio
 
     from panaoptions.models import PreMarketRead
     now = datetime(2026, 9, 30, 10, 30, tzinfo=ET)
     desk = _desk(cfg, monkeypatch, now)
-    cfg.data["universe"]["symbols"] = ["SPY", "QQQ", "AAPL"]
-    desk.screened = [PreMarketRead(symbol=s, passed=False) for s in ("SPY", "QQQ", "AAPL")]
+    cfg.data["swing"]["symbols"] = ["GLD", "SPY"]
+    desk.screened = [PreMarketRead(symbol="TSLA", passed=True),
+                     PreMarketRead(symbol="AAPL", passed=False)]
     seen = []
 
     async def tape(symbol, now):
@@ -265,9 +312,133 @@ def test_the_swing_desk_hunts_its_whole_list_without_the_screen(cfg, monkeypatch
         raise RuntimeError("no tape in this test")   # read, then skipped
     monkeypatch.setattr(desk, "_tape", tape)
     asyncio.run(desk._hunt(now))
-    assert sorted(seen) == ["AAPL", "QQQ", "SPY"]
-    # with the screen asked for, nothing that failed it is read
-    cfg.data["swing"]["use_screen"] = True
+    assert sorted(seen) == ["GLD", "SPY", "TSLA"]
+    # the swing book alone: the screen's names are not read
+    cfg.data["swing"]["only"] = True
     seen.clear()
     asyncio.run(desk._hunt(now))
-    assert seen == []
+    assert sorted(seen) == ["GLD", "SPY"]
+
+
+def test_full_day_slots_still_leave_the_swing_book_hunting(cfg, monkeypatch):
+    import asyncio
+
+    from panaoptions.models import PreMarketRead
+    now = datetime(2026, 9, 30, 10, 30, tzinfo=ET)
+    desk = _desk(cfg, monkeypatch, now)
+    cfg.data["risk"]["max_open_trades"] = 1
+    cfg.data["swing"]["symbols"] = ["GLD"]
+    day = _trade(datetime(2026, 9, 30, 10, 0, tzinfo=ET), swing=False)
+    desk.ledger.open_trades[day.id] = day
+    desk.screened = [PreMarketRead(symbol="TSLA", passed=True)]
+    seen = []
+
+    async def tape(symbol, now):
+        seen.append(symbol)
+        raise RuntimeError("no tape in this test")
+    monkeypatch.setattr(desk, "_tape", tape)
+    asyncio.run(desk._hunt(now))
+    assert seen == ["GLD"]
+    # and a full swing book leaves the day desk hunting
+    desk.ledger.open_trades.clear()
+    for n in range(2):
+        t = _trade(datetime(2026, 9, 29, 10, 0, tzinfo=ET))
+        t.id = f"PT-S{n}"
+        desk.ledger.open_trades[t.id] = t
+    seen.clear()
+    asyncio.run(desk._hunt(now))
+    assert seen == ["TSLA"]
+
+
+def _contract(dte, mid, delta=0.5):
+    return OptionContract(symbol="GLD", right=OptionRight.CALL, strike=350,
+                          expiry=f"dte{dte}", dte=dte, bid=mid - 0.02, ask=mid + 0.02,
+                          delta=delta, volume=500, open_interest=5000)
+
+
+def test_a_swing_setup_takes_a_21_45_day_contract_at_its_own_price_ceiling(cfg):
+    from panaoptions.engine import contracts
+    from panaoptions.models import Setup
+    _swing(cfg)
+    cfg.data["contracts"].update(max_contract_price=3.50, min_dte=0, max_dte=4)
+    setup = Setup(symbol="GLD", ts=datetime(2026, 9, 30, 10, 0, tzinfo=ET),
+                  strategy=SetupType.SWING_BREAKOUT,
+                  direction=Direction.LONG, swing=True, min_dte_override=21,
+                  max_dte_override=45, delta_band=(0.40, 0.55))
+    chain = [_contract(0, 1.20), _contract(30, 7.50)]
+    found = contracts.choose("GLD", chain, Direction.LONG, cfg, setup, budget=2000)
+    assert found.chosen is not None and found.chosen.dte == 30
+    # over budget: never a shorter-dated contract for a position held overnight
+    found = contracts.choose("GLD", chain, Direction.LONG, cfg, setup, budget=300)
+    assert found.chosen is None or found.chosen.dte >= 21
+
+
+def test_sizing_gives_the_swing_book_its_own_slots_and_backstop(cfg):
+    from panaoptions.models import Indicators, Setup
+    from panaoptions.risk.guardrails import RiskManager
+    _swing(cfg)
+    cfg.data["risk"].update(max_open_trades=1, max_daily_trades=1, stop_mode="underlying")
+    risk = RiskManager(cfg)
+    risk.capital = 10_000.0
+    risk.state.open_trades, risk.state.trades_taken = 1, 1       # the day desk is full
+    setup = Setup(symbol="GLD", ts=datetime(2026, 9, 30, 10, 0, tzinfo=ET),
+                  strategy=SetupType.SWING_BREAKOUT,
+                  direction=Direction.LONG, swing=True,
+                  indicators=Indicators(close=352.0), underlying_support=351.5)
+    c = _contract(30, 2.00)
+    signal, why = risk.size(setup, c, "S", datetime(2026, 9, 30, 10, 0, tzinfo=ET))
+    assert signal is not None, why
+    assert signal.hold_overnight and signal.stop_price == round(2.00 * 0.4, 2)
+    risk.state.open_trades, risk.state.swing_open = 3, 2          # the swing book full
+    signal, why = risk.size(setup, c, "S", datetime(2026, 9, 30, 10, 0, tzinfo=ET))
+    assert signal is None and "Swing book full" in why
+
+
+def test_a_swing_trade_is_not_tightened_or_timed_out(cfg, monkeypatch):
+    import asyncio
+    now = datetime(2026, 9, 30, 11, 0, tzinfo=ET)
+    desk = _desk(cfg, monkeypatch, now)
+    cfg.data["risk"]["max_hold_minutes"] = 30
+    trade = _trade(datetime(2026, 9, 30, 9, 50, tzinfo=ET))
+    trade.last_price = 4.0
+    desk.ledger.open_trades[trade.id] = trade
+    asyncio.run(desk._maybe_tighten(now))
+    assert not trade.breakeven_armed and trade.stop_price == 1.2
+    fills = desk.ledger.mark(trade.id, 3.5, 102.5, now)
+    assert fills == [] and trade.is_open
+
+
+def test_auto_parks_swing_positions_in_their_market_and_brings_them_back(
+        cfg, monkeypatch, tmp_path):
+    import asyncio
+
+    from panaoptions import markets
+    from panaoptions.ledger import store
+    now = datetime(2026, 9, 30, 20, 0, tzinfo=ET)       # US closed
+    desk = _desk(cfg, monkeypatch, now)
+    monkeypatch.setattr(markets, "in_hours", lambda code, now=None: False)
+    books: dict[str, list] = {"US": [], "IN": []}
+    monkeypatch.setattr(store, "save_open_book",
+                        lambda trades: books.__setitem__(desk.cfg.market, list(trades)))
+    monkeypatch.setattr(store, "load_open_book",
+                        lambda: list(books.get(desk.cfg.market, [])))
+    monkeypatch.setattr(store, "init", lambda: None)
+    trade = _trade(datetime(2026, 9, 30, 10, 0, tzinfo=ET))
+    desk.ledger.open_trades[trade.id] = trade
+    rebuilt = []
+
+    def rebuild(code, factory):
+        rebuilt.append(code)
+        desk.cfg.market = code
+        desk.ledger.open_trades = {}
+    monkeypatch.setattr(desk, "_rebuild", rebuild)
+    out = asyncio.run(desk.switch_market("IN"))
+    assert out["switched"] and rebuilt == ["IN"]
+    assert not desk.ledger.open_trades and [t.id for t in books["US"]] == [trade.id]
+    out = asyncio.run(desk.switch_market("US"))
+    assert out["switched"] and list(desk.ledger.open_trades) == [trade.id]
+    # a same-day position still blocks the switch
+    day = _trade(datetime(2026, 9, 30, 10, 0, tzinfo=ET), swing=False)
+    day.id = "PT-DAY"
+    desk.ledger.open_trades[day.id] = day
+    assert not asyncio.run(desk.switch_market("IN"))["switched"]
