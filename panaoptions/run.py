@@ -416,6 +416,32 @@ def _why(market: str | None = None) -> int:
     return 0
 
 
+async def _missed(market: str | None, days: int) -> int:
+    """Follow the refused setups of the last `days` audited sessions to the
+    close, with the coach's read, into each day's audit (learning/missed.py)."""
+    from panaoptions import audit, markets
+    from panaoptions.data.provider import make_feed
+    from panaoptions.learning import missed
+
+    home = get_config().market
+    try:
+        for code in ([market.upper()] if market else ["US", "IN"]):
+            cfg = _backtest_cfg(code, "Missed setups")
+            found = sorted(p.stem for p in audit.audit_dir().glob("*.jsonl"))[-days:]
+            if not found:
+                print(f"  {code}: no audit log yet in {audit.audit_dir()}")
+                continue
+            async with make_feed(cfg) as feed:
+                for stem in found:
+                    from datetime import date as _date
+                    record = await missed.review(cfg, _date.fromisoformat(stem), feed)
+                    print(f"\n  {code} {stem}:")
+                    print("\n".join("  " + line for line in missed.markdown(record)))
+    finally:
+        markets.activate(home)
+    return 0
+
+
 def _suggest_fix() -> int:
     """Print the one command that resolves the first finding carrying one.
 
@@ -1042,6 +1068,10 @@ def main() -> None:
                              "finished week now (Ollama tunes strategy weights)")
     parser.add_argument("--why", action="store_true",
                         help="why today's setups were or were not bought")
+    parser.add_argument("--missed", nargs="?", const=1, type=int, metavar="DAYS",
+                        help="follow the refused setups of the last DAYS audited "
+                             "sessions to the close (default 1), with the coach's "
+                             "read, into each day's audit (--market)")
     parser.add_argument("--check-candles", action="store_true",
                         help="per symbol: candle source, last closed bar, stale or not "
                              "(--market, --symbols)")
@@ -1105,6 +1135,8 @@ def main() -> None:
         raise SystemExit(_reflect())
     if args.why:
         raise SystemExit(_why(args.market))
+    if args.missed:
+        raise SystemExit(asyncio.run(_missed(args.market, args.missed)))
     if args.check_candles:
         raise SystemExit(asyncio.run(_check_candles(args.market, args.symbols)))
     if args.ensure_capital:

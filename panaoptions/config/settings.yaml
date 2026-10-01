@@ -768,6 +768,16 @@ strategy_weights:
   lvn_acceleration: 1.0
   poc_bounce: 1.0
 
+learning:
+  # After every close: each fired setup the desk refused is followed on the
+  # underlying to square-off (target first / stop first / where it closed),
+  # and the totals by gate go into the day's audit — what each gate cost in
+  # missed winners and saved in dodged losers. learning/missed.py.
+  missed_review: true
+  # Then the local Ollama model reads the day and writes up to 3 changes to
+  # TEST. Advice only: nothing is applied; the walk-forward decides.
+  daily_coach: true
+
 reflection:
   enabled: true                 # run after Friday's close, once a week
   min_trades: 5                 # fewer closed trades = no adjustment

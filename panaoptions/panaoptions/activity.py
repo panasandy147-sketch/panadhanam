@@ -42,6 +42,8 @@ NOTABLE_KINDS = frozenset({
     "restored",
     # The committee's verdict on a fired setup is a decision, not chatter.
     "vote.refused", "vote.approved",
+    # After the close: what the refused setups did next.
+    "review.missed",
 })
 
 # Shown under "Trades and decisions only" too — each symbol's "no trade, and

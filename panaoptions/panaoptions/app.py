@@ -1035,7 +1035,10 @@ class OptionsDesk:
         from panaoptions import audit
         audit.record_skip(self.cfg, symbol, side, reason, strategy=setup.strategy.value,
                           pattern=setup.pattern, gate=gate,
-                          detail={"spot": setup.indicators.close})
+                          detail={"spot": setup.indicators.close,
+                                  "entry": setup.entry_trigger or None,
+                                  "stop": setup.underlying_support or None,
+                                  "target": setup.underlying_target or None})
 
     def _record_refusal(self, symbol: str, side: str, setup, gate: str, reason: str,
                         now: datetime, extra: dict | None = None) -> None:
@@ -1582,6 +1585,7 @@ class OptionsDesk:
 
             review = await weekly.build_daily(self.cfg, day)
             self._daily_written_for = marker
+            await self._missed_review(day)
             if review.trades or review.audit_days:
                 weekly.save(review, self.cfg)
             else:
@@ -1596,6 +1600,25 @@ class OptionsDesk:
             log.warning("could not write the daily review: %s", exc)
             from panaoptions.journal import weekly
             self._daily_written_for = f"{self.cfg.market}:{weekly.today(self.cfg).isoformat()}"
+
+    async def _missed_review(self, day) -> None:
+        """What the refused setups did next, and the coach's read, into the
+        day's audit (learning/missed.py) — so a day with no trades still
+        teaches something."""
+        if not bool(self.cfg.get("learning.missed_review", True)):
+            return
+        try:
+            from panaoptions.learning import missed
+            record = await missed.review(self.cfg, day, self.feed)
+            gates = record.get("by_gate") or {}
+            if gates:
+                self.activity.add(
+                    "review.missed",
+                    "refused setups, followed to the close: " + "; ".join(
+                        f"{g} {v['setups']} ({v['would_win']} won, {v['would_lose']} lost, "
+                        f"{v['r']:+.1f}R)" for g, v in gates.items()), level="info")
+        except Exception as exc:                 # noqa: BLE001 - never fatal
+            log.warning("could not follow the refused setups: %s", exc)
 
     async def _maybe_write_weekly_review(self) -> None:
         """Have the week's review waiting once Friday's session has closed."""

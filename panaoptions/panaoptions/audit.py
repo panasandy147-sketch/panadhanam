@@ -43,18 +43,20 @@ def audit_dir() -> Path:
     return store.JOURNAL_DIR / "audit"
 
 
-def _write(cfg: Any, record: dict[str, Any]) -> dict[str, Any]:
-    """Append one event. Never raises: an audit failure must not stop trading."""
+def _write(cfg: Any, record: dict[str, Any], day_of: date | None = None) -> dict[str, Any]:
+    """Append one event (to `day_of`'s file, else today's). Never raises: an
+    audit failure must not stop trading."""
     now = clock.now(cfg.timezone)
     record = {"ts": datetime.now(UTC).isoformat(timespec="seconds"),
               "market_time": now.strftime("%Y-%m-%d %H:%M:%S %Z"), **record}
     try:
         folder = audit_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        day = now.date().isoformat()
+        when = day_of or now.date()
+        day = when.isoformat()
         with (folder / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, default=str) + "\n")
-        (folder / f"{day}.md").write_text(day_markdown(now.date()), encoding="utf-8")
+        (folder / f"{day}.md").write_text(day_markdown(when), encoding="utf-8")
     except OSError as exc:
         log.warning("could not write the audit log: %s", exc)
     return record
@@ -269,6 +271,14 @@ def record_refusal(cfg: Any, symbol: str, side: str, gate: str, reason: str, *,
         "market": getattr(cfg, "market", "US"), **(detail or {})})
 
 
+def record_missed(cfg: Any, record: dict[str, Any]) -> dict[str, Any]:
+    """After the close: what each refused setup went on to do, by gate, and
+    the coach's read (learning/missed.py). Written once a day."""
+    return _write(cfg, {"event": "MISSED", "trade_id": None,
+                        "market": getattr(cfg, "market", "US"), **record},
+                  day_of=date.fromisoformat(record["day"]) if record.get("day") else None)
+
+
 def record_screen(cfg: Any, reads: list[Any], summary: str) -> dict[str, Any]:
     """The pre-market screen's result: nothing is hunted until a name passes."""
     return _write(cfg, {
@@ -391,7 +401,7 @@ def by_day(since: date, until: date) -> list[dict[str, Any]]:
             if e.get("event") == "SCREEN":
                 screen = e.get("summary")
                 continue
-            if e.get("event") == "LOOK":             # in the day's .md, not a row
+            if e.get("event") in ("LOOK", "MISSED"):    # in the day's .md, not a row
                 continue
             if e.get("event") in ("SKIP", "REFUSED"):
                 gate = f"[{e.get('gate')}] " if e.get("gate") else ""
@@ -551,6 +561,10 @@ def day_markdown(day: date) -> str:
                   f"{e.get('side')} {e.get('pattern') or e.get('strategy')}: "
                   f"[{e.get('gate')}] {e.get('reason')}" for e in refused]
         lines.append("")
+    missed = [e for e in events if e.get("event") == "MISSED"]
+    if missed:
+        from panaoptions.learning import missed as missed_mod
+        lines += missed_mod.markdown(missed[-1])
     lines += _checks_markdown(day)
     lines += _symbols_markdown(day, [e for e in events if e.get("event") == "LOOK"])
     return "\n".join(lines)
