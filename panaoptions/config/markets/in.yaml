@@ -152,6 +152,15 @@ strategies:
   # judged half -₹9,494 -> -₹3,756 (max DD 8.5% -> 6.8%), the ten sessions
   # before +₹12,213 -> +₹13,273. The PD sweep carries India.
   vwap_ema_pullback:    { enabled: false, from: "09:45", to: "14:45" }
+  # Larry Williams' volatility breakout ON for India since 1 Oct 2026, at
+  # 0.3 x yesterday's range, with the pullback off: on the 20-session
+  # walk-forward the judged half went -₹9,494 -> +₹28,601 (+6.5%, max DD
+  # 8.5% -> 8.4%), the ten sessions before +₹12,213 -> +₹46,854 (20-session
+  # DD 8.2% -> 7.7%). It made +₹13,167 over 13 judged trades (46% won).
+  # Against the pullback off alone the DD is higher (6.8% -> 8.4%): set
+  # enabled: false here to go back to that. k 0.5 / 0.7 and a half-way stop
+  # did worse; on the US no setting beat the current rules.
+  volatility_breakout:  { enabled: true, k: 0.3, from: "09:45", to: "14:30" }
   liquidity_sweep:      { from: "09:30", to: "14:30" }
   candlestick_at_level: { from: "09:30", to: "14:45" }
   va_rejection:         { from: "09:30", to: "14:45" }

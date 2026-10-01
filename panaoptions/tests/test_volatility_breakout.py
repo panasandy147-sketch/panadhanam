@@ -84,5 +84,9 @@ def test_the_losing_strategies_are_off_per_market(shipped):
     india = Config(market="IN")
     assert india.get("strategies.vwap_ema_pullback.enabled") is False
     assert india.get("strategies.pd_liquidity_sweep.enabled") is True
+    # ...and the volatility breakout on India only, at 0.3 x the range.
+    assert india.get("strategies.volatility_breakout.enabled") is True
+    assert india.get("strategies.volatility_breakout.k") == 0.3
+    assert shipped.get("strategies.volatility_breakout.enabled") is False
     for profile in ("scalp", "zerodte"):
         assert Config(profile=profile).get("strategies.orb_vwap.enabled") is True
