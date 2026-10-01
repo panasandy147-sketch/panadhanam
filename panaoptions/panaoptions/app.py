@@ -687,9 +687,15 @@ class OptionsDesk:
         day_room = day_on
         if day_on and max_daily and self.risk.state.trades_taken >= max_daily:
             day_room = False
-            self.activity.add(
-                "hunt.skip", f"{self.risk.state.trades_taken} of {max_daily} trades "
-                f"taken today — the daily limit; no new entries until tomorrow", ts=now)
+            # Said once a day, not every minute until the close.
+            said = (now.date().isoformat(), self.cfg.market)
+            if getattr(self, "_daily_limit_said", None) != said:
+                self._daily_limit_said = said
+                self.activity.add(
+                    "hunt.skip", f"{self.risk.state.trades_taken} of {max_daily} trades "
+                    f"taken today — the daily limit; no new same-day entries until "
+                    f"tomorrow" + (" (the swing book keeps hunting)" if swing_on else ""),
+                    ts=now)
         elif day_on and day_held >= max_open:
             # Not scanning anything, and the panel must not keep showing the
             # last symbol it looked at as though it still were.

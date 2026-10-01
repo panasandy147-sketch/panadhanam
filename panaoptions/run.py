@@ -30,9 +30,8 @@ sys.path.insert(0, str(HERE))
 def _interpreter_with_dependencies() -> str:
     """A Python on this machine that probably has the packages installed.
 
-    panaoptions sits beside panadhanam in the same repository, and that
-    project's virtual environment already carries every package this one
-    needs. Naming the exact interpreter beats telling somebody their
+    This folder's own .venv (./setup.sh), else panadhanam's one level up
+    (an older checkout inside that repository). Naming the exact interpreter beats telling somebody their
     environment is wrong and leaving them to work out which of the three
     Pythons on a Windows box was meant.
     """

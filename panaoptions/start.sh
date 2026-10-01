@@ -8,10 +8,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-# panadhanam's virtual environment, one level up, already carries every
-# package panaoptions needs. Prefer a local .venv if one exists, fall back to
-# the parent, and only then to whatever `python` means — which on Windows is
-# the Microsoft Store build and has none of the packages.
+# This folder's own virtual environment (./setup.sh makes it). An older
+# checkout inside panadhanam used panadhanam's, one level up — still found.
+# Never a bare `python`: on Windows that is the Microsoft Store build, with
+# none of the packages.
 PY=""
 for candidate in \
   ".venv/bin/python" ".venv/Scripts/python.exe" \
@@ -20,7 +20,7 @@ for candidate in \
 done
 if [ -z "$PY" ]; then
   echo "No virtual environment found here or in the parent directory." >&2
-  echo "Run ../setup.sh (or ../setup.bat) first." >&2
+  echo "Run ./setup.sh (or setup.bat) first." >&2
   exit 1
 fi
 

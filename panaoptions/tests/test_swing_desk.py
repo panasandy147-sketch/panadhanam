@@ -442,3 +442,25 @@ def test_auto_parks_swing_positions_in_their_market_and_brings_them_back(
     day.id = "PT-DAY"
     desk.ledger.open_trades[day.id] = day
     assert not asyncio.run(desk.switch_market("IN"))["switched"]
+
+
+def test_the_daily_limit_is_said_once_a_day_and_the_swing_book_keeps_hunting(
+        cfg, monkeypatch):
+    import asyncio
+    now = datetime(2026, 9, 30, 10, 30, tzinfo=ET)
+    desk = _desk(cfg, monkeypatch, now)
+    cfg.data["risk"]["max_daily_trades"] = 3
+    cfg.data["swing"]["symbols"] = ["GLD"]
+    desk.risk.state.trades_taken = 3
+    seen = []
+
+    async def tape(symbol, now):
+        seen.append(symbol)
+        raise RuntimeError("no tape in this test")
+    monkeypatch.setattr(desk, "_tape", tape)
+    for _ in range(3):
+        asyncio.run(desk._hunt(now))
+    said = [e for e in desk.activity.recent(200)
+            if "the daily limit" in str(getattr(e, "message", e))]
+    assert len(said) == 1 and "swing book keeps hunting" in str(said[0])
+    assert seen == ["GLD"] * 3

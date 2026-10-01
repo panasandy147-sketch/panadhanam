@@ -1,8 +1,13 @@
 # panaoptions
 
-Intraday **US options** paper trading on a small account. A separate app in the
-same repository as `panadhanam`, sharing no code with it: different
-instruments, different risk model, different session rules.
+Intraday **US options** paper trading on a small account. Its own app and its
+own repository (it used to live inside `panadhanam`, and still shares no code
+with it): different instruments, different risk model, different session
+rules.
+
+**First time:** `./setup.sh` (Git Bash; `setup.bat` from cmd) makes this
+folder's own virtual environment `.venv` and installs the packages. Then
+`./start.sh` every time.
 
 **US and India.** The header toggle picks the market — **US**, **India**
 or **Auto** (follow whichever session is open; they never overlap). India
@@ -123,7 +128,7 @@ from the contract filter to the risk manager. Two ways to resolve it:
 20% rule; $1,600 reaches the cheapest.
 
 ```bash
-../.venv/Scripts/python.exe run.py --set PANAOPTIONS_CAPITAL=2000
+.venv/Scripts/python.exe run.py --set PANAOPTIONS_CAPITAL=2000
 ```
 
 That writes `.env`, which is untracked and survives a restart. An environment
@@ -194,14 +199,14 @@ that look alike is how you read an options position as an equities one.
 
 `run.py --no-web` runs the desk with terminal output only.
 
-**Use the virtual environment, not a bare `python`.** panadhanam's `.venv` one
-level up already carries every package panaoptions needs; a bare `python` on
-Windows finds the Microsoft Store build, which carries none of them. `run.py`
-says so by name if you forget.
+**Use the virtual environment, not a bare `python`.** `./setup.sh` makes
+`.venv` in this folder with every package panaoptions needs; a bare `python`
+on Windows finds the Microsoft Store build, which carries none of them.
+`run.py` says so by name if you forget.
 
 ```bash
-../.venv/Scripts/python.exe run.py --check-config    # Windows
-../.venv/bin/python run.py --check-config            # macOS / Linux
+.venv/Scripts/python.exe run.py --check-config    # Windows
+.venv/bin/python run.py --check-config            # macOS / Linux
 ```
 
 The other commands, all through that same interpreter:
@@ -560,7 +565,7 @@ On the dashboard its trades show as **Swing Breakout (1-4 days)**. The
 `swing` profile (`PANAOPTIONS_PROFILE=swing`) runs the swing book alone.
 Re-run its evidence any time:
 
-    ../.venv/Scripts/python.exe run.py --swing-backtest
+    .venv/Scripts/python.exe run.py --swing-backtest
 
 On two years of hourly bars (October 2024 to September 2026) it made, per
 trade on the option:
@@ -579,7 +584,7 @@ Perdices pullback were tested the same way on 5 years of daily bars and lost.
 
 Start with one command. It covers both markets, or one with `--market US|IN`:
 
-    ../.venv/Scripts/python.exe run.py --why
+    .venv/Scripts/python.exe run.py --why
 
 For each market it prints two things:
 - **Every strategy's day:** how many times it was checked (one symbol, one
@@ -591,7 +596,7 @@ For each market it prints two things:
 
 Then ask what those refused setups **would have done**:
 
-    ../.venv/Scripts/python.exe run.py --missed 2      # the last 2 audited days
+    .venv/Scripts/python.exe run.py --missed 2      # the last 2 audited days
 
 This follows each refused setup on the underlying, from the time it was
 refused to square-off. Reaching the target first counts as its planned R,
@@ -608,7 +613,7 @@ applied; a change goes in only after the 20-session walk-forward agrees.
 To see what today's rules would have done on the latest sessions, from market
 data alone:
 
-    ../.venv/Scripts/python.exe run.py --session-report 1 --market US
+    .venv/Scripts/python.exe run.py --session-report 1 --market US
 
 This lists the setups that fired and the trades the rules would have taken,
 each with its R and P&L, plus the totals and why the rest were not taken. A
@@ -1075,9 +1080,9 @@ the rejection. A projected 3R past a nearer POC is refused
 
 ### Validate the rule book on history
 
-    ../.venv/Scripts/python.exe run.py --backtest                       # the watchlist, last 20 sessions
-    ../.venv/Scripts/python.exe run.py --backtest --market IN --symbols NIFTY,BANKNIFTY,HDFCBANK,INFY
-    ../.venv/Scripts/python.exe run.py --backtest --days 20
+    .venv/Scripts/python.exe run.py --backtest                       # the watchlist, last 20 sessions
+    .venv/Scripts/python.exe run.py --backtest --market IN --symbols NIFTY,BANKNIFTY,HDFCBANK,INFY
+    .venv/Scripts/python.exe run.py --backtest --days 20
 
 This replays the sessions through the strategies, the gates and the contract
 picker, then through the account rules above: sizing, 2 open, 4 a day, and
@@ -1162,13 +1167,13 @@ ladder finds a tradeable structure, not a fill report.
 ### Pre-flight checks and the before/after backtest
 
 These are the Windows (Git Bash) forms. On Mac or Linux use
-`../.venv/bin/python`.
+`.venv/bin/python`.
 
-    ../.venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY          # premium x lot, cap, sizing
-    ../.venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY --premium 35
-    ../.venv/Scripts/python.exe run.py --check-pdh --market IN                # PDH/PDL cached before 09:15?
-    ../.venv/Scripts/python.exe run.py --backtest-compare --market IN --symbols HDFCBANK,INFY,RELIANCE --days 10
-    ../.venv/Scripts/python.exe run.py --backtest-compare --market US --symbols SPY,QQQ,NVDA --days 10
+    .venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY          # premium x lot, cap, sizing
+    .venv/Scripts/python.exe run.py --dry-fire-lots HDFCBANK,INFY --premium 35
+    .venv/Scripts/python.exe run.py --check-pdh --market IN                # PDH/PDL cached before 09:15?
+    .venv/Scripts/python.exe run.py --backtest-compare --market IN --symbols HDFCBANK,INFY,RELIANCE --days 10
+    .venv/Scripts/python.exe run.py --backtest-compare --market US --symbols SPY,QQQ,NVDA --days 10
 
 `--backtest-compare` replays the same history twice. **before** runs the
 rule book without the sweep strategy, the opening allowance, the 0.25 floor

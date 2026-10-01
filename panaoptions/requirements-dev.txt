@@ -1,0 +1,6 @@
+# For the tests and the linter: ./setup.sh installs these too.
+pytest==8.3.4
+pytest-asyncio==0.25.0
+ruff==0.8.4
+# Optional: the browser panel tests (tests/test_browser_panels.py) skip
+# without it.  pip install playwright && python -m playwright install chromium

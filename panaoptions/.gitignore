@@ -17,3 +17,12 @@ journal/*.tmp
 
 # Written by the Friday reflection; per machine, never committed.
 config/learned.yaml
+config/learned-*.yaml
+
+# The virtual environment and tool caches (./setup.sh makes .venv).
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+logs/
+*.log

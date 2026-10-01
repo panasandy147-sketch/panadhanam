@@ -44,6 +44,13 @@ def _desk_files_elsewhere(tmp_path, monkeypatch, request):
     from panaoptions import markets
     monkeypatch.delenv("PANAOPTIONS_MARKET", raising=False)
     monkeypatch.delenv("PANAOPTIONS_CAPITAL_IN", raising=False)
+    # Nor the profile this machine's .env picks (.env.example ships
+    # zerodte): config.py loads .env into the environment at import, so it
+    # would decide every Config() a test builds.
+    monkeypatch.delenv("PANAOPTIONS_PROFILE", raising=False)
+    # ... and Config() re-reads .env each time it is built: a test that
+    # builds one directly must not see this machine's either.
+    monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
     monkeypatch.setattr(markets, "_active", "US")
     monkeypatch.setattr(markets, "_home", {})
     monkeypatch.setattr(config_mod, "DATA_DIR", data)

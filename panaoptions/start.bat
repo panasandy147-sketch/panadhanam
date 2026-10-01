@@ -8,16 +8,16 @@ REM ---------------------------------------------------------------------------
 setlocal
 cd /d "%~dp0"
 
-REM panadhanam's virtual environment, one level up, already carries every
-REM package panaoptions needs. A bare `python` on Windows finds the Microsoft
-REM Store build, which has none of them.
+REM This folder's own virtual environment (setup.bat makes it); an older
+REM checkout inside panadhanam used panadhanam's, one level up. A bare
+REM `python` on Windows finds the Microsoft Store build, with no packages.
 set PY=
 if exist ".venv\Scripts\python.exe"    set PY=.venv\Scripts\python.exe
 if "%PY%"=="" if exist "..\.venv\Scripts\python.exe" set PY=..\.venv\Scripts\python.exe
 
 if "%PY%"=="" (
   echo No virtual environment found here or in the parent directory.
-  echo Run ..\setup.bat first.
+  echo Run setup.bat first.
   echo.
   pause
   exit /b 1
