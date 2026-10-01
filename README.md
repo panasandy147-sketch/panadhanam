@@ -156,6 +156,28 @@ Every buy in the day's audit (`journal/audit/<us|in>/YYYY-MM-DD.md`) carries a
 
 The exit adds the result in R.
 
+**The gold desk (held 1–4 days).** GOLDBEES (Nippon India gold ETF) in India,
+GLD (SPDR Gold) in the US.
+- **What it trades:** the shares, held overnight, on Larry Williams'
+  volatility breakout.
+- **Entry:** the first 5m bar whose high reaches today's open + 0.5 ×
+  yesterday's range, with the 20-day trend.
+- **Stop and target:** stop 2 ticks beyond today's open; target 3R.
+- **Exit:** the first later session that is in profit at the open (Williams'
+  bail-out), else the stop or target, else the square-off of the 4th session.
+- **Exempt:** no morning screener (gold's ~1% day never passes the 2% ATR
+  floor) and no other strategy.
+- **Evidence** (two years of hourly bars, then the last 60 days of 5-minute
+  bars):
+
+  | Instrument | First year | Second year | Last 60 days |
+  |---|---|---|---|
+  | GOLDBEES | +0.43R | +0.58R | +0.37R |
+  | GLD | +0.24R | +0.21R | +0.30R |
+
+  Gold rose through 2025–26, which flatters a breakout system. Check it with
+  `cd panaoptions && python run.py --swing-backtest`.
+
 **Volatility Breakout (Larry Williams, 1987 World Cup).** US only, intraday.
 - **Trigger:** the first closed 5m candle beyond today's open ± 0.5 × yesterday's
   range, with price on the same side of VWAP and the 9 EMA over (or under) the 21.

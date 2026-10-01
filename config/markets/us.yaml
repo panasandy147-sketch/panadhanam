@@ -115,6 +115,9 @@ universe:
     # cash_tradeable is true. A true index (NIFTY) has no cash instrument.
     - { symbol: "SPY", trading_symbol: "SPY", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 585,  cash_tradeable: true, band: "A", note: "S&P 500 ETF" }
     - { symbol: "QQQ", trading_symbol: "QQQ", exchange: "NASDAQ", lot_size: 1, fno: true, tick_size: 0.01, seed_price: 505,  cash_tradeable: true, band: "A", note: "Nasdaq 100 ETF" }
+    # The gold desk: SPDR Gold, the shares held 1-4 days on the volatility
+    # breakout (settings.yaml swing); never screened.
+    - { symbol: "GLD", trading_symbol: "GLD", exchange: "ARCA", lot_size: 1, fno: false, tick_size: 0.01, seed_price: 330, cash_tradeable: true, band: "A", swing: true, note: "Gold ETF" }
     - { symbol: "IWM", trading_symbol: "IWM", exchange: "ARCA",   lot_size: 1, fno: true, tick_size: 0.01, seed_price: 228,  cash_tradeable: true, band: "A", note: "Russell 2000 ETF" }
   stocks:
     # --- Band A (17 + the 3 ETFs above) ---

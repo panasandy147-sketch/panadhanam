@@ -233,13 +233,16 @@ class MarketDataService:
                 ctx.indicators["pd_sweep"] = sweep.to_dict() if sweep else None
             # Larry Williams' volatility breakout: today's open +/- k x
             # yesterday's range, crossed on the latest closed 5m candle.
-            if prev and bool(self.cfg.get("vol_breakout.enabled", False)):
+            swing = bool(self.cfg.instrument_meta(symbol).get("swing", False))
+            if prev and (swing or bool(self.cfg.get("vol_breakout.enabled", False))):
                 from app.strategies import vol_breakout
                 found = vol_breakout.detect(
                     candles.get("5m") or [], prev,
                     ctx.indicators.get("by_timeframe", {}).get("5m")
-                    or ctx.indicators.get("primary") or {}, tz, today, self.cfg)
-                ctx.indicators["vol_breakout"] = found.to_dict() if found else None
+                    or ctx.indicators.get("primary") or {}, tz, today, self.cfg,
+                    swing=swing, daily=candles.get("1d") or [])
+                ctx.indicators["vol_breakout"] = (
+                    {**found.to_dict(), "swing": swing} if found else None)
             if prev:
                 pic = fno_confluence.picture(symbol, prev, ctx.indicators.get("derivatives"))
                 ctx.indicators["fno_picture"] = pic

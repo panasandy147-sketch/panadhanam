@@ -7,6 +7,7 @@ outcome is just an opinion.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -69,8 +70,18 @@ class OutcomeTracker:
             else:
                 hit_stop = price <= stop if is_long else price >= stop
             hit_target = price >= target if is_long else price <= target
-            timed_out = self._past_squareoff()
-            time_stop = self._time_stop_hit(row, price)
+            swing = self._is_swing(row)
+            # The gold desk holds overnight: the square-off closes it only
+            # once it has been held swing.max_hold_days sessions.
+            timed_out = self._past_squareoff() and (
+                not swing or self._held_sessions(row) >= int(
+                    self.cfg.get("swing.max_hold_days", 4) or 0))
+            time_stop = False if swing else self._time_stop_hit(row, price)
+            if swing and not (hit_stop or hit_target) and self._first_profitable_open(
+                    row, price, is_long):
+                closed.append(await self._close(row, price, SignalStatus.CLOSED_TIME,
+                                                "first_profitable_open"))
+                continue
 
             if hit_stop or hit_target or timed_out or time_stop:
                 # A time-stop exit leaves at MARKET, not at the price stop: the
@@ -506,6 +517,58 @@ class OutcomeTracker:
         entry = row["entry"]
         in_favour = price > entry if is_long else price < entry
         return not in_favour
+
+    @staticmethod
+    def _is_swing(row: dict[str, Any]) -> bool:
+        try:
+            return bool(json.loads(row.get("payload") or "{}").get("hold_overnight"))
+        except (TypeError, ValueError):
+            return False
+
+    def _opened_on(self, row: dict[str, Any]):
+        from zoneinfo import ZoneInfo
+        try:
+            opened = datetime.fromisoformat(str(row.get("ts")))
+        except (TypeError, ValueError):
+            return None
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=UTC)
+        return opened.astimezone(ZoneInfo(str(self.cfg.get("system.timezone",
+                                                           "Asia/Kolkata")))).date()
+
+    def _held_sessions(self, row: dict[str, Any]) -> int:
+        """Weekday sessions since the entry day (the entry day is 0)."""
+        import numpy as np
+
+        from app.core import clock
+        start = self._opened_on(row)
+        if start is None:
+            return 0
+        today = clock.market_now(str(self.cfg.get("system.timezone",
+                                                   "Asia/Kolkata"))).date()
+        return int(np.busday_count(start, today))
+
+    def _first_profitable_open(self, row: dict[str, Any], price: float,
+                               is_long: bool) -> bool:
+        """Larry Williams' bail-out: on each later session, judged once at the
+        first mark after the open, sell if it is in profit; else hold."""
+        if not bool(self.cfg.get("swing.first_profitable_open", True)):
+            return False
+        from app.core import clock
+        tz = str(self.cfg.get("system.timezone", "Asia/Kolkata"))
+        now = clock.market_now(tz)
+        start = self._opened_on(row)
+        if start is None or start >= now.date():
+            return False
+        if not clock.past(tz, str(self.cfg.get("system.market_open", "09:15"))):
+            return False
+        key = (row["id"], now.date().isoformat())
+        seen = self.__dict__.setdefault("_fpo_judged", set())
+        if key in seen:
+            return False
+        seen.add(key)
+        entry = float(row["entry"])
+        return price > entry if is_long else price < entry
 
     def _past_squareoff(self) -> bool:
         """Is it past square-off on the MARKET's clock?

@@ -26,7 +26,8 @@ class CandlestickAgent(BaseAgent):
             return self._sweep_report(ctx, primary, sweep)
         # --- Larry Williams' volatility breakout: a complete setup too.
         breakout = ind.get("vol_breakout") or {}
-        if breakout and bool(self.cfg.get("vol_breakout.enabled", False)):
+        if breakout and (breakout.get("swing")
+                         or bool(self.cfg.get("vol_breakout.enabled", False))):
             return self._breakout_report(ctx, primary, breakout)
 
         score = 0.0

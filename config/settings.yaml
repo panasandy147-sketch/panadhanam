@@ -388,6 +388,27 @@ technical:
 # min_reward_risk (3R), whichever is further; there is no time stop — it runs
 # to the target, the stop, or the square-off (15:15 India).
 # --------------------------------------------------------------------------
+# THE GOLD DESK — instruments with swing: true (GOLDBEES in India, GLD in
+# the US): the volatility breakout held 1-4 days, as backtested on two years
+# of hourly bars (panaoptions: python run.py --swing-backtest). GOLDBEES
+# +0.43R / +0.58R a trade on the stock, +0.37R on the last 60 days of
+# 5-minute bars; GLD +0.24R / +0.21R, +0.30R. Gold rose through 2025-26.
+#   entry  the first 5m bar today whose high (low) reaches today's open
+#          +/- k x yesterday's range, with the trend_days trend
+#   stop   2 ticks beyond today's open; target 3R
+#   exit   the first later session that opens in profit, else the stop or
+#          target, else the square-off of the max_hold_days-th session
+# No morning screener and no other strategy on these instruments.
+# --------------------------------------------------------------------------
+swing:
+  k: 0.5
+  trend_days: 20
+  minutes_after_open: 5
+  to: "15:00"
+  max_hold_days: 4
+  first_profitable_open: true
+
+# --------------------------------------------------------------------------
 # VOLATILITY BREAKOUT (Larry Williams, 1987 Robbins World Cup) — intraday
 # --------------------------------------------------------------------------
 # The FIRST closed 5m candle beyond today's open +/- k x yesterday's range,

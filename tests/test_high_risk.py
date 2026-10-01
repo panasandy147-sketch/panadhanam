@@ -72,8 +72,12 @@ def test_each_market_scans_three_bands_of_twenty(cfg, market):
     try:
         bands: dict[str, int] = {}
         for item in cfg.watchlist():
+            if item.get("swing"):
+                continue                  # the gold desk's ETF, beside the bands
             bands[item["band"]] = bands.get(item["band"], 0) + 1
         assert bands == {"A": 20, "B": 20, "C": 20}
+        assert [i["symbol"] for i in cfg.watchlist() if i.get("swing")] == \
+            (["GLD"] if market == "US" else ["GOLDBEES"])
     finally:
         cfg.switch_market("IN")
 
@@ -82,7 +86,7 @@ def test_a_band_can_be_switched_off(cfg):
     cfg.switch_market("US")
     try:
         cfg.universe["active_bands"] = ["A"]
-        symbols = {i["symbol"] for i in cfg.watchlist()}
+        symbols = {i["symbol"] for i in cfg.watchlist() if not i.get("swing")}
         assert "SPY" in symbols and "PLTR" not in symbols and len(symbols) == 20
     finally:
         cfg.switch_market("IN")

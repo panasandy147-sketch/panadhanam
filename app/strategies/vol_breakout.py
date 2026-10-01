@@ -59,9 +59,22 @@ def _minutes(hhmm: str) -> int:
     return int(h) * 60 + int(m or 0)
 
 
+def _daily_slope(daily: list[Any], tz: str, today: date, days: int) -> float | None:
+    """Yesterday's close less the close `days` sessions before it."""
+    closes = [float(b.close) for b in daily if _local(b.ts, tz).date() < today]
+    if len(closes) <= days:
+        return None
+    return closes[-1] - closes[-1 - days]
+
+
 def detect(bars: list[Any], prev: dict[str, Any], primary: dict[str, Any], tz: str,
-           today: date, cfg: Any) -> Breakout | None:
-    """The breakout on the latest CLOSED 5m candle, or None."""
+           today: date, cfg: Any, swing: bool = False,
+           daily: list[Any] | None = None) -> Breakout | None:
+    """The breakout on the latest CLOSED 5m candle, or None.
+
+    swing=True is the 1-4 day gold desk, as backtested on two years of hourly
+    bars: the first bar whose HIGH (LOW) reaches the level today, with the
+    20-day trend (swing.trend_days), no VWAP/EMA condition, swing.k."""
     g = cfg.get
     high, low = float(prev.get("high") or 0.0), float(prev.get("low") or 0.0)
     if not bars or high <= low:
@@ -73,17 +86,31 @@ def detect(bars: list[Any], prev: dict[str, Any], primary: dict[str, Any], tz: s
         return None
     bar, before = session[-1], session[-2]
     now_m = _minutes(_local(bar.ts, tz).strftime("%H:%M"))
-    if now_m < open_m + int(g("vol_breakout.minutes_after_open", 30)) \
-            or now_m >= _minutes(g("vol_breakout.to", "14:30")):
+    key = "swing" if swing else "vol_breakout"
+    if now_m < open_m + int(g(f"{key}.minutes_after_open", 30)) \
+            or now_m >= _minutes(g(f"{key}.to", "14:30")):
         return None
-    k = float(g("vol_breakout.k", 0.5))
+    k = float(g(f"{key}.k", 0.5))
     rng = high - low
     day_open = float(session[0].open)
     up, down = day_open + k * rng, day_open - k * rng
     close = float(bar.close)
     vwap = float(primary.get("vwap") or 0.0)
     fast, slow = float(primary.get("ema9") or 0.0), float(primary.get("ema21") or 0.0)
-    if close > up >= float(before.close) and close > vwap and fast > slow:
+    if swing:
+        slope = _daily_slope(daily or [], tz, today, int(g("swing.trend_days", 20)))
+        if slope is None:
+            return None
+        earlier = session[:-1]
+        crossed_up = any(b.high >= up for b in earlier)
+        crossed_down = any(b.low <= down for b in earlier)
+        if bar.high >= up and not crossed_up and not crossed_down and slope > 0:
+            direction, level = 1, up
+        elif bar.low <= down and not crossed_down and not crossed_up and slope < 0:
+            direction, level = -1, down
+        else:
+            return None
+    elif close > up >= float(before.close) and close > vwap and fast > slow:
         direction, level = 1, up
     elif close < down <= float(before.close) and close < vwap and fast < slow:
         direction, level = -1, down
@@ -93,7 +120,11 @@ def detect(bars: list[Any], prev: dict[str, Any], primary: dict[str, Any], tz: s
     return Breakout(
         direction=direction, level=round(level, 4), day_open=day_open,
         prev_range=round(rng, 4), k=k, close=close, ts=bar.ts.isoformat(),
-        note=(f"first 5m close {side} today's open {day_open:,.2f} "
-              f"{'+' if direction > 0 else '-'} {k:g} x yesterday's range {rng:,.2f} "
-              f"= {level:,.2f} (close {close:,.2f}), {side} VWAP {vwap:,.2f}, "
-              f"9 EMA {'over' if direction > 0 else 'under'} the 21"))
+        note=((f"first 5m bar to reach today's open {day_open:,.2f} "
+               f"{'+' if direction > 0 else '-'} {k:g} x yesterday's range {rng:,.2f} "
+               f"= {level:,.2f}, with the 20-day trend — a 1-4 day swing")
+              if swing else
+              (f"first 5m close {side} today's open {day_open:,.2f} "
+               f"{'+' if direction > 0 else '-'} {k:g} x yesterday's range {rng:,.2f} "
+               f"= {level:,.2f} (close {close:,.2f}), {side} VWAP {vwap:,.2f}, "
+               f"9 EMA {'over' if direction > 0 else 'under'} the 21")))

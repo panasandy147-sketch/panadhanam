@@ -252,6 +252,9 @@ class TradeSignal(BaseModel):
     # scale-in (+50% at +1R, +25% at +2R). "One position per symbol" stops
     # BASE_ENTRY orders only.
     order_tag: str = "BASE_ENTRY"
+    # The gold desk (an instrument with swing: true): held overnight, out at
+    # the first session that opens in profit, the stop, or swing.max_hold_days.
+    hold_overnight: bool = False
     regime: Regime | None = None
     # The code that placed it, so results can be read per version.
     code_version: str = ""

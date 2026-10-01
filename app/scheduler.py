@@ -223,7 +223,13 @@ class TradingEngine:
                      self.risk.state.trades_today, max_daily)
             return []
         entry = scr.todays(self.cfg, clock.market_now(self.timezone).date())
-        return list((entry or {}).get("symbols") or [])
+        targets = list((entry or {}).get("symbols") or [])
+        # The gold desk's instruments (swing: true) are not screened — gold's
+        # ~1% daily range never passes the 2% ATR floor — and always looked at.
+        for item in self.cfg.watchlist():
+            if item.get("swing") and item["symbol"] not in targets:
+                targets.append(item["symbol"])
+        return targets
 
     async def maybe_run_screener(self, force: bool = False) -> dict[str, Any] | None:
         """Once a day at screener.run_at on the market clock (09:00 IST), from

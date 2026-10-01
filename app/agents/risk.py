@@ -406,11 +406,24 @@ class RiskManager:
             setup=(sweep.extra or {}).get("setup", "") if sweep is not None else "",
         )
 
+        # ---- the gold desk: an instrument with swing: true ----
+        # Only the 1-4 day volatility breakout trades it (its evidence), the
+        # morning screener does not apply (gold's ~1% daily range would fail
+        # its 2% ATR floor every day), and the position is held overnight.
+        swing = bool(self.cfg.instrument_meta(ctx.symbol).get("swing", False))
+        if swing:
+            from app.strategies.vol_breakout import SETUP_NAME as BREAKOUT
+            signal.hold_overnight = True
+            if signal.setup != BREAKOUT:
+                reasons.append(f"{ctx.symbol} is on the gold desk: only the 1-4 day "
+                               f"volatility breakout trades it")
+
         # ---- desk-level gates ----
         reasons.extend(self.desk_checks())
         reasons.extend(self.symbol_checks(ctx.symbol))
-        reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {},
-                                            composite_score))
+        if not swing:
+            reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {},
+                                                composite_score))
 
         # ---- can this instrument actually be bought? ----
         if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):

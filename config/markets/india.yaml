@@ -131,6 +131,9 @@ universe:
     - { symbol: "AXISBANK",   exchange: "NSE", lot_size: 625, fno: true, sector: "Banking", seed_price: 1150, band: "A" }
     - { symbol: "LT",         exchange: "NSE", lot_size: 150, fno: true, sector: "Infra",   seed_price: 3600, band: "A" }
     - { symbol: "BHARTIARTL", exchange: "NSE", lot_size: 475, fno: true, sector: "Telecom", seed_price: 1580, band: "A" }
+    # The gold desk: Nippon India's gold ETF, held 1-4 days on the volatility
+    # breakout (settings.yaml swing). Cash, delivery; never screened.
+    - { symbol: "GOLDBEES", exchange: "NSE", fno: false, sector: "Gold", band: "A", tick_size: 0.01, swing: true }
     - { symbol: "KOTAKBANK", exchange: "NSE", fno: false, sector: "Banking", band: "A" }
     - { symbol: "ITC", exchange: "NSE", fno: false, sector: "FMCG", band: "A" }
     - { symbol: "HINDUNILVR", exchange: "NSE", fno: false, sector: "FMCG", band: "A" }

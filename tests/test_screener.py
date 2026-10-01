@@ -177,7 +177,8 @@ async def test_the_engine_cycles_only_the_list_and_stops_at_four(scfg, monkeypat
     broker = PaperBroker(config={"total_capital": 350_000})
     await broker.connect()
     eng = TradingEngine(broker, scfg)
-    assert eng._screened_targets() == ["HDFCBANK", "SBIN"]
+    # ...and the gold desk's ETF, which is never screened
+    assert eng._screened_targets() == ["HDFCBANK", "SBIN", "GOLDBEES"]
     eng.risk.state.trades_today = 4
     assert eng._screened_targets() == []
 

@@ -293,6 +293,35 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         })
 
     # ------------------------------------------------------------------ #
+    gold = [i["symbol"] for i in cfg.watchlist() if i.get("swing")]
+    if gold:
+        sections.append({
+            "title": "The gold desk (held 1-4 days): " + ", ".join(gold),
+            "intro": ("Gold is traded on its own rules: the shares (not options), "
+                      "held overnight, on Larry Williams' volatility breakout — the "
+                      "strongest result of every test (two years of hourly bars and "
+                      "the last 60 days of 5-minute bars all positive). No morning "
+                      "screener and no other strategy on it."),
+            "rules": [
+                _rule("Entry: the first 5m bar today whose high reaches today's open + "
+                      "this share of yesterday's range (a long; a short: the low "
+                      "reaches the open minus it)", f"{g('swing.k', 0.5)} x range",
+                      "swing.k"),
+                _rule("Only with the trend: yesterday's close against the close this "
+                      "many sessions before", f"{g('swing.trend_days', 20)} days",
+                      "swing.trend_days"),
+                _rule("Stop: 2 ticks beyond today's open; target",
+                      f"{g('risk.min_risk_reward', 3.0)}R", "risk.min_risk_reward"),
+                _rule("Exit: the first later session that is in profit at the open "
+                      "(Williams' bail-out)",
+                      "on" if g("swing.first_profitable_open", True) else "off",
+                      "swing.first_profitable_open"),
+                _rule("…else the square-off of this session (the entry day is 0)",
+                      g("swing.max_hold_days", 4), "swing.max_hold_days"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     if g("vol_breakout.enabled", False):
         sections.append({
             "title": "Strategy: Volatility Breakout (Larry Williams, 1987 World Cup)",

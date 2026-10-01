@@ -97,6 +97,10 @@ def why_sold(row: dict[str, Any]) -> str:
             return (f"Closed at {fmt(exit_price)}{r_text} by the daily circuit "
                     f"breaker — the day's loss reached the limit, so everything "
                     f"was closed and the desk locked for the session.")
+        if detail == "first_profitable_open":
+            return (f"Sold at {fmt(exit_price)}{r_text} at the first session that "
+                    f"opened in profit — Larry Williams' bail-out on the 1-4 day "
+                    f"gold desk.")
         if detail == "time_stop":
             cause = "no follow-through within the time stop"
         elif detail == "square_off":
