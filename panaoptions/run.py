@@ -490,6 +490,21 @@ async def _session_report(market: str | None, days: int, symbols: str | None) ->
     return 0
 
 
+async def _swing_backtest() -> int:
+    """The swing desk's evidence (panaoptions/swing_backtest.py)."""
+    from panaoptions import swing_backtest
+    print("Larry Williams' volatility breakout, k 0.5 with the 20-day trend, held to "
+          "the first profitable open (max 4 sessions), ~30-day options.\n")
+    res = await swing_backtest.backtest()
+    for group, parts in res.items():
+        print(f"  {group}")
+        for name, s in parts.items():
+            print(f"    {name.replace('_', ' '):26s} {s['trades']:5d} trades, "
+                  f"{s['win_pct']:3d}% won, stock {s['stock_r']:+.2f}R, "
+                  f"option {s['option_r']:+.2f}R")
+    return 0
+
+
 def _suggest_fix() -> int:
     """Print the one command that resolves the first finding carrying one.
 
@@ -1124,6 +1139,9 @@ def main() -> None:
                         metavar="DAYS",
                         help="the last DAYS sessions (default 1) replayed through "
                              "today's rules: fired, taken, R and P&L (--market, --symbols)")
+    parser.add_argument("--swing-backtest", action="store_true",
+                        help="the swing desk's evidence: the 1-4 day breakout on two "
+                             "years of hourly and 60 days of 5-minute bars")
     parser.add_argument("--check-candles", action="store_true",
                         help="per symbol: candle source, last closed bar, stale or not "
                              "(--market, --symbols)")
@@ -1187,6 +1205,8 @@ def main() -> None:
         raise SystemExit(_reflect())
     if args.why:
         raise SystemExit(_why(args.market))
+    if args.swing_backtest:
+        raise SystemExit(asyncio.run(_swing_backtest()))
     if args.session_report:
         raise SystemExit(asyncio.run(_session_report(args.market, args.session_report,
                                                      args.symbols)))

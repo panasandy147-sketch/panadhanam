@@ -530,6 +530,39 @@ silent fall back to the default — running one desk while believing you
 selected the other is the most expensive way this could fail — and the
 profile in force is printed by `--check-config` and shown on the dashboard.
 
+### The swing desk (1-4 day options, US and India)
+
+A third desk beside the 0DTE one, on port 8102. It holds positions
+**overnight** and runs one strategy, the one with evidence: **Larry Williams'
+volatility breakout**.
+
+- **Entry:** the first 5m bar whose high reaches today's open + 0.5 ×
+  yesterday's range (calls). Puts are the mirror. Only in the direction of the
+  20-day trend.
+- **Stop:** today's open, on the underlying.
+- **Exit:** the first later session that opens in profit (Williams'
+  bail-out), else the stop, else the close of the 4th session.
+- **Options:** 21–45 days to expiry, so time decay is small over a few days.
+
+To turn it on, add `SWING_DESK=on` to the root `.env`. `auto_update.sh` then
+starts it with its own book, journal and learned weights (`data/swing`,
+`journal/swing`), covering both markets in turn. Re-run its evidence any time:
+
+    ../.venv/Scripts/python.exe run.py --swing-backtest
+
+On two years of hourly bars (October 2024 to September 2026) it made, per
+trade on the option:
+
+| Market | First year | Second year |
+|---|---|---|
+| US | +0.16R | +0.04R |
+| India | +0.20R | +0.12R |
+| Gold | +0.15R | +0.19R |
+
+About half the trades won. The last 60 days were flat. It's a small edge, but
+positive in every market in both years. The DeMark TD9 reversal and the
+Perdices pullback were tested the same way on 5 years of daily bars and lost.
+
 ### If the desk took nothing today
 
 Start with one command. It covers both markets, or one with `--market US|IN`:

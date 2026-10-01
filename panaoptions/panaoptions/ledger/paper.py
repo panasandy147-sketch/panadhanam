@@ -71,6 +71,7 @@ class PaperLedger:
             underlying_entry=signal.underlying_at_entry,
             risk_r=round(abs(signal.underlying_at_entry - signal.underlying_support), 4)
             if signal.underlying_at_entry and signal.underlying_support else 0.0,
+            hold_overnight=bool(self.cfg.get("swing.enabled", False)),
         )
         trade.fills.append(Fill(ts=ts, quantity=signal.quantity,
                                 price=fill_price, reason="ENTRY"))
@@ -236,7 +237,11 @@ class PaperLedger:
         sign = 1.0 if trade.direction is Direction.LONG else -1.0
         move =(underlying_price - trade.underlying_entry) * sign / trade.risk_r
         trade.best_r = max(trade.best_r, move)
-        scale_r = float(self.cfg.get("risk.scale_out_r", 1.5) or 0.0)
+        # A swing trade exits by its own plan (the first profitable open, the
+        # stop, the hold limit — app.py), never by an intraday scale-out or
+        # trail, whatever the market's risk.scale_out_r says (India: 2R).
+        scale_r = 0.0 if trade.hold_overnight else float(
+            self.cfg.get("risk.scale_out_r", 1.5) or 0.0)
         trail_r = float(self.cfg.get("risk.runner_trail_r", 1.0))
         fills: list[Fill] = []
         if scale_r <= 0:

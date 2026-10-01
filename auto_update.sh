@@ -7,7 +7,8 @@
 #
 # Leave it running in its own Git Bash window. It starts Ollama if it is
 # installed but not running, starts panadhanam (:8000) and panaoptions (:8100)
-# in the background if they are not already up, opens both dashboards in the
+# — and the swing desk (:8102, 1-4 day options) when SWING_DESK=on in .env —
+# in the background if they are not already up, opens the dashboards in the
 # browser (this first time only), then every interval:
 #
 #   1. git fetch — only this branch, read-only; nothing is pushed, nothing on
@@ -42,6 +43,9 @@ LOG="logs/auto_update.log"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 PORT_PD=8000
 PORT_PO="${PANAOPTIONS_PORT:-8100}"
+# The swing desk (panaoptions profile swing: 1-4 day options, US and India),
+# a third desk beside the 0DTE one — only when SWING_DESK=on in .env.
+PORT_SW="${PANAOPTIONS_SWING_PORT:-8102}"
 
 NOHUP="$(command -v nohup || true)"      # Git for Windows ships it; if not, plain &
 
@@ -82,6 +86,21 @@ start_panaoptions() {
   say "starting panaoptions on :$PORT_PO"
   # exec: the subshell BECOMES the desk rather than lingering to wait for it.
   ( cd panaoptions && exec env NO_BROWSER=1 $NOHUP ./start.sh >> ../logs/panaoptions.log 2>&1 ) &
+}
+
+swing_on() {
+  [ "$(env_value SWING_DESK off)" = "on" ] \
+    || grep -qE '^SWING_DESK=on' panaoptions/.env 2>/dev/null
+}
+
+start_swing() {
+  swing_on || return 0
+  say "starting the swing desk on :$PORT_SW (1-4 day options, US and India)"
+  # Its own book and journal (data/swing, journal/swing), both markets in
+  # turn (AUTO), whatever profile the 0DTE desk's .env names.
+  ( cd panaoptions && exec env NO_BROWSER=1 PANAOPTIONS_PROFILE=swing \
+      PANAOPTIONS_DESK_DIR=swing PANAOPTIONS_PORT="$PORT_SW" PANAOPTIONS_MARKET=AUTO \
+      $NOHUP ./start.sh >> ../logs/panaoptions-swing.log 2>&1 ) &
 }
 
 # The local model (panadhanam's AI reasoning, the panaoptions agents): the
@@ -137,14 +156,16 @@ ensure_ollama() {
 open_tabs() {
   [ -n "${AUTO_UPDATE_RELOADED:-}" ] && return
   local url
-  for url in "http://127.0.0.1:$PORT_PD" "http://127.0.0.1:$PORT_PO"; do
+  local urls=("http://127.0.0.1:$PORT_PD" "http://127.0.0.1:$PORT_PO")
+  swing_on && urls+=("http://127.0.0.1:$PORT_SW")
+  for url in "${urls[@]}"; do
     case "$(uname -s)" in
       MINGW*|MSYS*|CYGWIN*) explorer.exe "$url" >/dev/null 2>&1 || : ;;
       Darwin)               open "$url" ;;
       *)                    command -v xdg-open >/dev/null && xdg-open "$url" >/dev/null 2>&1 ;;
     esac
   done
-  say "opened both dashboards in the browser"
+  say "opened the dashboards in the browser"
 }
 
 wait_up() {
@@ -155,10 +176,13 @@ wait_up() {
 restart_all() {
   stop_port "$PORT_PD"
   stop_port "$PORT_PO"
+  stop_port "$PORT_SW"
   start_panadhanam
   start_panaoptions
+  start_swing
   wait_up "$PORT_PD" panadhanam
   wait_up "$PORT_PO" panaoptions
+  if swing_on; then wait_up "$PORT_SW" panaoptions-swing; fi
 }
 
 check() {
@@ -200,6 +224,7 @@ main() {
   ensure_ollama
   up "$PORT_PD" || { start_panadhanam; wait_up "$PORT_PD" panadhanam; }
   up "$PORT_PO" || { start_panaoptions; wait_up "$PORT_PO" panaoptions; }
+  if swing_on; then up "$PORT_SW" || { start_swing; wait_up "$PORT_SW" panaoptions-swing; }; fi
   open_tabs
   while :; do
     check

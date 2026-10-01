@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from panaoptions.config import DESK as _DESK
 from panaoptions.config import ROOT
 from panaoptions.journal.models import Card, JournalEntry
 from panaoptions.ledger.store import get_conn
@@ -19,7 +20,8 @@ from panaoptions.logging import get_logger
 
 log = get_logger("journal.store")
 
-JOURNAL_DIR = ROOT / "journal"
+# A second desk keeps its own journal (config.DESK, PANAOPTIONS_DESK_DIR).
+JOURNAL_DIR = ROOT / "journal" / _DESK if _DESK else ROOT / "journal"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS journal (

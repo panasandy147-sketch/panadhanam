@@ -511,8 +511,11 @@ def evaluate_all(symbol: str, candles: list[Candle], levels: SessionLevels,
     gated = pd_gate_strategies(cfg)
     sweep: dict | None | bool = False           # not looked yet
 
+    only = set(cfg.get("swing.strategies") or []) if cfg.get("swing.enabled", False) else set()
     for cls in ALL:
         strategy = cls(cfg)
+        if only and strategy.key not in only:
+            continue
         if not strategy.enabled or not strategy.in_window(df5):
             continue
         if strategy.key in gated:
@@ -967,7 +970,8 @@ class VolatilityBreakout(Strategy):
     def evaluate(self, symbol, df5, df15, levels) -> Setup:
         setup = _base(symbol, df5, self.name)
         g = self.cfg.get
-        k = float(g("strategies.volatility_breakout.k", 0.5))
+        swing = bool(g("swing.enabled", False))
+        k = float(g("swing.k", 0.5) if swing else g("strategies.volatility_breakout.k", 0.5))
         prev_range = float(levels.previous_high or 0) - float(levels.previous_low or 0)
         if prev_range <= 0:
             setup.blockers.append("no previous-day range to measure from")
@@ -982,12 +986,26 @@ class VolatilityBreakout(Strategy):
         up, down = day_open + k * prev_range, day_open - k * prev_range
         bar, prev = today.iloc[-1], today.iloc[-2]
         snapshot = ta.compute(df5, self.cfg)
-        long_break = (bar["close"] > up >= prev["close"]
-                      and snapshot.close > snapshot.vwap
-                      and snapshot.ema_fast > snapshot.ema_slow)
-        short_break = (bar["close"] < down <= prev["close"]
-                       and snapshot.close < snapshot.vwap
-                       and snapshot.ema_fast < snapshot.ema_slow)
+        if swing:
+            # The multi-day desk, as backtested on 2 years of hourly bars:
+            # the first bar whose HIGH (LOW) reaches the level today, with
+            # the 20-day trend; no VWAP / EMA condition.
+            slope = self._daily_slope(df5, int(g("swing.trend_days", 20)))
+            if slope is None:
+                setup.blockers.append("not enough daily history for the 20-day trend")
+                return setup
+            earlier = today.iloc[:-1]
+            long_break = (bar["high"] >= up and not (earlier["high"] >= up).any()
+                          and not (earlier["low"] <= down).any() and slope > 0)
+            short_break = (bar["low"] <= down and not (earlier["low"] <= down).any()
+                           and not (earlier["high"] >= up).any() and slope < 0)
+        else:
+            long_break = (bar["close"] > up >= prev["close"]
+                          and snapshot.close > snapshot.vwap
+                          and snapshot.ema_fast > snapshot.ema_slow)
+            short_break = (bar["close"] < down <= prev["close"]
+                           and snapshot.close < snapshot.vwap
+                           and snapshot.ema_fast < snapshot.ema_slow)
         if not (long_break or short_break):
             setup.blockers.append(
                 f"no fresh 5m close beyond open {day_open:.2f} ± {k:g} x yesterday's "
@@ -996,10 +1014,13 @@ class VolatilityBreakout(Strategy):
 
         setup.direction = Direction.LONG if long_break else Direction.SHORT
         setup.indicators = snapshot
-        setup.pattern = f"Volatility breakout ({k:g} x range)"
+        setup.pattern = f"Volatility breakout ({k:g} x range)" + (", swing" if swing else "")
         level = up if long_break else down
         side = "above" if long_break else "below"
         setup.entry_trigger = float(bar["close"])
+        if swing:
+            setup.min_dte_override = int(g("swing.min_dte", 21))
+            setup.max_dte_override = int(g("swing.max_dte", 45))
         setup.key_level = level
         setup.key_level_source = f"open {'+' if long_break else '-'} {k:g} x previous range"
         setup.confirmations = [
@@ -1010,7 +1031,11 @@ class VolatilityBreakout(Strategy):
             f"9 EMA {'>' if long_break else '<'} 21 EMA "
             f"({snapshot.ema_fast:.2f} vs {snapshot.ema_slow:.2f})",
         ]
-        frac = float(g("strategies.volatility_breakout.stop_fraction", 1.0))
+        if swing:
+            setup.confirmations.append(
+                f"swing: 20-day trend {'up' if long_break else 'down'}; held overnight to "
+                f"the first profitable open, the stop, or {g('swing.max_hold_days', 4)} sessions")
+        frac = 1.0 if swing else float(g("strategies.volatility_breakout.stop_fraction", 1.0))
         entry = float(bar["close"])
         risk = abs(entry - day_open) * frac
         sign = 1.0 if long_break else -1.0
@@ -1023,6 +1048,18 @@ class VolatilityBreakout(Strategy):
         setup.trend_aligned = True
         return setup
 
+
+def _daily_slope(df5: pd.DataFrame, days: int) -> float | None:
+    """Yesterday's close less the close `days` sessions before it, from the
+    5m history (today excluded)."""
+    closes = df5["close"].groupby(df5.index.date).last()
+    closes = closes.iloc[:-1]
+    if len(closes) <= days:
+        return None
+    return float(closes.iloc[-1] - closes.iloc[-1 - days])
+
+
+VolatilityBreakout._daily_slope = staticmethod(_daily_slope)
 
 LAST: list[type[Strategy]] = [VolatilityBreakout]   # after every other family
 

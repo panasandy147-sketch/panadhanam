@@ -12,11 +12,16 @@ from panaoptions import envfile
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "settings.yaml"
 PROFILE_DIR = ROOT / "config" / "profiles"
-DATA_DIR = ROOT / "data"
+# A second desk on the same machine (the swing desk beside the 0DTE one):
+# PANAOPTIONS_DESK_DIR=swing keeps its book, journal and learned weights in
+# data/swing, journal/swing and config/learned-swing.yaml, so two desks never
+# share a ledger. Unset: the one desk, as before.
+DESK = (os.getenv("PANAOPTIONS_DESK_DIR") or "").strip().strip("/\\")
+DATA_DIR = ROOT / "data" / DESK if DESK else ROOT / "data"
 ENV_PATH = ROOT / ".env"
 # What the Friday reflection learned: strategy weights, merged over the
 # settings and the profile. Git-ignored, so `git pull` never conflicts with it.
-LEARNED_PATH = ROOT / "config" / "learned.yaml"
+LEARNED_PATH = ROOT / "config" / (f"learned-{DESK}.yaml" if DESK else "learned.yaml")
 MARKET_DIR = ROOT / "config" / "markets"
 MARKETS = ("US", "IN")
 

@@ -334,6 +334,8 @@ class ExitReason(str, Enum):
     TIME_EXIT = "TIME_EXIT"
     DAY_END = "DAY_END"
     CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
+    # The swing desk: Larry Williams' bail-out, the first open in profit.
+    FIRST_PROFITABLE_OPEN = "FIRST_PROFITABLE_OPEN"
 
 
 class Fill(BaseModel):
@@ -395,6 +397,10 @@ class PaperTrade(BaseModel):
     underlying_entry: float = 0.0
     risk_r: float = 0.0
     best_r: float = 0.0
+    # The swing desk: held overnight (not squared off at the close) until the
+    # first profitable open, the stop, or swing.max_hold_days sessions.
+    hold_overnight: bool = False
+    fpo_checked: str = ""          # the session date whose open was judged
 
     @property
     def is_open(self) -> bool:

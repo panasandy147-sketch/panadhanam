@@ -580,6 +580,11 @@ class OptionsDesk:
         today = now.date().isoformat()
         if self.risk.roll_day(today):
             self._restore_day(today)
+            if self.ledger.open_trades:
+                # Swing positions carried overnight still hold capital and a
+                # slot: a new day's counters start from them, not from zero.
+                self.risk.state.open_trades = len(self.ledger.open_trades)
+                self.risk.state.deployed = self.ledger._deployed()
 
         phase = clock.session_phase(self.cfg, now)
         result: dict[str, Any] = {"phase": phase, "ts": now.isoformat(),
@@ -1432,7 +1437,9 @@ class OptionsDesk:
 
             if price is None:
                 continue
-            fills = self.ledger.mark(trade_id, price, underlying, now, ema_fast)
+            fpo = self._first_profitable_open(trade, candles, price, now)
+            fills = [fpo] if fpo else self.ledger.mark(trade_id, price, underlying,
+                                                       now, ema_fast)
             for fill in fills:
                 actions.append(f"{trade.symbol}: {fill.reason} at {fill.price:.2f}")
                 self.activity.add(
@@ -1523,16 +1530,61 @@ class OptionsDesk:
             log.info("%s green past the tighten time — stop moved to "
                      "breakeven %.2f", trade.contract_label, trade.stop_price)
 
+    def _first_profitable_open(self, trade, candles, price: float, now: datetime):
+        """Larry Williams' bail-out for a swing trade: on each later session,
+        judged once at its first 5m bar, sell if the underlying OPENED in the
+        trade's favour; otherwise keep holding (the stop still applies)."""
+        if not trade.hold_overnight or not bool(
+                self.cfg.get("swing.first_profitable_open", True)):
+            return None
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(self.cfg.timezone)
+        today = now.date()
+        if trade.fpo_checked == today.isoformat() or \
+                trade.opened_at.astimezone(tz).date() >= today:
+            return None
+        open_at = clock.parse_hhmm(str(self.cfg.get("session.market_open", "09:30")))
+        bars = [c for c in candles or []
+                if c.ts.astimezone(tz).date() == today
+                and c.ts.astimezone(tz).timetz().replace(tzinfo=None) >= open_at]
+        if not bars:
+            return None                                   # not open yet
+        trade.fpo_checked = today.isoformat()
+        sign = 1.0 if trade.direction is Direction.LONG else -1.0
+        if (bars[0].open - trade.underlying_entry) * sign <= 0:
+            return None
+        log.info("%s opened in profit (%.2f vs entry %.2f) — first profitable open",
+                 trade.contract_label, bars[0].open, trade.underlying_entry)
+        return self.ledger.close(trade.id, price, ExitReason.FIRST_PROFITABLE_OPEN, now)
+
+    def _held_sessions(self, trade, now: datetime) -> int:
+        """Weekday sessions since the entry day (the entry day is 0)."""
+        from zoneinfo import ZoneInfo
+
+        import numpy as np
+        start = trade.opened_at.astimezone(ZoneInfo(self.cfg.timezone)).date()
+        return int(np.busday_count(start, now.date()))
+
     async def _square_off(self, now: datetime) -> None:
         if not self.ledger.open_trades:
             return
+        # The swing desk holds overnight: only a position that has reached
+        # swing.max_hold_days sessions is closed at the end of the day.
+        max_days = int(self.cfg.get("swing.max_hold_days", 4) or 0)
+        due = [t for t in self.ledger.open_trades.values()
+               if not t.hold_overnight or self._held_sessions(t, now) >= max_days]
+        if not due:
+            return
         prices: dict[str, float] = {}
-        for trade in self.ledger.open_trades.values():
+        for trade in due:
             price = await self._contract_price(trade)
             if price is not None:
                 prices[trade.contract_label] = price
-        closed = list(self.ledger.open_trades.values())
-        self.ledger.close_all(prices, ExitReason.DAY_END, now)
+        closed = due
+        reason = ExitReason.DAY_END
+        for trade in due:
+            self.ledger.close(trade.id, prices.get(trade.contract_label, trade.entry_price),
+                              ExitReason.TIME_EXIT if trade.hold_overnight else reason, now)
         for trade in closed:
             store.save_trade(trade)
             await self._grade(trade)

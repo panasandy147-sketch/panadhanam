@@ -677,6 +677,36 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         ],
     })
 
+    if g("swing.enabled", False):
+        sections.insert(0, {
+            "title": "The swing desk (1-4 day options)",
+            "intro": ("This desk holds positions overnight. One strategy, the one "
+                      "with evidence on two years of hourly bars in the US, India and "
+                      "gold: Larry Williams' volatility breakout, exited by his "
+                      "first-profitable-open rule."),
+            "rules": [
+                _rule("Entry: the first 5m bar today whose high reaches today's open + "
+                      "this share of yesterday's range (calls; puts: the low reaches "
+                      "the open minus it)", f"{g('swing.k', 0.5)} x range", "swing.k"),
+                _rule("Only with the trend: yesterday's close against the close this "
+                      "many sessions before", f"{g('swing.trend_days', 20)} days",
+                      "swing.trend_days"),
+                _rule("Stop: today's open, on the underlying, checked every bar until "
+                      "the trade closes", "the open", "strategies.volatility_breakout"),
+                _rule("Exit: the first later session that OPENS in profit (Larry "
+                      "Williams' bail-out)",
+                      "on" if g("swing.first_profitable_open", True) else "off",
+                      "swing.first_profitable_open"),
+                _rule("…else closed at the end of this session (the entry day is 0)",
+                      g("swing.max_hold_days", 4), "swing.max_hold_days"),
+                _rule("Options: days to expiry (theta is small over a few days)",
+                      f"{g('swing.min_dte', 21)}–{g('swing.max_dte', 45)}",
+                      "swing.min_dte / swing.max_dte"),
+                _rule("No intraday scale-out or trail, and no 1:3 room check", "—",
+                      "risk.scale_out_r / room_check"),
+            ],
+        })
+
     return {"desk": "panaoptions",
             "profile": getattr(cfg, "profile_label", "") or "default",
             "sections": sections}

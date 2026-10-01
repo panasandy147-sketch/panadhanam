@@ -1,0 +1,57 @@
+# ==========================================================================
+# profile: swing — a multi-day options desk (1-4 days), US and India.
+#
+#   PANAOPTIONS_PROFILE=swing PANAOPTIONS_DESK_DIR=swing PANAOPTIONS_PORT=8102
+#   (auto_update.sh starts it beside the 0DTE desk when SWING_DESK=on in
+#    panaoptions/.env; its book, journal and learned weights stay separate)
+#
+# One strategy, the one with evidence: Larry Williams' volatility breakout,
+# k 0.5 x yesterday's range, only with the 20-day trend. On two years of
+# hourly bars (Oct 2024 - Sep 2026, ~30-day at-the-money options, Black-
+# Scholes) it made, per trade:
+#     US (10 names)   +0.16R (1,596 trades) then +0.05R (1,479)
+#     India (9)       +0.20R (1,299)        then +0.12R (1,318)
+#     gold            +0.15R (119)          then +0.19R (119)
+# about half the trades won; the last 60 days were flat (-0.01 to -0.09R).
+# A small edge, positive in every market in both years — nothing the
+# same-day desk tested did that.
+#
+#   Entry  the first 5m bar today whose high reaches open + 0.5 x yesterday's
+#          range (calls; puts: the low reaches open - 0.5 x range), the
+#          20-day trend agreeing
+#   Stop   today's open, on the underlying, every bar until the trade closes
+#   Exit   the first later session that OPENS in profit (Williams'
+#          bail-out), else the stop, else the close of the 4th session
+#   Option 21-45 days to expiry, delta 0.40-0.55: theta is small over a
+#          few days, unlike a same-day contract
+# ==========================================================================
+
+swing:
+  enabled: true
+  strategies: ["volatility_breakout"]
+  k: 0.5
+  trend_days: 20
+  first_profitable_open: true
+  max_hold_days: 4
+  min_dte: 21
+  max_dte: 45
+
+strategies:
+  volatility_breakout:
+    enabled: true
+    from: "09:45"
+    to: "15:30"
+    # The bail-out exit is the plan; the target is not, so the 1:3 room
+    # check against the previous-day / opening-range high does not apply.
+    room_check: false
+
+contracts:
+  min_delta: 0.40
+  max_delta: 0.55
+
+risk:
+  exit_style: "r_multiple"
+  scale_out_r: 0           # no scale-out or trail: the bail-out exit decides
+  stop_mode: "underlying"
+  disaster_stop_pct: 60.0  # a 30-day option moves less; the open is the stop
+  max_hold_minutes: null
