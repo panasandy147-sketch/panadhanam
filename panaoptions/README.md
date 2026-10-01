@@ -544,6 +544,31 @@ For each market it prints two things:
 - **The setups that did fire** and the rule that refused each one: F&O
   confluence, reward:risk, the contract ladder, the risk limits.
 
+Then ask what those refused setups **would have done**:
+
+    ../.venv/Scripts/python.exe run.py --missed 2      # the last 2 audited days
+
+This follows each refused setup on the underlying, from the time it was
+refused to square-off. Reaching the target first counts as its planned R,
+hitting the stop first as −1R, and anything else as where it stood at the
+close. Results are totalled by gate under **What the refused setups did
+next** in that day's audit. That shows what each gate cost in missed winners
+and saved in dodged losers. The desk also does this by itself after every
+close (`learning.missed_review`).
+
+With Ollama running, a coach then suggests up to three settings to test
+(`learning.daily_coach`). The suggestions are written down and never
+applied; a change goes in only after the 20-session walk-forward agrees.
+
+To see what today's rules would have done on the latest sessions, from market
+data alone:
+
+    ../.venv/Scripts/python.exe run.py --session-report 1 --market US
+
+This lists the setups that fired and the trades the rules would have taken,
+each with its R and P&L, plus the totals and why the rest were not taken. A
+cloud routine runs it for both markets every weekday after the US close.
+
 Then work down the gates in order; each one is visible somewhere:
 
 0. **The clock.** Every strategy skips **09:30–09:45**, where spreads are
