@@ -24,6 +24,10 @@ class CandlestickAgent(BaseAgent):
         sweep = ind.get("pd_sweep") or {}
         if sweep.get("confirmed") and bool(self.cfg.get("pd_sweep.enabled", True)):
             return self._sweep_report(ctx, primary, sweep)
+        # --- Larry Williams' volatility breakout: a complete setup too.
+        breakout = ind.get("vol_breakout") or {}
+        if breakout and bool(self.cfg.get("vol_breakout.enabled", False)):
+            return self._breakout_report(ctx, primary, breakout)
 
         score = 0.0
         evidence: list[Evidence] = []
@@ -146,6 +150,26 @@ class CandlestickAgent(BaseAgent):
             suggested_target=round(vwap, 2) if vwap else None,
             extra={"setup": SETUP_NAME, "sweep": sweep, "patterns": [sweep.get("pattern")],
                    "atr": primary.get("atr", 0.0), "vwap": vwap},
+        )
+
+    def _breakout_report(self, ctx: MarketContext, primary: dict, breakout: dict) -> AgentReport:
+        from app.strategies.vol_breakout import SETUP_NAME
+        direction = int(breakout.get("direction") or 0)
+        score = float(self.cfg.get("vol_breakout.score", 0.9)) * direction
+        price = float(primary.get("last_close") or breakout.get("close") or 0.0)
+        return AgentReport(
+            agent_id=self.agent_id, symbol=ctx.symbol,
+            bias=self._bias_from_score(score), score=round(score, 3), confidence=0.9,
+            rationale=(f"{SETUP_NAME}: {breakout.get('note', '')}. The day's range "
+                       f"expansion is under way — wrong if back at today's open "
+                       f"{float(breakout.get('day_open') or 0):,.2f}; target 3R."),
+            evidence=[Evidence(label=SETUP_NAME, value=breakout.get("note", ""), weight=1.0)],
+            # The risk desk places the stop exactly 2 ticks beyond today's open.
+            invalidation_level=round(float(breakout.get("day_open") or 0.0), 4),
+            suggested_entry=price,
+            extra={"setup": SETUP_NAME, "breakout": breakout,
+                   "patterns": ["volatility_breakout"],
+                   "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 
     @staticmethod

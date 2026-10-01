@@ -38,6 +38,12 @@ session:
 # the lunch freeze, an afternoon VWAP-pullback window; square-off 15:45.
 screener:
   run_at: "09:00"
+  # The daily-ATR floor 1.0% (was 2.0%) with the volatility breakout on
+  # (below), 1 Oct 2026, 20-session walk-forward with the account rules:
+  # earlier ten sessions +2.83% -> +5.26%, judged ten +1.04% -> +4.73%
+  # (+0.47R a trade, 50% won), drawdown unchanged at 1.0% / 2.0%.
+  band_a: {min_atr_pct: 1.0}
+  band_b: {min_atr_pct: 1.0}
   windows:
     morning_from: "09:45"
     morning_to: "11:30"
@@ -176,3 +182,10 @@ universe:
     Tech: 2
     Semis: 1
     default: 2
+
+# Larry Williams' volatility breakout ON for the US at 0.5 x yesterday's
+# range (settings.yaml vol_breakout; the screener floor above). India keeps
+# it off: no setting beat India's rules in both halves.
+vol_breakout:
+  enabled: true
+  k: 0.5

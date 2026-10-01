@@ -293,6 +293,35 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         })
 
     # ------------------------------------------------------------------ #
+    if g("vol_breakout.enabled", False):
+        sections.append({
+            "title": "Strategy: Volatility Breakout (Larry Williams, 1987 World Cup)",
+            "intro": ("Yesterday's range says how far price can travel today. Once "
+                      "it has moved a set share of that range away from today's open, "
+                      "the day's expansion is under way."),
+            "rules": [
+                _rule("The trigger: the FIRST closed 5m candle beyond today's open "
+                      "plus (long) or minus (short) this share of yesterday's range — "
+                      "a level crossed earlier is a chase, not taken",
+                      f"{g('vol_breakout.k', 0.5)} x range", "vol_breakout.k"),
+                _rule("Price on the same side of VWAP, the 9 EMA over the 21 for a long "
+                      "(under for a short)", "required", "vol_breakout.enabled"),
+                _rule("Entries from this long after the open, until",
+                      f"{g('vol_breakout.minutes_after_open', 30)} min – "
+                      f"{g('vol_breakout.to', '14:30')}",
+                      "vol_breakout.minutes_after_open / vol_breakout.to"),
+                _rule("The candlestick analyst's score for it",
+                      g("vol_breakout.score", 0.9), "vol_breakout.score"),
+                _rule("Stop: exactly this many ticks beyond today's open — back there "
+                      "and the expansion has failed", g("vol_breakout.stop_ticks", 2),
+                      "vol_breakout.stop_ticks"),
+                _rule("Target, with no room check against the previous-day high/low "
+                      "and no time stop", f"{g('risk.min_risk_reward', 3.0)}R",
+                      "risk.min_risk_reward"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     sections.append({
         "title": "Previous-day F&O confluence",
         "intro": ("Each symbol's previous session is mapped every day: high "

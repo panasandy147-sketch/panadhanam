@@ -121,7 +121,7 @@ risk:
   time_stop_setups: ["Mean Reversion"]   # which setups the timer applies to
   # Setups that are NEVER time-stopped: they run to the target, the stop or
   # the intraday square-off.
-  no_time_stop_setups: ["PD Liquidity Sweep"]
+  no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout"]
   # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
   # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
   # At +1.0R open: ADD 50% of the base, and the stop for the WHOLE position
@@ -387,6 +387,22 @@ technical:
 # stop_ticks beyond the sweep candle's wick; the target is the day's VWAP or
 # min_reward_risk (3R), whichever is further; there is no time stop — it runs
 # to the target, the stop, or the square-off (15:15 India).
+# --------------------------------------------------------------------------
+# VOLATILITY BREAKOUT (Larry Williams, 1987 Robbins World Cup) — intraday
+# --------------------------------------------------------------------------
+# The FIRST closed 5m candle beyond today's open +/- k x yesterday's range,
+# with VWAP and the 9/21 EMAs agreeing. Stop stop_ticks beyond today's open,
+# target risk.min_risk_reward (3R), no time stop, no room check. Scored
+# `score` by the candlestick analyst. Off here; on for the US (us.yaml)
+# after the 20-session walk-forward — see app/strategies/vol_breakout.py.
+vol_breakout:
+  enabled: false
+  k: 0.5
+  score: 0.9
+  minutes_after_open: 30
+  to: "14:30"
+  stop_ticks: 2
+
 pd_sweep:
   enabled: true
   timeframes: ["5m", "15m"]

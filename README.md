@@ -156,6 +156,17 @@ Every buy in the day's audit (`journal/audit/<us|in>/YYYY-MM-DD.md`) carries a
 
 The exit adds the result in R.
 
+**Volatility Breakout (Larry Williams, 1987 World Cup).** US only, intraday.
+- **Trigger:** the first closed 5m candle beyond today's open ± 0.5 × yesterday's
+  range, with price on the same side of VWAP and the 9 EMA over (or under) the 21.
+- **Stop:** 2 ticks beyond today's open. **Target:** 3R, with no room check
+  and no time stop.
+- **Why the US only:** on the 20-session walk-forward (to 30 Sept 2026), the
+  breakout plus a 1.0% screener ATR floor took the US from +2.83% to +5.26%
+  in the earlier ten sessions and from +1.04% to +4.73% in the judged ten,
+  with the same drawdown. No setting beat India's rules in both halves.
+  Switch it with `vol_breakout.enabled` in `config/markets/<market>.yaml`.
+
 **Previous Day Liquidity Sweep (failed breakout).** US and India, intraday.
 - **Trigger:** a 5m or 15m candle pierces the previous-day high or low and
   closes back inside yesterday's range.

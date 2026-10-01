@@ -860,9 +860,11 @@ class RiskManager:
         """The candlestick analyst's confirmed PD Liquidity Sweep in this
         trade's direction, if that is what this trade is."""
         from app.strategies.pd_sweep import SETUP_NAME
+        from app.strategies.vol_breakout import SETUP_NAME as BREAKOUT
         want = 1 if bias == Bias.BULLISH else -1
         for r in reports or []:
-            if (r.agent_id == "candlestick" and (r.extra or {}).get("setup") == SETUP_NAME
+            if (r.agent_id == "candlestick"
+                    and (r.extra or {}).get("setup") in (SETUP_NAME, BREAKOUT)
                     and r.score * want > 0 and r.invalidation_level):
                 return r
         return None
@@ -883,8 +885,16 @@ class RiskManager:
         tick = float(meta.get("tick_size")
                      or (0.01 if str(getattr(self.cfg, "active_market", "IN")).upper() == "US"
                          else 0.05))
-        ticks = int(self.cfg.get("pd_sweep.stop_ticks", 2))
-        need = float(self.cfg.get("pd_sweep.min_reward_risk", 3.0))
+        from app.strategies.vol_breakout import SETUP_NAME as BREAKOUT
+        breakout = (sweep.extra or {}).get("setup") == BREAKOUT
+        if breakout:
+            # The volatility breakout: the same exact-level stop, beyond
+            # today's open instead of a wick, and the desk's 3R target.
+            ticks = int(self.cfg.get("vol_breakout.stop_ticks", 2))
+            need = float(self.cfg.get("risk.min_risk_reward", 3.0))
+        else:
+            ticks = int(self.cfg.get("pd_sweep.stop_ticks", 2))
+            need = float(self.cfg.get("pd_sweep.min_reward_risk", 3.0))
         long = bias == Bias.BULLISH
         wick = float(sweep.invalidation_level)
         u_stop = round(wick - ticks * tick if long else wick + ticks * tick, 4)
@@ -898,7 +908,7 @@ class RiskManager:
                     guard.UnderlyingStop(u_stop, "sweep", "wick breached"))
         sign = 1.0 if long else -1.0
         three_r = spot + sign * need * u_risk
-        vwap = float((sweep.extra or {}).get("vwap") or 0.0)
+        vwap = 0.0 if breakout else float((sweep.extra or {}).get("vwap") or 0.0)
         vwap_r = (vwap - spot) * sign / u_risk if vwap else 0.0
         if vwap_r >= need:
             u_target, how = vwap, f"VWAP {vwap:.2f} ({vwap_r:.1f}R)"
@@ -906,8 +916,10 @@ class RiskManager:
             u_target, how = three_r, (f"{need:g}R ({three_r:.2f}; VWAP {vwap:.2f} is only "
                                       f"{max(vwap_r, 0):.1f}R)" if vwap else f"{need:g}R")
         rr = abs(u_target - spot) / u_risk
-        note = (f"sweep stop {ticks} tick(s) beyond the wick {wick:.2f} → {u_stop:.2f}; "
-                f"target {how}; no time stop")
+        note = ((f"breakout stop {ticks} tick(s) beyond today's open {wick:.2f} → "
+                 f"{u_stop:.2f}; target {how}") if breakout else
+                (f"sweep stop {ticks} tick(s) beyond the wick {wick:.2f} → {u_stop:.2f}; "
+                 f"target {how}; no time stop"))
         ustop = guard.UnderlyingStop(u_stop, "sweep", note)
         if is_option:
             leg = (source.extra.get("suggested_leg") or {}) if source else {}
