@@ -231,6 +231,9 @@ main() {
     [ -n "$ONCE" ] && exit 0
     sleep "$INTERVAL"
     ensure_ollama          # started again if it stopped in the meantime
+    # SWING_DESK=on added to .env while this runs (or the desk stopped):
+    # start it now rather than only on the next restart of this script.
+    if swing_on && ! up "$PORT_SW"; then start_swing; wait_up "$PORT_SW" panaoptions-swing; fi
   done
 }
 
