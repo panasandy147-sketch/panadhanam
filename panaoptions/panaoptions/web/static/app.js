@@ -610,7 +610,8 @@ function renderStrategies(d) {
         : " · none live");
   $("strategies-body").innerHTML = `
     <table>
-      <thead><tr><th>Strategy</th><th>Window (ET)</th><th>Status</th></tr></thead>
+      <thead><tr><th>Strategy</th><th>Window (${esc(
+        (d.market_time || "").trim().split(" ").pop() || "ET")})</th><th>Status</th></tr></thead>
       <tbody>${(d.strategies || []).map((s) => `
         <tr>
           <td>${esc(s.name)}</td>
@@ -621,11 +622,13 @@ function renderStrategies(d) {
         </tr>`).join("")}</tbody>
     </table>
     <div class="empty">${live
-        ? `Each runs only inside its own window. They all skip 09:30–09:45,
-           where spreads are widest and the first prints are noise.`
+        ? `Each runs only inside its own window. None trades the first
+           minutes after the open, where spreads are widest and the first
+           prints are noise.`
         : next != null
-          ? `Nothing can trade yet — every strategy skips 09:30–09:45, where
-             spreads are widest and the first prints are noise. Symbols that
+          ? `Nothing can trade yet — no strategy trades the first minutes
+             after the open, where spreads are widest and the first prints
+             are noise. Symbols that
              passed the screen are already queued; the first strategy opens in
              ${next} minute${next === 1 ? "" : "s"}.`
           : `The entry windows have closed for today. Open positions are still

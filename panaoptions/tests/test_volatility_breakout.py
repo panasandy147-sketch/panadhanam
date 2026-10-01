@@ -82,7 +82,9 @@ def test_the_losing_strategies_are_off_per_market(shipped):
     assert shipped.get("strategies.orb_vwap.enabled") is False
     assert shipped.get("strategies.vwap_ema_pullback.enabled") is True
     india = Config(market="IN")
-    assert india.get("strategies.vwap_ema_pullback.enabled") is False
+    # India: every strategy on, a paper trial from 1 Oct (in.yaml)
+    for key in ("orb_vwap", "vwap_ema_pullback", "va_rejection", "poc_bounce"):
+        assert india.get(f"strategies.{key}.enabled") is True
     assert india.get("strategies.pd_liquidity_sweep.enabled") is True
     # ...and the volatility breakout on India only, at 0.3 x the range.
     assert india.get("strategies.volatility_breakout.enabled") is True

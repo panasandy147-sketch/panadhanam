@@ -146,12 +146,17 @@ strategies:
   # -> +₹9,035 (max DD 7.3% -> 6.1%), the other ten sessions -₹5,521 ->
   # +₹8,019. ORB was -0.18R over its 9 judged trades; the PD sweep carries
   # India (+0.43R over 16).
-  orb_vwap:             { enabled: false, from: "09:30", to: "14:45" }
+  # TRIAL from 1 Oct 2026, the user's call: EVERY strategy on for India,
+  # paper only, while the 40-session walk-forward runs. The 20-session one had
+  # ORB (-0.18R), the VWAP pullback (-0.33R), VA rejection and POC bounce
+  # (both losers in every run) off. To end the trial, set them back to
+  # enabled: false here.
+  orb_vwap:             { enabled: true, from: "09:30", to: "14:45" }
   # The VWAP / 9-EMA pullback off on India since 1 Oct 2026: -0.33R over its
   # 16 judged trades (-₹38,197). Without it on the 20-session walk-forward:
   # judged half -₹9,494 -> -₹3,756 (max DD 8.5% -> 6.8%), the ten sessions
   # before +₹12,213 -> +₹13,273. The PD sweep carries India.
-  vwap_ema_pullback:    { enabled: false, from: "09:45", to: "14:45" }
+  vwap_ema_pullback:    { enabled: true, from: "09:45", to: "14:45" }
   # Larry Williams' volatility breakout ON for India since 1 Oct 2026, at
   # 0.3 x yesterday's range, with the pullback off: on the 20-session
   # walk-forward the judged half went -₹9,494 -> +₹28,601 (+6.5%, max DD
@@ -163,9 +168,9 @@ strategies:
   volatility_breakout:  { enabled: true, k: 0.3, from: "09:45", to: "14:30" }
   liquidity_sweep:      { from: "09:30", to: "14:30" }
   candlestick_at_level: { from: "09:30", to: "14:45" }
-  va_rejection:         { from: "09:30", to: "14:45" }
+  va_rejection:         { enabled: true, from: "09:30", to: "14:45" }
   lvn_acceleration:     { from: "09:30", to: "14:45" }
-  poc_bounce:           { from: "09:45", to: "14:45" }
+  poc_bounce:           { enabled: true, from: "09:45", to: "14:45" }
 
 volume_profile:
   rth_open: "09:15"

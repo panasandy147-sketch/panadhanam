@@ -124,7 +124,7 @@ def test_the_replay_holds_too(rcfg):
 
 def test_the_shipped_exit_plan_per_market(tmp_path, monkeypatch):
     """US holds (scale_out_r 0, ORB off since 1 Oct); India sells half at
-    2R with ORB off; the scalp profile keeps 1.5R."""
+    2R; the scalp profile keeps 1.5R."""
     from panaoptions import config as config_mod
     from panaoptions import markets, rules
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
@@ -137,7 +137,8 @@ def test_the_shipped_exit_plan_per_market(tmp_path, monkeypatch):
     try:
         india = config_mod.Config(market="IN")
         assert india.get("risk.scale_out_r") == 2.0
-        assert india.get("strategies.orb_vwap.enabled") is False
+        # ORB is on again for India in the 1 Oct paper trial (in.yaml)
+        assert india.get("strategies.orb_vwap.enabled") is True
         assert "+2.0R, sell" in str(rules.build(india))
     finally:
         markets.activate("US")
