@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from panaoptions.models import Direction
+from panaoptions.models import Direction, SetupType
 
 _SLACK = 0.01          # R — rounding, not a looser rule
 
@@ -79,6 +79,12 @@ def project(setup: Any, levels: Any, cfg: Any,
     its target VWAP or 3R; the far side of yesterday's range is where a
     failed breakout rotates to, so the room check does not apply."""
     need = float(cfg.get("risk.min_reward_risk", 3.0) or 0.0)
+    # The volatility breakout may skip the room check too
+    # (strategies.volatility_breakout.room_check: false): it is meant to run
+    # through the opening-range and previous-day highs/lows.
+    if setup.strategy is SetupType.VOLATILITY_BREAKOUT and not bool(
+            cfg.get("strategies.volatility_breakout.room_check", True)):
+        sweep = True
     entry = float(setup.entry_trigger or setup.indicators.close)
     stop = float(setup.underlying_support or 0.0)
     risk = abs(entry - stop)

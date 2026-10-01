@@ -92,3 +92,26 @@ def test_the_losing_strategies_are_off_per_market(shipped):
     assert shipped.get("strategies.volatility_breakout.enabled") is False
     for profile in ("scalp", "zerodte"):
         assert Config(profile=profile).get("strategies.orb_vwap.enabled") is True
+
+
+def test_the_room_check_can_be_switched_off_for_the_breakout_only(cfg):
+    """1 Oct, India: two breakout calls were refused for 0.6R / 0.3R of room
+    before the previous-day / opening-range high."""
+    from panaoptions.engine import reward
+    from panaoptions.models import Indicators, Setup, SetupType
+
+    levels = SessionLevels(previous_high=101.0, previous_low=95.0)
+
+    def setup(kind):
+        return Setup(symbol="INFY", ts=__import__("datetime").datetime(2026, 10, 1),
+                     direction=Direction.LONG, strategy=kind, entry_trigger=100.0,
+                     underlying_support=98.0, indicators=Indicators(close=100.0))
+
+    _, _, why, _ = reward.project(setup(SetupType.VOLATILITY_BREAKOUT), levels, cfg)
+    assert "only 0.5R of room before the previous-day high" in why
+    cfg.data["strategies"]["volatility_breakout"]["room_check"] = False
+    target, rr, why, _ = reward.project(setup(SetupType.VOLATILITY_BREAKOUT), levels, cfg)
+    assert why == "" and target == 106.0 and rr == 3.0
+    # ...and every other strategy still needs the room
+    _, _, why, _ = reward.project(setup(SetupType.ORB_VWAP), levels, cfg)
+    assert "of room" in why
