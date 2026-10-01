@@ -281,11 +281,14 @@ def test_the_start_check_shows_the_last_verdict(shipped):
 def test_poc_bounce_is_off_on_the_profiles_and_on_trial_on_the_default_desk():
     """POC bounce and VA rejection lost in every backtest; since 1 Oct the
     user runs them on the default desk (US and India) as a paper trial. The
-    0DTE and scalp desks keep them off."""
+    scalp desk keeps them off; the 0DTE desk (the user's) runs the trial too."""
     from panaoptions.config import Config
-    for cfg in (Config(profile="zerodte"), Config(profile="scalp")):
-        assert cfg.get("strategies.poc_bounce.enabled") is False
-        assert cfg.get("strategies.va_rejection.enabled") is False
+    cfg = Config(profile="scalp")
+    assert cfg.get("strategies.poc_bounce.enabled") is False
+    assert cfg.get("strategies.va_rejection.enabled") is False
+    z = Config(profile="zerodte")          # the user's desk: on trial too
+    for key in ("poc_bounce", "va_rejection", "volatility_breakout"):
+        assert z.get(f"strategies.{key}.enabled") is True
     from panaoptions.engine.strategies import ALL
     from panaoptions.models import SetupType as ST
     cfg = Config()

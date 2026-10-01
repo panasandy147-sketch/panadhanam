@@ -60,7 +60,7 @@ strategies:
     to:   "14:30"
     volume_multiple: 1.5
   va_rejection:
-    enabled: false              # off on 0DTE (the default desk trials it)
+    enabled: true               # TRIAL from 1 Oct (the user's call)
     from: "09:45"
     to:   "15:00"
   lvn_acceleration:
@@ -68,11 +68,11 @@ strategies:
     from: "09:45"
     to:   "15:00"
   poc_bounce:
-    enabled: false              # off on 0DTE (the default desk trials it)
+    enabled: true               # TRIAL from 1 Oct (the user's call)
     from: "10:00"
     to:   "15:00"
-  # Not part of the default desk's 1 Oct trial.
-  volatility_breakout: { enabled: false }
+  # TRIAL from 1 Oct (the user's call): on, as on the default desk.
+  volatility_breakout: { enabled: true }
   candlestick_at_level:
     enabled: true
     from: "09:45"
