@@ -344,8 +344,12 @@ strategies:
     k: 0.5
     stop_fraction: 1.0
     target_r: 3.0
+  # ORB off on the US since 1 Oct 2026: on the 20-session walk-forward it was
+  # -0.23R over its 7 judged trades. Without it: judged half -$102 -> +$64
+  # (+0.05R -> +0.13R a trade, max DD 9.6% -> 8.5%), the ten sessions before
+  # -$765 -> -$356. The scalp and 0DTE profiles keep their own ORB.
   orb_vwap:
-    enabled: true
+    enabled: false
     from: "09:45"        # the 15m opening range is not final until 09:45
     to:   "15:45"
     volume_multiple: 1.5

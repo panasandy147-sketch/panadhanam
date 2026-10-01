@@ -100,6 +100,8 @@ def desk(tmp_path_factory):
     cfg.data["risk"]["exit_style"] = "auto"
     # FakeFeed's made-up tape is not on the test clock (see conftest).
     cfg.data["technical"].update(completed_bars_only=False, stale_after_bars=0)
+    # FakeFeed's tape is an ORB breakout; ORB is off on the US since 1 Oct.
+    cfg.data["strategies"]["orb_vwap"]["enabled"] = True
     mp.setattr(config_mod, "_config", cfg)
     feed = FakeFeed()
     desk = OptionsDesk(cfg=cfg, feed=feed)

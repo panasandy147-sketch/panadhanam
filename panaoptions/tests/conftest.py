@@ -103,6 +103,9 @@ def cfg(tmp_path, monkeypatch):
     # tests/test_no_trade_audit.py tests the shipped ones.
     cfg.data["risk"].update(min_stop_atr=0, min_stop_pct=0,
                             target_snap={"enabled": False})
+    # ORB is off on the US since 1 Oct; the loop tests' fake tape is an ORB
+    # breakout. tests/test_volatility_breakout.py checks the shipped switch.
+    cfg.data["strategies"]["orb_vwap"]["enabled"] = True
     return cfg
 
 

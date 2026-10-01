@@ -73,3 +73,16 @@ def test_k_comes_from_the_config(cfg):
     cfg.data["strategies"]["volatility_breakout"]["k"] = 0.25     # line at 101.00
     s = _eval(cfg, [100.2, 100.6, 100.9, 101.2])
     assert s.triggered and s.key_level == 101.0
+
+
+def test_the_losing_strategies_are_off_per_market(shipped):
+    """1 Oct 2026, 20-session walk-forward: ORB off on the US, the VWAP
+    pullback off on India; both beat the old rules in both halves."""
+    from panaoptions.config import Config
+    assert shipped.get("strategies.orb_vwap.enabled") is False
+    assert shipped.get("strategies.vwap_ema_pullback.enabled") is True
+    india = Config(market="IN")
+    assert india.get("strategies.vwap_ema_pullback.enabled") is False
+    assert india.get("strategies.pd_liquidity_sweep.enabled") is True
+    for profile in ("scalp", "zerodte"):
+        assert Config(profile=profile).get("strategies.orb_vwap.enabled") is True

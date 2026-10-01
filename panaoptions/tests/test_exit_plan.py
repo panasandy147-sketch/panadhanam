@@ -123,13 +123,14 @@ def test_the_replay_holds_too(rcfg):
 
 
 def test_the_shipped_exit_plan_per_market(tmp_path, monkeypatch):
-    """US holds (scale_out_r 0); India sells half at 2R with ORB off; the
-    scalp profile keeps 1.5R."""
+    """US holds (scale_out_r 0, ORB off since 1 Oct); India sells half at
+    2R with ORB off; the scalp profile keeps 1.5R."""
     from panaoptions import config as config_mod
     from panaoptions import markets, rules
     monkeypatch.setattr(config_mod, "ENV_PATH", tmp_path / "absent.env")
     us = config_mod.Config()
-    assert us.get("risk.scale_out_r") == 0 and us.get("strategies.orb_vwap.enabled")
+    assert us.get("risk.scale_out_r") == 0
+    assert us.get("strategies.orb_vwap.enabled") is False
     assert config_mod.Config(profile="scalp").get("risk.scale_out_r") == 1.5
     text = str(rules.build(us))
     assert "Hold: no scale-out, no breakeven, no trail" in text
