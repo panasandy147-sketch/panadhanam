@@ -46,6 +46,8 @@ def test_the_table_names_every_strategy_and_why_it_did_not_fire(db, cfg):
     orb = table["ORB + VWAP"]
     assert (orb["checked"], orb["fired"]) == (4, 1)
     assert orb["not_fired"][0] == {"reason": "no #m close beyond the range", "count": 3}
+    cfg.data["strategies"]["va_rejection"]["enabled"] = False   # (on trial since 1 Oct)
+    table = {t["strategy"]: t for t in why.strategy_table(cfg, DAY)}
     assert table["Value Area Rejection"]["note"] == "switched off"
     assert "never asked yet" in table["VWAP / 9-EMA Pullback"]["note"]
     text = "\n".join(why._strategy_lines(list(table.values())))

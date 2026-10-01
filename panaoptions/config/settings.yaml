@@ -336,9 +336,11 @@ strategies:
   # Larry Williams' volatility breakout (1987 Robbins World Cup): the first
   # 5m close beyond today's open +/- k x yesterday's range, with VWAP and the
   # EMAs agreeing. Stop stop_fraction of the way back to the open; target
-  # target_r x that. Off until the 20-session walk-forward says it earns.
+  # target_r x that. TRIAL from 1 Oct 2026, the user's call: ON for the US
+  # (paper) at k 0.5. On the 20-session walk-forward no breakout setting beat
+  # the US rules (k 0.5: judged -$120 vs -$102). Set false to end it.
   volatility_breakout:
-    enabled: false
+    enabled: true
     from: "09:45"
     to: "14:30"
     k: 0.5
@@ -480,7 +482,9 @@ strategies:
     # walk-forward test half (0% winners), India -0.55R edge. With it off,
     # the US went from -$88 to +$71 on the same fills. Re-enable with true and
     # re-run `python run.py --backtest` to see whether it earns back.
-    enabled: false
+    # TRIAL from 1 Oct 2026, the user's call: ON for the US (paper) as for
+    # India, against the backtests above. Set false to end it.
+    enabled: true
     from: "09:45"
     to:   "15:45"
     lookback_bars: 2       # the poke/test may be this many bars back
@@ -494,7 +498,9 @@ strategies:
     # OFF: the worst strategy in every backtest run — US -1.08R a trade at a
     # 10% win rate, India -0.32R (validation, 29 Sept 2026). Re-enable with
     # true and re-run `python run.py --backtest` to see whether it earns back.
-    enabled: false
+    # TRIAL from 1 Oct 2026, the user's call: ON for the US (paper) as for
+    # India, against the backtests above. Set false to end it.
+    enabled: true
     from: "10:00"
     to:   "15:45"
     away_atr: 1.0

@@ -278,16 +278,20 @@ def test_the_start_check_shows_the_last_verdict(shipped):
 # --------------------------------------------------------------------------- #
 # Ranking the day's slots; POC off; walk-forward
 # --------------------------------------------------------------------------- #
-def test_poc_bounce_is_off_on_every_desk():
+def test_poc_bounce_is_off_on_the_profiles_and_on_trial_on_the_default_desk():
+    """POC bounce and VA rejection lost in every backtest; since 1 Oct the
+    user runs them on the default desk (US and India) as a paper trial. The
+    0DTE and scalp desks keep them off."""
     from panaoptions.config import Config
-    for cfg in (Config(), Config(profile="zerodte"), Config(profile="scalp")):
+    for cfg in (Config(profile="zerodte"), Config(profile="scalp")):
         assert cfg.get("strategies.poc_bounce.enabled") is False
         assert cfg.get("strategies.va_rejection.enabled") is False
     from panaoptions.engine.strategies import ALL
     from panaoptions.models import SetupType as ST
     cfg = Config()
     enabled = {cls(cfg).name for cls in ALL if cls(cfg).enabled}
-    assert ST.POC_BOUNCE not in enabled and ST.VA_REJECTION not in enabled
+    assert {ST.POC_BOUNCE, ST.VA_REJECTION, ST.VOLATILITY_BREAKOUT} <= enabled
+    assert ST.ORB_VWAP not in enabled
 
 
 def test_without_a_validation_the_priority_list_decides(shipped):

@@ -124,7 +124,7 @@ def test_the_entry_window_never_outlasts_the_force_exit(cfg):
 
 def test_a_disabled_strategy_does_not_hold_the_window_open(cfg):
     later = ("pd_liquidity_sweep", "candlestick_at_level", "va_rejection",
-             "lvn_acceleration", "poc_bounce")
+             "lvn_acceleration", "poc_bounce", "volatility_breakout")
     for key in later:
         cfg.data["strategies"][key]["enabled"] = False
     try:
@@ -619,7 +619,7 @@ async def test_after_the_last_window_the_note_says_so_instead(desk,
     monkeypatch.setattr(clock, "now", lambda tz: _at(10, 0))
     for key in ("pd_liquidity_sweep", "orb_vwap", "vwap_ema_pullback",
                 "liquidity_sweep", "candlestick_at_level", "va_rejection",
-                "lvn_acceleration", "poc_bounce"):
+                "lvn_acceleration", "poc_bounce", "volatility_breakout"):
         desk.cfg.data["strategies"][key]["to"] = "09:50"
     await desk.cycle()
     notes = [e["detail"] for e in desk.activity.recent(40)

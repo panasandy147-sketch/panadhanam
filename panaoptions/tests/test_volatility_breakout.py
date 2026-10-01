@@ -35,9 +35,9 @@ def _eval(cfg, closes, levels=LEVELS):
     return VolatilityBreakout(cfg).evaluate("SPY", df5, df15, levels)
 
 
-def test_it_is_registered_and_ships_off_until_the_walk_forward_says_so(cfg, shipped):
+def test_it_is_registered_and_on_trial_on_the_default_desk(cfg, shipped):
     assert VolatilityBreakout in ALL
-    assert shipped.get("strategies.volatility_breakout.enabled") is False
+    assert shipped.get("strategies.volatility_breakout.enabled") is True     # 1 Oct trial
 
 
 def test_the_first_close_above_open_plus_half_the_range_is_a_call(cfg):
@@ -89,7 +89,7 @@ def test_the_losing_strategies_are_off_per_market(shipped):
     # ...and the volatility breakout on India only, at 0.3 x the range.
     assert india.get("strategies.volatility_breakout.enabled") is True
     assert india.get("strategies.volatility_breakout.k") == 0.3
-    assert shipped.get("strategies.volatility_breakout.enabled") is False
+    assert shipped.get("strategies.volatility_breakout.k") == 0.5          # the US
     for profile in ("scalp", "zerodte"):
         assert Config(profile=profile).get("strategies.orb_vwap.enabled") is True
 

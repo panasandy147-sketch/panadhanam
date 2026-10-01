@@ -107,6 +107,10 @@ risk:
   daily_loss_limit_pct: 3.0
 
 strategies:
+  # Not part of the default desk's 1 Oct trial: the scalp desk keeps them off.
+  va_rejection:        { enabled: false }
+  poc_bounce:          { enabled: false }
+  volatility_breakout: { enabled: false }
   orb_vwap:
     enabled: true
     from: "09:40"
