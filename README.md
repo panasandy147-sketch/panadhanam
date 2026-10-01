@@ -143,6 +143,19 @@ buy and sell with its reason, Monday to today. The week so far is saved to
 `journal/weekly/<week>-<us|in>.md` after every session, so US and India each
 have their own file.
 
+Every buy in the day's audit (`journal/audit/<us|in>/YYYY-MM-DD.md`) carries a
+**trade card**:
+- the last `audit.card_candles` (6) closed candles with OHLCV, the trigger bar marked;
+- PDH, PDL, PDC, the recent swing range and the PD sweep, if one fired;
+- VWAP, the EMAs, ATR, RSI, volume against its average, the regime, and the
+  patterns found on each timeframe;
+- the stop and target in R, with the underlying's stop in ATR;
+- the sizing arithmetic against the risk cap;
+- the vote and the stop-and-target rules (with the strategy's own section when
+  a PD sweep led), each with its live value.
+
+The exit adds the result in R.
+
 **Previous Day Liquidity Sweep (failed breakout).** US and India, intraday.
 - **Trigger:** a 5m or 15m candle pierces the previous-day high or low and
   closes back inside yesterday's range.

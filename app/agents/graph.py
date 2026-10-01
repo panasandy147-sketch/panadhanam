@@ -171,7 +171,7 @@ class TradingDesk:
             # An evaluation-only cycle: say what WOULD be traded, place nothing.
             return {"dispatch": {"dispatched": False,
                                  "reason": "evaluation only — nothing sent"}}
-        result = await self.dispatcher.dispatch(signal)
+        result = await self.dispatcher.dispatch(signal, ctx=state.get("context"))
         return {"dispatch": result}
 
     # ------------------------------------------------------------------ #

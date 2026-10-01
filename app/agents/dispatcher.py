@@ -37,7 +37,7 @@ class Dispatcher:
         # for today before any order is sent.
         self.trading_day = trading_day
 
-    async def dispatch(self, signal: TradeSignal) -> dict[str, Any]:
+    async def dispatch(self, signal: TradeSignal, ctx: Any = None) -> dict[str, Any]:
         if signal.status == SignalStatus.REJECTED:
             await bus.publish(Topic.SIGNAL_REJECTED, signal)
             return {"dispatched": False, "reason": "rejected by risk"}
@@ -62,7 +62,7 @@ class Dispatcher:
                 log.info("order placed for %s → %s", signal.id, order.order_id)
                 # The audit log: the fill and the whole case for it, as known now.
                 from app.core import audit
-                audit.record_buy(self.cfg, signal, order.dict())
+                audit.record_buy(self.cfg, signal, order.dict(), ctx=ctx)
             else:
                 log.error("order FAILED for %s: %s", signal.id, order.message)
             # Everything a person needs to know what just happened, in the

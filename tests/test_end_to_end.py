@@ -541,6 +541,51 @@ async def test_every_buy_and_sell_is_in_the_audit_log_with_its_reasons(engine, c
 
 
 @pytest.mark.asyncio
+async def test_every_buy_carries_a_trade_card(engine, cfg, monkeypatch):
+    """For a contest review: the candles the analysts read, the levels and
+    figures, the patterns, the stop and target in R, the sizing against the
+    risk cap, and the rules it had to pass."""
+    from app.core import audit
+
+    row = await _open_one(engine)
+    today = clock.market_now(str(cfg.get("system.timezone"))).date()
+    [buy] = [e for e in audit.entries(today) if e.get("signal_id") == row["id"]]
+    card = buy["card"]
+    assert card["candles"] and len(card["candles"]) <= 6
+    assert {"time", "open", "high", "low", "close", "volume"} <= set(card["candles"][-1])
+    assert card["indicators"]["vwap"] and card["indicators"]["atr"]
+    plan = card["plan"]
+    assert plan["entry"] == row["entry"] and plan["stop"] == row["stop_loss"]
+    assert plan["reward_risk"] == round(abs(plan["target"] - plan["entry"])
+                                        / abs(plan["entry"] - plan["stop"]), 2)
+    z = card["sizing"]
+    assert z["quantity"] == row["quantity"]
+    if z["risk_cap"]:
+        assert z["planned_risk"] <= z["risk_cap"] + 0.01
+    titles = [s["title"] for s in card["rules"]]
+    assert any(t.startswith("The vote") for t in titles)
+    assert any(t.startswith("What it buys") for t in titles)
+    text = audit.day_markdown(today, "IN")
+    assert "Trade card" in text and "**trigger**" in text and "**Sizing**" in text
+
+
+def test_a_trade_card_that_fails_never_stops_the_buy_record(cfg, monkeypatch):
+    from app.core import audit
+    from app.core.models import Instrument, Side, TradeSignal
+
+    def boom(*a, **k):
+        raise RuntimeError("bad data")
+
+    monkeypatch.setattr(audit, "trade_card", boom)
+    signal = TradeSignal(id="SIG-CARD", instrument=Instrument(symbol="NIFTY",
+                                                              tradingsymbol="NIFTY"),
+                         side=Side.BUY, entry=100.0, stop_loss=90.0, target=130.0,
+                         quantity=75)
+    record = audit.record_buy(cfg, signal, {})
+    assert record["card"] is None and record["entry"] == 100.0
+
+
+@pytest.mark.asyncio
 async def test_the_paper_record_panel_is_today_only_and_saved_at_the_close(
         engine, cfg, monkeypatch):
     from datetime import timedelta

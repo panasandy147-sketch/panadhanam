@@ -80,10 +80,129 @@ def _write(cfg: Any, record: dict[str, Any]) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-def record_buy(cfg: Any, signal: Any, order: dict[str, Any] | None = None) -> dict[str, Any]:
+def _r(x: Any, nd: int = 2) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if v != v else round(v, nd)             # NaN -> None
+
+
+def _local(ts: Any, tz: str) -> str:
+    from zoneinfo import ZoneInfo
+    try:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return ts.astimezone(ZoneInfo(tz)).strftime("%H:%M")
+    except (AttributeError, ValueError):
+        return str(ts)
+
+
+_CARD_SECTIONS = ("The vote", "What it buys, and the stop and target")
+
+
+def card_rules(cfg: Any, setup: str = "") -> list[dict[str, Any]]:
+    """The rules page's sections behind an entry — the vote, the stop and
+    target, and the named strategy's own section when one led — with the
+    values the live config sets."""
+    try:
+        from app.core import rules
+        out = []
+        for section in rules.build(cfg).get("sections") or []:
+            title = str(section.get("title") or "")
+            if not (title.startswith(_CARD_SECTIONS)
+                    or (setup and title.startswith("Strategy:")
+                        and "sweep" in setup.lower() and "Sweep" in title)):
+                continue
+            out.append({"title": title,
+                        "rules": [{"text": r.get("text"), "value": r.get("value")}
+                                  for r in section.get("rules") or []]})
+        return out
+    except Exception as exc:                            # noqa: BLE001
+        log.debug("rules for the trade card: %s", exc)
+        return []
+
+
+def trade_card(cfg: Any, signal: Any, ctx: Any = None) -> dict[str, Any]:
+    """The full case for one entry, for a contest review: the candles the
+    analysts read (the last is the trigger bar), the levels and figures, the
+    patterns found, the rules it had to pass, the stop and target in R, and
+    the sizing arithmetic against the risk cap."""
+    tz = str(cfg.get("system.timezone", "Asia/Kolkata"))
+    ind = dict(getattr(ctx, "indicators", None) or {})
+    tf = str(ind.get("primary_timeframe") or cfg.get("technical.primary_timeframe", "5m"))
+    card: dict[str, Any] = {"timeframe": tf, "currency": str(getattr(
+        getattr(cfg, "market", None), "currency_symbol", "") or "")}
+    candles = (getattr(ctx, "candles", None) or {}).get(tf) or []
+    n = int(cfg.get("audit.card_candles", 6) or 6)
+    card["candles"] = [{"time": _local(c.ts, tz), "open": _r(c.open), "high": _r(c.high),
+                        "low": _r(c.low), "close": _r(c.close), "volume": _r(c.volume, 0),
+                        "colour": "green" if c.close > c.open else
+                        "red" if c.close < c.open else "doji"} for c in candles[-n:]]
+    prim = ind.get("primary") or {}
+    prev = ind.get("previous_day") or {}
+    card["levels"] = {"previous_high": _r(prev.get("high")),
+                      "previous_low": _r(prev.get("low")),
+                      "previous_close": _r(prev.get("close")),
+                      "swing_high": _r(prim.get("high")), "swing_low": _r(prim.get("low"))}
+    card["pd_sweep"] = ind.get("pd_sweep") or None
+    card["indicators"] = {
+        "close": _r(prim.get("last_close")), "vwap": _r(prim.get("vwap")),
+        **{k: _r(prim.get(k)) for k in prim if str(k).startswith("ema")
+           and str(k)[3:].isdigit()},
+        "atr": _r(prim.get("atr"), 3), "atr_pct": _r(prim.get("atr_pct"), 3),
+        "rsi": _r(prim.get("rsi"), 1), "volume_surge": _r(prim.get("volume_surge")),
+        "macd_hist": _r(prim.get("macd_hist"), 4), "supertrend": prim.get("supertrend"),
+        "regime": prim.get("regime"),
+        "timeframes_agree": (ind.get("mtf_alignment") or {}).get("aligned"),
+    }
+    card["patterns"] = {t: [p.get("name") for p in (snap.get("patterns") or [])][:6]
+                        for t, snap in (ind.get("by_timeframe") or {}).items()
+                        if snap.get("patterns")}
+
+    entry, stop, target = (float(signal.entry or 0), float(signal.stop_loss or 0),
+                           float(signal.target or 0))
+    risk_u = abs(entry - stop)
+    card["plan"] = {
+        "entry": _r(entry), "stop": _r(stop), "target": _r(target),
+        "risk_per_unit": _r(risk_u, 4), "reward_per_unit": _r(abs(target - entry), 4),
+        "reward_risk": _r(abs(target - entry) / risk_u) if risk_u else None,
+        "entry_spot": _r(signal.entry_spot), "underlying_stop": _r(signal.underlying_stop),
+        "underlying_stop_note": signal.underlying_stop_note or None,
+        "spot_risk_atr": (_r(abs(signal.entry_spot - signal.underlying_stop)
+                             / prim["atr"])
+                          if signal.entry_spot and signal.underlying_stop
+                          and prim.get("atr") else None),
+    }
+    capital = float(cfg.get("risk.total_capital", 0) or 0)
+    risk_pct = float(cfg.get("risk.risk_per_trade_pct", 0) or 0)
+    cap = capital * risk_pct / 100.0
+    card["sizing"] = {
+        "capital": _r(capital), "risk_cap_pct": risk_pct or None,
+        "risk_cap": _r(cap) if cap else None,
+        "risk_per_unit": _r(signal.risk_per_unit or risk_u, 4),
+        "units_at_cap": int(cap // risk_u) if cap and risk_u else None,
+        "quantity": signal.quantity, "lots": signal.lots, "unit_size": signal.unit_size,
+        "unit": signal.unit_label, "planned_risk": _r(signal.total_risk),
+        "planned_risk_pct": _r(signal.capital_at_risk_pct, 3),
+        "notional": _r(signal.notional),
+        "note": str(signal.rationale or "").partition(" | Sizing: ")[2] or None,
+    }
+    card["rules"] = card_rules(cfg, str(getattr(signal, "setup", "") or ""))
+    return card
+
+
+def record_buy(cfg: Any, signal: Any, order: dict[str, Any] | None = None,
+               ctx: Any = None) -> dict[str, Any]:
     """A filled entry, with the whole case for it."""
     from app.core.explain import why_bought
     from app.core.version import code_version
+
+    try:
+        card = trade_card(cfg, signal, ctx)
+    except Exception as exc:                            # noqa: BLE001
+        log.warning("could not build the trade card: %s", exc)
+        card = None
 
     inst = signal.instrument
     reports = []
@@ -124,6 +243,7 @@ def record_buy(cfg: Any, signal: Any, order: dict[str, Any] | None = None) -> di
         "volume_profile": setup, "analysts": reports,
         "regime": _value(signal.regime) if signal.regime else None,
         "order": order or {},
+        "card": card,
     })
 
 
@@ -303,6 +423,7 @@ def day_markdown(day: date, market: str = "US") -> str:
                 lines.append(f"  - {a['agent']} {a['score']:+.2f}"
                              + ("" if a.get("available", True) else " (abstained)")
                              + f" — {a.get('reason', '')[:160]}")
+            lines += _card_markdown(b)
         if s:
             lines += ["", f"**{s.get('event')}** @ {s.get('exit_price')} at "
                           f"{s.get('market_time')} · {s.get('status')} · "
@@ -313,3 +434,78 @@ def day_markdown(day: date, market: str = "US") -> str:
             lines += ["", "_Still open._"]
         lines.append("")
     return "\n".join(lines)
+
+
+def _num(v: Any, nd: int = 2) -> str:
+    return "—" if v is None else f"{v:,.{nd}f}"
+
+
+def _card_markdown(b: dict[str, Any]) -> list[str]:
+    """The BUY's trade card, readable."""
+    card = b.get("card") or {}
+    if not card:
+        return []
+    out = ["", "<details open><summary><b>Trade card</b></summary>", ""]
+    bars = card.get("candles") or []
+    if bars:
+        out += [f"**Candles** ({card.get('timeframe', '5m')}, closed; the last row is "
+                "the trigger bar)", "",
+                "| Time | Open | High | Low | Close | Volume | |",
+                "|---|---|---|---|---|---|---|"]
+        for i, c in enumerate(bars):
+            mark = " **trigger**" if i == len(bars) - 1 else ""
+            out.append(f"| {c['time']} | {_num(c['open'])} | {_num(c['high'])} | "
+                       f"{_num(c['low'])} | {_num(c['close'])} | {_num(c['volume'], 0)} | "
+                       f"{c['colour']}{mark} |")
+        out.append("")
+    lv = card.get("levels") or {}
+    out.append(f"**Levels** — PDH {_num(lv.get('previous_high'))} · PDL "
+               f"{_num(lv.get('previous_low'))} · PDC {_num(lv.get('previous_close'))} · "
+               f"recent swing {_num(lv.get('swing_low'))}–{_num(lv.get('swing_high'))}")
+    sw = card.get("pd_sweep") or {}
+    if sw:
+        out.append("**PD sweep** — " + ", ".join(f"{k} {v}" for k, v in sw.items()
+                                                 if v not in (None, "", [], {})))
+    ind = card.get("indicators") or {}
+    emas = " / ".join(f"{_num(ind[k])}" for k in sorted(
+        (k for k in ind if k.startswith("ema")), key=lambda k: int(k[3:])))
+    ema_names = "/".join(k[3:] for k in sorted(
+        (k for k in ind if k.startswith("ema")), key=lambda k: int(k[3:])))
+    out.append(f"**Figures at entry** — close {_num(ind.get('close'))} · VWAP "
+               f"{_num(ind.get('vwap'))} · EMA {ema_names} {emas} · ATR "
+               f"{_num(ind.get('atr'), 3)} ({_num(ind.get('atr_pct'), 3)}%) · RSI "
+               f"{_num(ind.get('rsi'), 1)} · volume {_num(ind.get('volume_surge'))}x avg · "
+               f"regime {ind.get('regime') or '—'} · timeframes agree: "
+               f"{'yes' if ind.get('timeframes_agree') else 'no'}")
+    pats = card.get("patterns") or {}
+    if pats:
+        out.append("**Patterns found** — " + "; ".join(
+            f"{tf}: {', '.join(p for p in names if p)}" for tf, names in pats.items()))
+    p = card.get("plan") or {}
+    out += ["", f"**Stop and target** — entry {_num(p.get('entry'))}, stop "
+                f"{_num(p.get('stop'))} (1R = {_num(p.get('risk_per_unit'), 4)} a unit), "
+                f"target {_num(p.get('target'))} ({_num(p.get('reward_risk'))}R)"
+                + (f"; underlying {_num(p.get('entry_spot'))} → stop "
+                   f"{_num(p.get('underlying_stop'))}"
+                   + (f" ({p['spot_risk_atr']:.2f} ATR)" if p.get("spot_risk_atr") else "")
+                   if p.get("underlying_stop") else "")]
+    if p.get("underlying_stop_note"):
+        out.append(f"- {p['underlying_stop_note']}")
+    z = card.get("sizing") or {}
+    cur = card.get("currency") or ""
+    out += ["", f"**Sizing** — capital {cur}{_num(z.get('capital'), 0)}"
+                + (f"; the {_num(z.get('risk_cap_pct'), 1)}% risk cap is "
+                   f"{cur}{_num(z.get('risk_cap'))} = {z.get('units_at_cap')} units at "
+                   f"{_num(z.get('risk_per_unit'), 4)} a unit" if z.get("risk_cap") else "")
+                + f". Bought **{z.get('quantity')}**"
+                + (f" ({z.get('lots')} {z.get('unit')}{'' if z.get('lots') == 1 else 's'} "
+                   f"of {z.get('unit_size')})" if (z.get("unit_size") or 1) > 1 else "")
+                + f", notional {cur}{_num(z.get('notional'))} → planned risk "
+                f"{cur}{_num(z.get('planned_risk'))} ({_num(z.get('planned_risk_pct'), 2)}% "
+                "of capital)."]
+    for sec in card.get("rules") or []:
+        out += ["", f"**Rules — {sec['title']}**"]
+        out += [f"- {r['text']}" + (f" — **{r['value']}**" if r.get("value") else "")
+                for r in sec.get("rules") or []]
+    out += ["", "</details>"]
+    return out
