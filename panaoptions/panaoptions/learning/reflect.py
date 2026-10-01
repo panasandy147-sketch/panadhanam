@@ -41,7 +41,7 @@ log = get_logger("reflect")
 STRATEGIES: tuple[str, ...] = ("pd_liquidity_sweep", "orb_vwap", "vwap_ema_pullback",
                                "liquidity_sweep",
                                "candlestick_at_level", "va_rejection",
-                               "lvn_acceleration", "poc_bounce")
+                               "lvn_acceleration", "poc_bounce", "volatility_breakout")
 WEIGHT_MIN, WEIGHT_MAX = 0.25, 1.5
 
 SYSTEM = (

@@ -333,6 +333,17 @@ strategies:
     tick: 0.01                 # $0.01 (the India overlay: ₹0.05)
     stop_ticks: 2
     min_reward_risk: 3.0
+  # Larry Williams' volatility breakout (1987 Robbins World Cup): the first
+  # 5m close beyond today's open +/- k x yesterday's range, with VWAP and the
+  # EMAs agreeing. Stop stop_fraction of the way back to the open; target
+  # target_r x that. Off until the 20-session walk-forward says it earns.
+  volatility_breakout:
+    enabled: false
+    from: "09:45"
+    to: "14:30"
+    k: 0.5
+    stop_fraction: 1.0
+    target_r: 3.0
   orb_vwap:
     enabled: true
     from: "09:45"        # the 15m opening range is not final until 09:45

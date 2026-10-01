@@ -64,6 +64,8 @@ class SetupType(str, Enum):
     POC_BOUNCE = "POC Magnet / Bounce"
     # The previous session's high / low swept and reclaimed (a failed breakout).
     PD_LIQUIDITY_SWEEP = "PD Liquidity Sweep"
+    # Larry Williams' volatility breakout: today's open +/- k x yesterday's range.
+    VOLATILITY_BREAKOUT = "Volatility Breakout"
     OTHER = "Other"
 
 

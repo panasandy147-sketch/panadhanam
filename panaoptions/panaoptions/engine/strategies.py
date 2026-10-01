@@ -838,6 +838,94 @@ class PdLiquiditySweep(Strategy):
 ALL.insert(0, PdLiquiditySweep)
 
 
+class VolatilityBreakout(Strategy):
+    """Larry Williams' volatility breakout (1987 Robbins World Cup, +11,376%).
+
+    Yesterday's range says how far price can travel today. When it has
+    already moved `k` x that range away from today's open, the day's
+    expansion is under way: buy the first 5m CLOSE above open + k x range
+    (calls), sell the first close below open - k x range (puts), with price
+    on the same side of VWAP and the 9 EMA over the 21 for calls (under for
+    puts). Only the bar that crosses counts — a level crossed an hour ago is
+    a chase, not a breakout.
+
+    Stop: `stop_fraction` of the way back from the trigger to the open
+    (1.0 = the open itself — back there and the expansion has failed).
+    Target: `target_r` x that risk.
+    """
+
+    name = SetupType.VOLATILITY_BREAKOUT
+    window = ("09:45", "14:30")
+
+    def evaluate(self, symbol, df5, df15, levels) -> Setup:
+        setup = _base(symbol, df5, self.name)
+        g = self.cfg.get
+        k = float(g("strategies.volatility_breakout.k", 0.5))
+        prev_range = float(levels.previous_high or 0) - float(levels.previous_low or 0)
+        if prev_range <= 0:
+            setup.blockers.append("no previous-day range to measure from")
+            return setup
+        today = df5[df5.index.date == df5.index[-1].date()]
+        open_at = self._parse(str(g("session.market_open", "09:30")))
+        today = today[[t.time() >= open_at for t in today.index]]
+        if len(today) < 2:
+            setup.blockers.append("today's session has not opened long enough")
+            return setup
+        day_open = float(today.iloc[0]["open"])
+        up, down = day_open + k * prev_range, day_open - k * prev_range
+        bar, prev = today.iloc[-1], today.iloc[-2]
+        snapshot = ta.compute(df5, self.cfg)
+        long_break = (bar["close"] > up >= prev["close"]
+                      and snapshot.close > snapshot.vwap
+                      and snapshot.ema_fast > snapshot.ema_slow)
+        short_break = (bar["close"] < down <= prev["close"]
+                       and snapshot.close < snapshot.vwap
+                       and snapshot.ema_fast < snapshot.ema_slow)
+        if not (long_break or short_break):
+            setup.blockers.append(
+                f"no fresh 5m close beyond open {day_open:.2f} ± {k:g} x yesterday's "
+                f"range {prev_range:.2f} ({down:.2f} / {up:.2f}) with VWAP and the EMAs")
+            return setup
+
+        setup.direction = Direction.LONG if long_break else Direction.SHORT
+        setup.indicators = snapshot
+        setup.pattern = f"Volatility breakout ({k:g} x range)"
+        level = up if long_break else down
+        side = "above" if long_break else "below"
+        setup.entry_trigger = float(bar["close"])
+        setup.key_level = level
+        setup.key_level_source = f"open {'+' if long_break else '-'} {k:g} x previous range"
+        setup.confirmations = [
+            f"first 5m close {side} open {day_open:.2f} {'+' if long_break else '-'} "
+            f"{k:g} x yesterday's range {prev_range:.2f} = {level:.2f} "
+            f"(close {bar['close']:.2f}, previous {prev['close']:.2f})",
+            f"price {side} VWAP ({snapshot.close:.2f} vs {snapshot.vwap:.2f})",
+            f"9 EMA {'>' if long_break else '<'} 21 EMA "
+            f"({snapshot.ema_fast:.2f} vs {snapshot.ema_slow:.2f})",
+        ]
+        frac = float(g("strategies.volatility_breakout.stop_fraction", 1.0))
+        entry = float(bar["close"])
+        risk = abs(entry - day_open) * frac
+        sign = 1.0 if long_break else -1.0
+        setup.underlying_support = round(entry - sign * risk, 4)
+        setup.invalidation_note = (
+            f"back {'below' if long_break else 'above'} {setup.underlying_support:.2f} "
+            f"({frac:g} of the way to today's open {day_open:.2f}) — the expansion failed")
+        setup.underlying_target = round(
+            entry + sign * risk * float(g("strategies.volatility_breakout.target_r", 3.0)), 4)
+        setup.trend_aligned = True
+        return setup
+
+
+LAST: list[type[Strategy]] = [VolatilityBreakout]   # after every other family
+
+
+def register(cls: type[Strategy]) -> None:
+    """Add a strategy family ahead of the ones that always run last."""
+    at = next((i for i, c in enumerate(ALL) if c in LAST), len(ALL))
+    ALL.insert(at, cls)
+
+
 def _register_volume_profile() -> None:
     """Add the volume-profile family after the core four.
 
@@ -848,9 +936,10 @@ def _register_volume_profile() -> None:
         from panaoptions.strategies import volume_profile_strategies as vp
         for cls in vp.STRATEGIES:
             if cls not in ALL:
-                ALL.append(cls)
+                register(cls)
     except (ImportError, AttributeError):
         pass
 
 
+ALL.extend(c for c in LAST if c not in ALL)
 _register_volume_profile()

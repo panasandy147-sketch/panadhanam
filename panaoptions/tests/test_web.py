@@ -246,7 +246,8 @@ def test_the_strategies_endpoint_lists_them_all_with_their_windows(client):
     body = client.get("/api/strategies").json()
     names = [s["name"] for s in body["strategies"]]
 
-    assert len(names) == 8
+    assert len(names) == 9
+    assert names[-1] == "Volatility Breakout"
     assert names[0] == "PD Liquidity Sweep"
     assert "ORB + VWAP" in names
     assert "Candlestick at a Key Level" in names

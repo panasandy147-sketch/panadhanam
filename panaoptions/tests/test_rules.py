@@ -14,7 +14,7 @@ def test_every_strategy_is_written_out_with_its_live_window(cfg):
     keys = [s["key"] for s in section["strategies"]]
     assert keys == ["pd_liquidity_sweep", "orb_vwap", "vwap_ema_pullback", "liquidity_sweep",
                     "candlestick_at_level", "va_rejection", "lvn_acceleration",
-                    "poc_bounce"]
+                    "poc_bounce", "volatility_breakout"]
     # ...which is every strategy the desk actually runs, in its order.
     from panaoptions.engine.strategies import ALL
     assert keys == [cls(cfg).key for cls in ALL]

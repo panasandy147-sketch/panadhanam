@@ -343,6 +343,23 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             "wrong": "A close through the POC.",
             "target": "The swing it came back from.",
         },
+        {
+            "key": "volatility_breakout",
+            "name": "8 · Volatility Breakout (Larry Williams, 1987 World Cup)",
+            "window": window("volatility_breakout"),
+            "enabled": enabled("volatility_breakout"),
+            "buy": [
+                f"The FIRST 5m close above today's open + "
+                f"{g('strategies.volatility_breakout.k', 0.5)} x yesterday's range "
+                "(calls), or below the open minus the same (puts). A level crossed "
+                "earlier in the day is not taken — that is a chase.",
+                "Price on the same side of VWAP, and the 9 EMA above the 21 EMA for "
+                "calls (below for puts).",
+            ],
+            "wrong": (f"Back {g('strategies.volatility_breakout.stop_fraction', 1.0)} of "
+                      "the way from the entry to today's open — the expansion failed."),
+            "target": f"{g('strategies.volatility_breakout.target_r', 3.0)}R.",
+        },
     ]
     sections.append({
         "title": "The strategies",

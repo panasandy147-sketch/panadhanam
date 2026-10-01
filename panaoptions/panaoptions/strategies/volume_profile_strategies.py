@@ -421,4 +421,4 @@ from panaoptions.engine import strategies as _pipeline  # noqa: E402
 
 for _cls in STRATEGIES:
     if _cls not in _pipeline.ALL:
-        _pipeline.ALL.append(_cls)
+        _pipeline.register(_cls)
