@@ -965,7 +965,9 @@ class OptionsDesk:
             from panaoptions import audit
             audit.record_buy(self.cfg, trade, signal, setup,
                              self.candidate if self.candidate
-                             and self.candidate.get("symbol") == symbol else None)
+                             and self.candidate.get("symbol") == symbol else None,
+                             candles=candles, levels=session_levels,
+                             capital=self.risk.capital)
             if self.candidate and self.candidate.get("symbol") == symbol:
                 self.candidate["taken"] = True
                 self.candidate["trade_id"] = trade.id

@@ -1250,6 +1250,19 @@ also written to `journal/weekly/` (`journal/in/weekly/` for India). It is
 marked provisional until Friday's close, when it is rewritten with the coach's
 read. US and India keep separate reviews and audit logs.
 
+Every BUY in the day's audit (`journal/audit/YYYY-MM-DD.md`, India
+`journal/in/audit/`) carries a **trade card**:
+- the last `audit.card_candles` closed candles with OHLCV, the trigger bar marked;
+- PDH, PDL, PDC, the opening range and the pre-market range;
+- VWAP, EMA 9/21, ATR and RVOL at entry;
+- the strategy's written rules, from the rules page;
+- the stop and target on the underlying in R, with any stop-floor widening or
+  target snap;
+- the sizing arithmetic: the budget, the loss per contract at the stop, the 2%
+  risk cap and the planned risk.
+
+Its SELL adds the **result in R**: the P&L over the risk planned at entry.
+
 `journal.use_llm` is **on by default** and safe to leave on: if Ollama is not
 running the cards fall back to the rules-written version, the failure is logged
 once rather than per trade, and the grading is unaffected.

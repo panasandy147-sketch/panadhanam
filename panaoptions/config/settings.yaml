@@ -680,6 +680,11 @@ audit:
   # every fired setup) — the bars read, close/VWAP/EMAs/ATR/RVOL, PDH/PDL,
   # the opening range, and every strategy's verdict with its numbers.
   look_every_minutes: 15
+  # Every BUY carries a trade card: the last N closed candles (the last is
+  # the trigger bar), PDH/PDL/PDC, the opening range, VWAP/EMAs/ATR/RVOL, the
+  # strategy's written rules, the stop and target in R, the sizing
+  # arithmetic, and at the exit the result in R.
+  card_candles: 6
 
 journal:
   # Grade every closed trade the moment it closes, and write a card to
