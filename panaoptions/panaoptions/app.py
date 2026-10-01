@@ -1031,8 +1031,19 @@ class OptionsDesk:
 
     def _record_skip(self, symbol: str, side: str, setup, gate: str, reason: str) -> None:
         """A fired setup a hard risk gate refused: into the audit log, so the
-        weekly review shows what was skipped and why beside what was bought."""
+        weekly review shows what was skipped and why beside what was bought.
+        Once per symbol, side, strategy and reason per
+        `audit.refusal_repeat_minutes`, like a refusal: the same setup stays
+        valid for the five minutes of its bar and was logged every minute."""
         from panaoptions import audit
+        now = clock.now(self.cfg.timezone)
+        key = ("skip", now.date().isoformat(), symbol, side, setup.strategy.value, gate,
+               store._generic(reason))
+        repeat = float(self.cfg.get("audit.refusal_repeat_minutes", 30) or 0)
+        last = self._refusals_logged.get(key)
+        if last is not None and (now - last).total_seconds() < repeat * 60:
+            return
+        self._refusals_logged[key] = now
         audit.record_skip(self.cfg, symbol, side, reason, strategy=setup.strategy.value,
                           pattern=setup.pattern, gate=gate,
                           detail={"spot": setup.indicators.close,

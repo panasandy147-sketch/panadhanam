@@ -112,3 +112,27 @@ def test_a_card_that_cannot_be_built_never_stops_the_buy_record(cfg, monkeypatch
     [buy] = [e for e in audit.entries(now.date()) if e["event"] == "BUY"]
     assert buy["card"] is None and buy["confirmations"]
     assert "**BUY**" in audit.day_markdown(now.date())
+
+
+def test_a_skip_that_stays_valid_is_logged_once_not_every_minute(cfg, monkeypatch):
+    """1 Oct, India: one breakout skipped for room was logged at 10:10, 10:11,
+    10:12, 10:13 and 10:14 — 25 SKIP rows for 5 setups."""
+    from panaoptions import audit, clock
+    from panaoptions.app import OptionsDesk
+    from panaoptions.models import Direction, Setup, SetupType
+
+    now = {"t": datetime(2026, 10, 1, 10, 10, tzinfo=ET)}
+    monkeypatch.setattr(clock, "now", lambda tz: now["t"])
+    desk = OptionsDesk(cfg=cfg, feed=FakeFeed())
+    setup = Setup(symbol="INFY", ts=now["t"], direction=Direction.LONG,
+                  strategy=SetupType.VOLATILITY_BREAKOUT, pattern="Volatility breakout")
+    why = "only 0.6R of room before the previous-day high 1,023.60"
+    for minute in range(10, 15):
+        now["t"] = datetime(2026, 10, 1, 10, minute, tzinfo=ET)
+        desk._record_skip("INFY", "LONG_CALL", setup, "reward:risk", why)
+    desk._record_skip("INFY", "LONG_CALL", setup, "contract ladder", "nothing fits")
+    skips = [e for e in audit.entries(now["t"].date()) if e["event"] == "SKIP"]
+    assert [e["gate"] for e in skips] == ["reward:risk", "contract ladder"]
+    now["t"] = datetime(2026, 10, 1, 10, 45, tzinfo=ET)     # 30 minutes on: again
+    desk._record_skip("INFY", "LONG_CALL", setup, "reward:risk", why)
+    assert len([e for e in audit.entries(now["t"].date()) if e["event"] == "SKIP"]) == 3
