@@ -31,11 +31,11 @@ session:
   market_close: "16:00"
   premarket_scan_time: "08:45"
   no_new_entry_after: "15:30"
-  square_off_time: "15:45"
+  square_off_time: "15:59"         # 15:59 from 2 Oct 2026, the user's call (was 15:45)
   trading_days: [0, 1, 2, 3, 4]
 
 # The same shape on the US clock (ET): morning after the 15-minute range,
-# the lunch freeze, an afternoon VWAP-pullback window; square-off 15:45.
+# the lunch freeze, an afternoon VWAP-pullback window; square-off 15:59.
 screener:
   run_at: "09:00"
   # The daily-ATR floor 1.0% (was 2.0%) with the volatility breakout on

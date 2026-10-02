@@ -35,7 +35,10 @@ def test_a_us_trade_is_not_squared_off_before_the_us_square_off(tracker, cfg, mo
     cfg.switch_market("US")
     _at(monkeypatch, datetime(2026, 9, 24, 15, 29, tzinfo=ET))
     assert tracker._past_squareoff() is False
-    _at(monkeypatch, datetime(2026, 9, 24, 15, 46, tzinfo=ET))
+    # The US square-off is 15:59 since 2 Oct 2026 (the user's call; 15:45 before).
+    _at(monkeypatch, datetime(2026, 9, 24, 15, 58, tzinfo=ET))
+    assert tracker._past_squareoff() is False
+    _at(monkeypatch, datetime(2026, 9, 24, 15, 59, tzinfo=ET))
     assert tracker._past_squareoff() is True
 
 
