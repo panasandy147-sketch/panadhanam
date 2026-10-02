@@ -84,25 +84,29 @@ When it starts, it does four things:
 - starts Ollama (`ollama serve`) if it is installed but not running, and
   pulls the model (`OLLAMA_MODEL`, default `qwen2.5:7b`) only if it is
   missing;
-- starts panadhanam (:8000) and panaoptions (:8100) if they are not already
-  running;
-- opens both dashboards in the browser, this first time only;
+- starts panadhanam (:8000) if it is not already running;
+- opens its dashboard in the browser, this first time only;
 - checks every 30 minutes that Ollama is still running.
 
 Every 30 minutes (`--interval 900` for 15) it checks this branch on
 GitHub:
 - **Nothing new:** it does nothing.
-- **New commits:** it runs `git pull`, then restarts both desks on the new
-  code without opening another browser tab. A dashboard already open
-  reconnects by itself, and each desk restores the day's trade count, open
+- **New commits:** it runs `git pull`, then restarts the desk on the new
+  code without opening another browser tab. The dashboard already open
+  reconnects by itself, and the desk restores the day's trade count, open
   positions and any lockout.
-- **A pull that fails** (for example a locally edited file): the desks keep
-  the code they have, and it tries again next time.
+- **A pull that fails** (for example a locally edited file): the desk keeps
+  the code it has, and it tries again next time.
 
 It only reads from GitHub: nothing is pushed, and nothing on this machine is
-opened to the internet. Its own log is in `logs/auto_update.log`, and each
-desk writes to `logs/panadhanam.log` and `logs/panaoptions.log`. Closing its
-window stops the desks it started.
+opened to the internet. Its own log is in `logs/auto_update.log`, and the
+desk writes to `logs/panadhanam.log`. Closing its window stops the desk it
+started.
+
+**panaoptions** (the options desk, :8100) has its own repository since
+2 Oct 2026: https://github.com/panasandy147-sketch/panaoptions. Clone it
+beside this folder, run its `./setup.sh` once, and start it with its own
+`./start.sh`; `git pull` in that folder updates it.
 
 ## Two markets: India and the US
 
@@ -176,7 +180,7 @@ GLD (SPDR Gold) in the US.
   | GLD | +0.24R | +0.21R | +0.30R |
 
   Gold rose through 2025–26, which flatters a breakout system. Check it with
-  `cd panaoptions && python run.py --swing-backtest`.
+  panaoptions' `python run.py --swing-backtest` (its own repository).
 
 **Volatility Breakout (Larry Williams, 1987 World Cup).** US only, intraday.
 - **Trigger:** the first closed 5m candle beyond today's open ± 0.5 × yesterday's

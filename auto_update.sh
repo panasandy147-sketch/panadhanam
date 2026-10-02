@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
-# Keep both desks on the latest code without anyone at the machine.
+# Keep panadhanam on the latest code without anyone at the machine.
+# (panaoptions has its own repository since 2 Oct 2026 —
+#  github.com/panasandy147-sketch/panaoptions — and is started from its own
+#  folder with its own ./start.sh; this script no longer touches it.)
 #
 #     ./auto_update.sh                  check every 30 minutes, forever
 #     ./auto_update.sh --interval 900   every 15 minutes
 #     ./auto_update.sh --once           one check, then exit (for a test)
 #
 # Leave it running in its own Git Bash window. It starts Ollama if it is
-# installed but not running, starts panadhanam (:8000) and panaoptions (:8100)
-# in the background if they are not already up, opens both dashboards in the
-# browser (this first time only), then every interval:
+# installed but not running, starts panadhanam (:8000) in the background if it
+# is not already up, opens its dashboard in the browser (this first time
+# only), then every interval:
 #
 #   1. git fetch — only this branch, read-only; nothing is pushed, nothing on
 #      this machine is opened to the internet.
 #   2. No new commits: nothing happens. The desks keep running.
-#   3. New commits: git pull --ff-only, then stop both desks and start them
-#      again on the new code, WITHOUT opening new browser tabs (NO_BROWSER=1):
-#      the dashboards already open reconnect by themselves. A restart
-#      mid-session is safe — each desk restores the day's trade count, its
+#   3. New commits: git pull --ff-only, then stop the desk and start it
+#      again on the new code, WITHOUT opening a new browser tab (NO_BROWSER=1):
+#      the dashboard already open reconnects by itself. A restart
+#      mid-session is safe — the desk restores the day's trade count, its
 #      open positions and any daily lockout.
 #   4. A pull that fails (a locally edited file, no network) changes nothing:
-#      the desks keep running the code they have, and it tries again next time.
+#      the desk keeps running the code it has, and it tries again next time.
 #
-# Everything it does goes to logs/auto_update.log; each desk's own output to
-# logs/panadhanam.log and logs/panaoptions.log. Paper trading only, as always.
+# Everything it does goes to logs/auto_update.log; the desk's own output to
+# logs/panadhanam.log. Paper trading only, as always.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -41,7 +44,6 @@ mkdir -p logs
 LOG="logs/auto_update.log"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 PORT_PD=8000
-PORT_PO="${PANAOPTIONS_PORT:-8100}"
 
 NOHUP="$(command -v nohup || true)"      # Git for Windows ships it; if not, plain &
 
@@ -76,12 +78,6 @@ stop_port() {
 start_panadhanam() {
   say "starting panadhanam on :$PORT_PD"
   NO_BROWSER=1 $NOHUP ./start.sh >> logs/panadhanam.log 2>&1 &
-}
-
-start_panaoptions() {
-  say "starting panaoptions on :$PORT_PO"
-  # exec: the subshell BECOMES the desk rather than lingering to wait for it.
-  ( cd panaoptions && exec env NO_BROWSER=1 $NOHUP ./start.sh >> ../logs/panaoptions.log 2>&1 ) &
 }
 
 # The local model (panadhanam's AI reasoning, the panaoptions agents): the
@@ -132,19 +128,19 @@ ensure_ollama() {
   fi
 }
 
-# Both dashboards in the default browser: only when you start this script,
+# The dashboard in the default browser: only when you start this script,
 # never on its own restarts or reloads.
 open_tabs() {
   [ -n "${AUTO_UPDATE_RELOADED:-}" ] && return
   local url
-  for url in "http://127.0.0.1:$PORT_PD" "http://127.0.0.1:$PORT_PO"; do
+  for url in "http://127.0.0.1:$PORT_PD"; do
     case "$(uname -s)" in
       MINGW*|MSYS*|CYGWIN*) explorer.exe "$url" >/dev/null 2>&1 || : ;;
       Darwin)               open "$url" ;;
       *)                    command -v xdg-open >/dev/null && xdg-open "$url" >/dev/null 2>&1 ;;
     esac
   done
-  say "opened both dashboards in the browser"
+  say "opened the dashboard in the browser"
 }
 
 wait_up() {
@@ -154,11 +150,8 @@ wait_up() {
 
 restart_all() {
   stop_port "$PORT_PD"
-  stop_port "$PORT_PO"
   start_panadhanam
-  start_panaoptions
   wait_up "$PORT_PD" panadhanam
-  wait_up "$PORT_PO" panaoptions
 }
 
 check() {
@@ -184,7 +177,7 @@ check() {
         "git status shows what is in the way."
     return
   fi
-  say "pulled $(git rev-parse --short HEAD) — restarting both desks"
+  say "pulled $(git rev-parse --short HEAD) — restarting the desk"
   ensure_ollama
   restart_all
   # The pull changed this script: carry on as the NEW version (the desks are
@@ -199,7 +192,6 @@ main() {
   say "auto-update on $BRANCH, every $((INTERVAL / 60)) min (log: $LOG)"
   ensure_ollama
   up "$PORT_PD" || { start_panadhanam; wait_up "$PORT_PD" panadhanam; }
-  up "$PORT_PO" || { start_panaoptions; wait_up "$PORT_PO" panaoptions; }
   open_tabs
   while :; do
     check
