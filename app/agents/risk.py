@@ -497,6 +497,10 @@ class RiskManager:
         reward_points = abs(target - entry)
         rr = reward_points / stop_points if stop_points > 0 else 0.0
         min_rr = float(self.cfg.get("risk.min_risk_reward", 2.0))
+        # SJK 1 is judged at its own reward:risk (sjk1.rr, 1:2.5), not 1:3.
+        from app.strategies.sjk1 import SETUP_NAME as SJK1
+        if signal.setup == SJK1:
+            min_rr = float(self.cfg.get("sjk1.rr", 2.5))
         if snapped_r is not None:
             min_rr = min(min_rr, float(self.cfg.get("risk.target_snap.min_r", 2.2)))
         max_rr = float(self.cfg.get("risk.max_risk_reward", 10.0))
@@ -873,11 +877,12 @@ class RiskManager:
         """The candlestick analyst's confirmed PD Liquidity Sweep in this
         trade's direction, if that is what this trade is."""
         from app.strategies.pd_sweep import SETUP_NAME
+        from app.strategies.sjk1 import SETUP_NAME as SJK1
         from app.strategies.vol_breakout import SETUP_NAME as BREAKOUT
         want = 1 if bias == Bias.BULLISH else -1
         for r in reports or []:
             if (r.agent_id == "candlestick"
-                    and (r.extra or {}).get("setup") in (SETUP_NAME, BREAKOUT)
+                    and (r.extra or {}).get("setup") in (SETUP_NAME, BREAKOUT, SJK1)
                     and r.score * want > 0 and r.invalidation_level):
                 return r
         return None
@@ -898,9 +903,17 @@ class RiskManager:
         tick = float(meta.get("tick_size")
                      or (0.01 if str(getattr(self.cfg, "active_market", "IN")).upper() == "US"
                          else 0.05))
+        from app.strategies.sjk1 import SETUP_NAME as SJK1
         from app.strategies.vol_breakout import SETUP_NAME as BREAKOUT
-        breakout = (sweep.extra or {}).get("setup") == BREAKOUT
-        if breakout:
+        setup_name = (sweep.extra or {}).get("setup")
+        sjk1 = setup_name == SJK1
+        breakout = setup_name == BREAKOUT or sjk1        # no VWAP target either
+        if sjk1:
+            # SJK 1: the stop AT the pullback's swing (sjk1.stop_ticks beyond
+            # it, 0 by default), the target at its own 1:rr.
+            ticks = int(self.cfg.get("sjk1.stop_ticks", 0))
+            need = float(self.cfg.get("sjk1.rr", 2.5))
+        elif breakout:
             # The volatility breakout: the same exact-level stop, beyond
             # today's open instead of a wick, and the desk's 3R target.
             ticks = int(self.cfg.get("vol_breakout.stop_ticks", 2))
@@ -929,7 +942,9 @@ class RiskManager:
             u_target, how = three_r, (f"{need:g}R ({three_r:.2f}; VWAP {vwap:.2f} is only "
                                       f"{max(vwap_r, 0):.1f}R)" if vwap else f"{need:g}R")
         rr = abs(u_target - spot) / u_risk
-        note = ((f"breakout stop {ticks} tick(s) beyond today's open {wick:.2f} → "
+        note = ((f"SJK 1 stop at the pullback's swing {wick:.2f} → {u_stop:.2f}; "
+                 f"target {how}") if sjk1 else
+                (f"breakout stop {ticks} tick(s) beyond today's open {wick:.2f} → "
                  f"{u_stop:.2f}; target {how}") if breakout else
                 (f"sweep stop {ticks} tick(s) beyond the wick {wick:.2f} → {u_stop:.2f}; "
                  f"target {how}; no time stop"))

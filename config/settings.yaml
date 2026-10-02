@@ -121,7 +121,8 @@ risk:
   time_stop_setups: ["Mean Reversion"]   # which setups the timer applies to
   # Setups that are NEVER time-stopped: they run to the target, the stop or
   # the intraday square-off.
-  no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout"]
+  no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout",
+                        "SJK 1 · 50/200 EMA Pullback"]
   # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
   # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
   # At +1.0R open: ADD 50% of the base, and the stop for the WHOLE position
@@ -423,6 +424,27 @@ vol_breakout:
   minutes_after_open: 30
   to: "14:30"
   stop_ticks: 2
+
+# SJK 1 — the user's 50 / 200 EMA pullback continuation (app/strategies/sjk1.py).
+# TRIAL from 2 Oct 2026, the user's call, both markets. Long: above the 200
+# EMA, a pullback to the 50 EMA that never closes below the 200, then the
+# FIRST 5m close above the swing high made before it; stop the pullback's
+# swing low; target 1:rr, sold there. Short: the mirror. One trade per swing.
+sjk1:
+  enabled: true
+  score: 0.9                # the candlestick analyst's vote, like the breakout
+  from: "09:45"             # market time (India: markets/india.yaml)
+  to: "15:00"
+  fast: 50                  # EMA periods, on the 5m close
+  slow: 200
+  swing_lookback: 3         # bars each side that make a swing high / low (3-5)
+  touch_pct: 0.15           # the pullback must come within 0.15% of the 50 EMA
+  max_age_bars: 36          # the pullback swing at most 3 hours old
+  rr: 2.5                   # target = entry + 2.5 x risk (2, 3 or 4 also); judged at it
+  stop_buffer: 0.0          # beyond the swing for the stop in price (0 = at it)
+  stop_ticks: 0             # ...or in ticks, at the risk desk
+  breakeven_r: 0            # 1.5 = stop to breakeven at +1.5R (0 = off)
+  trail_r: 0                # after breakeven, trail this many R behind the best (0 = off)
 
 pd_sweep:
   enabled: true

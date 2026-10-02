@@ -126,7 +126,9 @@ class MarketDataService:
         hit = self._slow.get(key)
         if ttl and hit and time.monotonic() - hit[0] < ttl:
             return hit[1]
-        bars = await self.broker.get_candles(symbol, tf, 200)
+        # 5m: 600 bars (about 8 sessions), so SJK 1's 200 EMA has history
+        # behind today's first bar; 200 for the other timeframes.
+        bars = await self.broker.get_candles(symbol, tf, 600 if tf == "5m" else 200)
         if ttl and bars:
             self._slow[key] = (time.monotonic(), bars)
         return bars
@@ -243,6 +245,11 @@ class MarketDataService:
                     swing=swing, daily=candles.get("1d") or [])
                 ctx.indicators["vol_breakout"] = (
                     {**found.to_dict(), "swing": swing} if found else None)
+            # SJK 1, the user's 50 / 200 EMA pullback continuation.
+            if bool(self.cfg.get("sjk1.enabled", False)) and not swing:
+                from app.strategies import sjk1
+                ctx.indicators["sjk1"] = sjk1.detect_candles(
+                    candles.get("5m") or [], self.cfg, tz)
             if prev:
                 pic = fno_confluence.picture(symbol, prev, ctx.indicators.get("derivatives"))
                 ctx.indicators["fno_picture"] = pic

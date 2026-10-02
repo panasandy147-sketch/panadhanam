@@ -107,6 +107,7 @@ class OutcomeTracker:
                 if self.risk is not None:
                     self.risk.position_pnl[str(row["symbol"]).upper()] = round(
                         (price - entry) * qty * direction, 2)
+                row = self._own_stop_step(row, price, spot)
                 if pyramiding:
                     row = await self._pyramid_step(row, price, spot)
                     entry, qty = row["entry"], row["quantity"] or 0
@@ -274,6 +275,67 @@ class OutcomeTracker:
     # ------------------------------------------------------------------ #
     # The Standard Pyramid (agents/pyramid.py)
     # ------------------------------------------------------------------ #
+    def _own_stop_step(self, row: dict[str, Any], price: float,
+                       spot: float | None) -> dict[str, Any]:
+        """SJK 1's optional stop management (sjk1.breakeven_r, sjk1.trail_r):
+        the stop to breakeven once the trade is +breakeven_r on its own risk,
+        then trailed trail_r behind the best R reached. Judged on the
+        UNDERLYING for an option (its underlying stop moves), on the price for
+        shares. Off (0) by default: the stop stays at the pullback's swing."""
+        from app.strategies.sjk1 import SETUP_NAME
+        payload = self._payload(row)
+        be_r = float(self.cfg.get("sjk1.breakeven_r", 0) or 0)
+        trail_r = float(self.cfg.get("sjk1.trail_r", 0) or 0)
+        if payload.get("setup") != SETUP_NAME or (be_r <= 0 and trail_r <= 0):
+            return row
+        option = row.get("instrument_type") in {"CE", "PE"}
+        state = payload.setdefault("sjk1_stop", {})
+        if not state:                                      # the first look
+            if option:
+                u_entry = float(payload.get("entry_spot") or spot or 0)
+                u_stop = float(payload.get("underlying_stop") or 0)
+            else:
+                u_entry, u_stop = float(row["entry"]), float(row["stop_loss"])
+            state.update(entry=u_entry, stop=u_stop, risk=abs(u_entry - u_stop),
+                         best=0.0, armed=False)
+        now = float(spot if option and spot is not None else price)
+        if not state.get("risk") or not now:
+            return row
+        long = (row["side"] == "BUY") if not option else row["instrument_type"] == "CE"
+        sign = 1.0 if long else -1.0
+        r = (now - state["entry"]) * sign / state["risk"]
+        state["best"] = max(float(state.get("best", 0.0)), r)
+        new = None
+        if be_r and not state.get("armed") and state["best"] >= be_r:
+            state["armed"] = True
+            new = state["entry"]
+        if trail_r and state.get("armed"):
+            trail = state["entry"] + sign * (state["best"] - trail_r) * state["risk"]
+            cur = new if new is not None else float(state.get("current", state["entry"]))
+            if (trail - cur) * sign > 0:
+                new = trail
+        if new is None:
+            return row
+        state["current"] = round(new, 4)
+        stop_loss = float(row["stop_loss"])
+        if option:
+            payload["underlying_stop"] = round(new, 4)
+            stop_loss = max(stop_loss, float(row["entry"])) if state["armed"] else stop_loss
+        else:
+            stop_loss = round(new, 4)
+        import json
+        row = {**row, "stop_loss": stop_loss, "payload": json.dumps(payload, default=str)}
+        try:
+            db.update_position(row["id"], quantity=int(row["quantity"] or 0),
+                               entry=float(row["entry"]), stop_loss=stop_loss,
+                               target=float(row["target"]), payload=row["payload"],
+                               notional=float(row.get("notional") or 0),
+                               total_risk=float(row.get("total_risk") or 0))
+        except Exception as exc:                           # noqa: BLE001
+            log.warning("could not move the SJK 1 stop for %s: %s", row.get("symbol"), exc)
+        log.info("SJK 1 %s at %+.2fR — stop moved to %.2f", row.get("symbol"), r, new)
+        return row
+
     @staticmethod
     def _payload(row: dict[str, Any]) -> dict[str, Any]:
         import json

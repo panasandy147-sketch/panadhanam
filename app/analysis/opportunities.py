@@ -96,6 +96,7 @@ class Opportunity:
                 "unit_size": s.unit_size,
                 "unit_label": s.unit_label,
                 "risk_reward": s.risk_reward,
+                "setup": s.setup,
                 "total_risk": s.total_risk,
                 "capital_at_risk_pct": s.capital_at_risk_pct,
                 "notional": s.notional,

@@ -1046,10 +1046,11 @@ function initCandChart() {
    option's premiums do not belong on the stock's price axis. */
 let candLevels = [];
 
-function drawCandLevels(c) {
+function drawCandLevels(c, bars = []) {
   if (!candSeries.candles) return;
   candLines.forEach((l) => candSeries.candles.removePriceLine(l));
   candLines = [];
+  candSeries.candles.setMarkers([]);
   candLevels = c ? [c.spot, c.underlying_stop, c.underlying_target]
     .filter((x) => x).map(Number) : [];
   if (!c) return;
@@ -1062,6 +1063,15 @@ function drawCandLevels(c) {
   add(c.spot, "#8b949e", "entry");
   add(c.underlying_stop, "#d03b3b", "stop");
   add(c.underlying_target, "#0ca30c", "target");
+  // An arrow on the bar the trade was judged on.
+  const at = Math.floor(new Date(c.ts).getTime() / 1000);
+  const bar = [...bars].reverse().find((b) => b.time <= at);
+  if (bar) {
+    const long = c.direction === "LONG";
+    candSeries.candles.setMarkers([{ time: bar.time,
+      position: long ? "belowBar" : "aboveBar", color: long ? "#0ca30c" : "#d03b3b",
+      shape: long ? "arrowUp" : "arrowDown", text: c.action }]);
+  }
 }
 
 async function loadCandChart(symbol, c) {
@@ -1104,7 +1114,7 @@ async function loadCandChart(symbol, c) {
     pv += ((x.high + x.low + x.close) / 3) * v; vol += v;
     return pv / vol;
   })));
-  drawCandLevels(c);
+  drawCandLevels(c, bars);
   if (candChartFor !== symbol) candChart.timeScale().fitContent();
   candChartFor = symbol;
   $("cand-symbol").textContent = `${symbol} · 5m · ${d.session_only ? "today" : "recent"}`;

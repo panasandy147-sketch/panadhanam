@@ -182,7 +182,7 @@ class MarketProfile:
 
         # Setups switched per market (the volatility breakout: on for the US,
         # off for India — each on its own walk-forward).
-        for section in ("vol_breakout",):
+        for section in ("vol_breakout", "sjk1"):
             if self.data.get(section):
                 out.setdefault(section, {}).update(self.data[section])
 

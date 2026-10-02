@@ -29,6 +29,10 @@ class CandlestickAgent(BaseAgent):
         if breakout and (breakout.get("swing")
                          or bool(self.cfg.get("vol_breakout.enabled", False))):
             return self._breakout_report(ctx, primary, breakout)
+        # --- SJK 1, the user's 50 / 200 EMA pullback: a complete setup too.
+        sjk = ind.get("sjk1") or {}
+        if sjk and bool(self.cfg.get("sjk1.enabled", False)):
+            return self._sjk1_report(ctx, primary, sjk)
 
         score = 0.0
         evidence: list[Evidence] = []
@@ -170,6 +174,27 @@ class CandlestickAgent(BaseAgent):
             suggested_entry=price,
             extra={"setup": SETUP_NAME, "breakout": breakout,
                    "patterns": ["volatility_breakout"],
+                   "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
+        )
+
+    def _sjk1_report(self, ctx: MarketContext, primary: dict, sjk: dict) -> AgentReport:
+        from app.strategies.sjk1 import SETUP_NAME
+        direction = 1 if sjk.get("direction") == "LONG" else -1
+        score = float(self.cfg.get("sjk1.score", 0.9)) * direction
+        price = float(primary.get("last_close") or sjk.get("entry") or 0.0)
+        rr = float(self.cfg.get("sjk1.rr", 2.5))
+        return AgentReport(
+            agent_id=self.agent_id, symbol=ctx.symbol,
+            bias=self._bias_from_score(score), score=round(score, 3), confidence=0.9,
+            rationale=(f"{SETUP_NAME}: {sjk.get('note', '')}. Wrong back through the "
+                       f"pullback's swing {float(sjk.get('stop') or 0):,.2f}; target "
+                       f"1:{rr:g} at {float(sjk.get('target') or 0):,.2f}."),
+            evidence=[Evidence(label=SETUP_NAME, value=sjk.get("note", ""), weight=1.0)],
+            # The risk desk places the stop exactly at the pullback's swing.
+            invalidation_level=round(float(sjk.get("stop") or 0.0), 4),
+            suggested_entry=price,
+            suggested_target=round(float(sjk.get("target") or 0.0), 4),
+            extra={"setup": SETUP_NAME, "sjk1": sjk, "patterns": ["sjk1_ema_pullback"],
                    "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 
