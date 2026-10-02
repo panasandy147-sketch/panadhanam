@@ -23,7 +23,7 @@ falls back to a deterministic summary of the same numbers.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -546,17 +546,35 @@ def to_markdown(review: WeekReview) -> str:
 
     # --- trade by trade ----------------------------------------------------
     out += ["## Every trade, and why the desk took it", ""]
+    tz = {"US": "America/New_York"}.get(str(review.market).upper(), "Asia/Kolkata")
     for i, t in enumerate(review.trades, 1):
-        out += _trade_markdown(i, t, cur)
+        out += _trade_markdown(i, t, cur, tz)
 
     _append_coach(out, review)
     return "\n".join(out)
 
 
-def _trade_markdown(i: int, t: dict[str, Any], cur: str) -> list[str]:
+def _market_time(ts: Any, tz: str) -> str:
+    """A stored timestamp (UTC when it carries no zone) on the MARKET's clock:
+    the trades were listed in UTC, four hours off the audit log's ET."""
+    from zoneinfo import ZoneInfo
+    try:
+        parsed = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return str(ts or "")[:16].replace("T", " ")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
+
+
+def _trade_markdown(i: int, t: dict[str, Any], cur: str,
+                    tz: str = "Asia/Kolkata") -> list[str]:
     r = t.get("r_multiple") or 0.0
     pnl = t.get("pnl") or 0.0
-    when = str(t.get("ts") or "")[:16].replace("T", " ")
+    when = _market_time(t.get("ts"), tz)
+    held = t.get("hold_minutes")
+    # Rows journalled before the clock fix can hold a negative duration.
+    held_txt = f"{held:.0f} min" if isinstance(held, int | float) and held >= 0 else "—"
 
     out = [
         f"### {i}. {t['symbol']} {t['side']} — {r:+.2f}R ({cur}{pnl:,.0f})",
@@ -570,7 +588,7 @@ def _trade_markdown(i: int, t: dict[str, Any], cur: str) -> list[str]:
         f"| Stop | {t.get('planned_stop')} | {'held' if t.get('stop_honoured') else 'moved'} |",
         f"| Target | {t.get('planned_target')} | exited at {t.get('actual_exit')} |",
         f"| Quantity | {t.get('quantity')} | {t.get('quantity')} |",
-        f"| Held | — | {(t.get('hold_minutes') or 0):.0f} min |",
+        f"| Held | — | {held_txt} |",
         "",
         f"**Verdict: {t.get('verdict') or 'ungraded'}** "
         f"· discipline {t.get('execution_score') or '—'}/10 "

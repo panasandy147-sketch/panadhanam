@@ -224,12 +224,17 @@ class OutcomeTracker:
 
             store.init_journal()
 
+            from datetime import UTC as _UTC
+
+            # Both ends in UTC, naive. The entry came back as UTC and the exit
+            # was the PC's own local clock, so "Held" read -238 min.
             def _ts(value: Any) -> _dt | None:
                 if not value:
                     return None
                 try:
                     parsed = _dt.fromisoformat(str(value))
-                    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+                    return (parsed.astimezone(_UTC).replace(tzinfo=None)
+                            if parsed.tzinfo else parsed)
                 except ValueError:
                     return None
 
@@ -248,7 +253,7 @@ class OutcomeTracker:
                 actual_exit=round(exit_price, 2),
                 actual_quantity=row["quantity"] or 0,
                 entry_ts=_ts(row.get("ts")),
-                exit_ts=_dt.now(),
+                exit_ts=_dt.now(_UTC).replace(tzinfo=None),
                 notes=(f"Auto-logged from a live signal. Exit: {outcome}. "
                        f"{(row.get('rationale') or '')[:200]}"),
                 context={

@@ -301,9 +301,14 @@ class CMIOAgent(BaseAgent):
             worst = min(opposing, key=lambda r: r.score * (1 if bias == Bias.BULLISH else -1))
             return f"{worst.agent_id} disagrees ({worst.score:+.2f}): {worst.rationale[:160]}"
         weakest = min(reports, key=lambda r: r.confidence, default=None)
-        if weakest:
+        # Only a genuinely unsure analyst is worth naming: "candlestick has
+        # only 100% confidence" was printed on half the week's trades.
+        if weakest and weakest.confidence < 0.6:
             return (f"No direct opposition, but {weakest.agent_id} has only "
                     f"{weakest.confidence:.0%} confidence — the consensus may be thin.")
+        if len(reports) <= 2:
+            return (f"No direct opposition, but only {len(reports)} analyst(s) voted — "
+                    f"a thin consensus.")
         return "No explicit counter-argument identified — treat that as a warning, not comfort."
 
     @staticmethod
