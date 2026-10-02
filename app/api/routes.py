@@ -234,7 +234,7 @@ async def stats() -> dict[str, Any]:
 @router.get("/market/{symbol}/candles")
 async def candles(request: Request, symbol: str, timeframe: str = "5m",
                   count: int = 200, session: bool = True,
-                  warmup: int = 60) -> dict[str, Any]:
+                  warmup: int = 600) -> dict[str, Any]:
     """Bars for the chart: today's session, plus the bars the lines need.
 
     Several days of 5m bars on one axis squeeze the current session into the
@@ -256,7 +256,10 @@ async def candles(request: Request, symbol: str, timeframe: str = "5m",
     engine = _engine(request)
     cfg = get_config()
     tz_name = cfg.market.timezone
-    data = await engine.broker.get_candles(symbol, timeframe, max(count, 250))
+    # Enough history behind today for the chart's EMA 200 (600 warm-up bars,
+    # about 8 sessions of 5m; Yahoo serves 60 days).
+    data = await engine.broker.get_candles(symbol, timeframe,
+                                           max(count, warmup + 150, 250))
 
     today: list = list(data)
     before: list = []

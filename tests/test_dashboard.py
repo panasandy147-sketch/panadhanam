@@ -405,3 +405,14 @@ def test_the_candidate_endpoint_serves_this_markets_candidate_only(cfg):
     assert body["candidate"]["symbol"] == "RELIANCE"
     eng.candidate = {"market": "XX", "symbol": "AAPL"}
     assert client.get("/api/candidate").json()["candidate"] is None
+
+
+def test_the_candidate_chart_draws_an_ema_200_with_enough_history(client):
+    """2 Oct 2026, the user's call: the EMA 200 on the chart, for checks. It
+    needs ~200 bars before today, so the chart asks for 600 warm-up bars."""
+    script = (STATIC / "app.js").read_text()
+    page = (STATIC / "index.html").read_text()
+    assert "candEma(closes, 200)" in script and "warmup=600" in script
+    assert "EMA 200" in page
+    body = client.get("/api/market/NIFTY/candles?timeframe=5m").json()
+    assert len(body["warmup"]) > 60          # every bar before today, up to 600

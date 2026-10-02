@@ -1022,22 +1022,36 @@ function initCandChart() {
   candSeries.candles = candChart.addCandlestickSeries({
     upColor: "#0ca30c", downColor: "#d03b3b", borderUpColor: "#0ca30c",
     borderDownColor: "#d03b3b", wickUpColor: "#0ca30c", wickDownColor: "#d03b3b",
+    // The price axis stretches to the entry, stop and target, so a target
+    // above today's range is still on screen.
+    autoscaleInfoProvider: (base) => {
+      const r = base();
+      if (!r || !candLevels.length) return r;
+      r.priceRange.minValue = Math.min(r.priceRange.minValue, ...candLevels);
+      r.priceRange.maxValue = Math.max(r.priceRange.maxValue, ...candLevels);
+      return r;
+    },
   });
   const line = (color, width) => candChart.addLineSeries(
     { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false });
   candSeries.ema9 = line("#4c8dff", 1);
   candSeries.ema21 = line("#c77dff", 1);
   candSeries.ema50 = line("#8b949e", 1);
+  candSeries.ema200 = line("#2dd4bf", 2);
   candSeries.vwap = line("#d29922", 2);
   new ResizeObserver(() => candChart.applyOptions({ width: el.clientWidth })).observe(el);
 }
 
 /* Entry, stop and target as dashed lines — on the UNDERLYING only: an
    option's premiums do not belong on the stock's price axis. */
+let candLevels = [];
+
 function drawCandLevels(c) {
   if (!candSeries.candles) return;
   candLines.forEach((l) => candSeries.candles.removePriceLine(l));
   candLines = [];
+  candLevels = c ? [c.spot, c.underlying_stop, c.underlying_target]
+    .filter((x) => x).map(Number) : [];
   if (!c) return;
   const add = (price, color, title) => {
     if (!price) return;
@@ -1057,7 +1071,7 @@ async function loadCandChart(symbol, c) {
   let d;
   try {
     const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/candles` +
-                            "?timeframe=5m&session=true");
+                            "?timeframe=5m&session=true&warmup=600");
     if (!res.ok) return;
     d = await res.json();
   } catch { return; }
@@ -1070,8 +1084,8 @@ async function loadCandChart(symbol, c) {
   };
   const bars = clean(d.candles);
   if (!bars.length) return;
-  // Today is drawn; the bars before it make the lines right (an EMA 50
-  // started from nine bars of today is not an EMA 50).
+  // Today is drawn; the bars before it make the lines right (an EMA 200
+  // started from nine bars of today is not an EMA 200).
   const all = clean([...(d.warmup || []), ...bars]);
   const first = bars[0].time;
   const closes = all.map((x) => x.close);
@@ -1081,6 +1095,7 @@ async function loadCandChart(symbol, c) {
   candSeries.ema9.setData(asLine(candEma(closes, 9)));
   candSeries.ema21.setData(asLine(candEma(closes, 21)));
   candSeries.ema50.setData(asLine(candEma(closes, 50)));
+  candSeries.ema200.setData(asLine(candEma(closes, 200)));
   let pv = 0, vol = 0, day = null;
   candSeries.vwap.setData(asLine(all.map((x) => {
     const dd = candDay(x.time);
