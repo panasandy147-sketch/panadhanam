@@ -40,6 +40,9 @@ echo
 "$PY" run.py --ensure-paper-orders
 "$PY" run.py --check-data
 "$PY" run.py --check-broker
+# Ollama (the local AI) is a separate program: start it if it is installed
+# but not running, so the check below finds it up (ollama_up.sh).
+./ollama_up.sh
 "$PY" run.py --check-llm
 
 URL="http://127.0.0.1:8000"
