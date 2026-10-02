@@ -185,6 +185,55 @@ class RiskManager:
         return out
 
     # ------------------------------------------------------------------ #
+    # General setups: the guards from the US week of 28 Sept 2026
+    # ------------------------------------------------------------------ #
+    def general_checks(self, bias: Bias, reports: list[AgentReport],
+                       indicators: dict[str, Any]) -> list[str]:
+        """Reasons a GENERAL setup (no named strategy) is refused; each guard
+        is off until its setting is set (per market):
+
+          consensus.general_min_analysts   at least N analysts voting the
+                                           trade's way at +/-general_agree_min
+          risk.rsi_guard                   no short below short_min RSI, no
+                                           long above long_max
+          screener.windows.general_to      no new general entry from this
+                                           time (market clock)
+        """
+        g = self.cfg.get
+        out: list[str] = []
+        sign = 1 if bias == Bias.BULLISH else -1
+        need = int(g("consensus.general_min_analysts", 0) or 0)
+        if need > 1:
+            floor = float(g("consensus.general_agree_min", 0.25))
+            agree = sorted(r.agent_id for r in reports
+                           if getattr(r, "data_available", True) and r.score * sign >= floor)
+            if len(agree) < need:
+                out.append(f"General setup needs {need} analysts at "
+                           f"{'+' if sign > 0 else '-'}{floor:g} or stronger its way; "
+                           f"{len(agree)} ({', '.join(agree) or 'none'}) — one analyst "
+                           f"never trades alone without a named strategy")
+        guard_cfg = g("risk.rsi_guard") or {}
+        if guard_cfg.get("enabled", False):
+            primary = (indicators or {}).get("primary") or {}
+            rsi = primary.get("rsi")
+            if rsi is not None:
+                rsi = float(rsi)
+                low, high = float(guard_cfg.get("short_min", 25)), float(
+                    guard_cfg.get("long_max", 75))
+                if sign < 0 and rsi < low:
+                    out.append(f"RSI {rsi:.0f} is below {low:g} — no short into a "
+                               f"stretched, oversold move (risk.rsi_guard)")
+                elif sign > 0 and rsi > high:
+                    out.append(f"RSI {rsi:.0f} is above {high:g} — no long into a "
+                               f"stretched, overbought move (risk.rsi_guard)")
+        cutoff = g("screener.windows.general_to")
+        if cutoff and clock.past(str(g("system.timezone", "Asia/Kolkata")), str(cutoff)):
+            out.append(f"Past {cutoff} — general setups take no new entries this late "
+                       f"(screener.windows.general_to); the named strategies keep "
+                       f"their own windows")
+        return out
+
+    # ------------------------------------------------------------------ #
     # The daily lockout
     # ------------------------------------------------------------------ #
     def lock(self, reason: str) -> None:
@@ -424,6 +473,11 @@ class RiskManager:
         if not swing:
             reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {},
                                                 composite_score))
+        # A general setup (no named strategy) answers to the weekly review's
+        # guards; PD sweep, the volatility breakout and SJK 1 carry their own.
+        if not swing and not signal.setup:
+            reasons.extend(self.general_checks(
+                bias, reports or ctx.__dict__.get("_reports") or [], ctx.indicators or {}))
 
         # ---- can this instrument actually be bought? ----
         if self._index_is_untradeable(self.cfg.instrument_meta(ctx.symbol), instrument):

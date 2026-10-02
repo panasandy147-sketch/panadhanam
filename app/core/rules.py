@@ -91,6 +91,18 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                   session_key + "no_new_entry_after"),
             _rule("Everything still open is sold at", g("system.square_off_time"),
                   session_key + "square_off_time"),
+            _rule("A general setup (no named strategy) needs this many analysts "
+                  "voting its way at ±" f"{g('consensus.general_agree_min', 0.25)}",
+                  g("consensus.general_min_analysts", 0) or "off",
+                  "consensus.general_min_analysts"),
+            _rule("A general setup: no short below this RSI, no long above",
+                  (f"{(g('risk.rsi_guard') or {}).get('short_min', 25)} / "
+                   f"{(g('risk.rsi_guard') or {}).get('long_max', 75)}")
+                  if (g("risk.rsi_guard") or {}).get("enabled") else "off",
+                  "risk.rsi_guard"),
+            _rule("No new general setup after (named strategies keep their own "
+                  "windows)", g("screener.windows.general_to") or "off",
+                  "screener.windows.general_to"),
             _rule("Paper account arms itself at the open",
                   "yes" if g("trading_day.auto_arm_on_open", True) else "no",
                   "trading_day.auto_arm_on_open"),

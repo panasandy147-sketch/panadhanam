@@ -25,6 +25,9 @@ system:
 # talked out of these numbers by any prompt.
 # --------------------------------------------------------------------------
 risk:
+  # GENERAL setups only: no short below short_min RSI, no long above
+  # long_max (stretched moves snap back). Off here; set per market.
+  rsi_guard: {enabled: false, short_min: 25, long_max: 75}
   # Account size every position is sized against. Set it per-machine with
   # TOTAL_CAPITAL in .env, which overrides this file and survives a git pull:
   #
@@ -198,6 +201,11 @@ consensus:
   # replay it left 5 of 4,085 India setups and 0 of 3,687 US (the volume
   # profile rarely votes, and India's chain has no OI for the derivatives
   # analyst) — it would stop the desk. The model synthesis obeys it when on.
+  # A GENERAL setup (no named strategy: not PD sweep, volatility breakout or
+  # SJK 1) needs this many analysts voting its way at +/-general_agree_min.
+  # 0 = off; set per market (config/markets/*.yaml).
+  general_min_analysts: 0
+  general_agree_min: 0.25
   quorum:
     enabled: false
     primary: "candlestick"
@@ -300,6 +308,9 @@ screener:
     morning_to: "11:15"
     afternoon_from: "13:30"
     afternoon_to: "14:45"
+    # No new GENERAL entry (no named strategy) from this time, market clock;
+    # the named strategies keep their own windows. Empty = off; per market.
+    general_to: ""
 
 # VOLUME PROFILE — the Volume Profile analyst and the CMIO's confluence rule.
 # Sessions follow the active market's hours (US 09:30-16:00 ET) unless

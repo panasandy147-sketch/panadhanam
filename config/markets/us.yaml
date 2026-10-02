@@ -49,6 +49,26 @@ screener:
     morning_to: "11:30"
     afternoon_from: "13:30"
     afternoon_to: "15:00"
+    # No new GENERAL entry (no named strategy) from 14:00 ET, 5 Oct 2026 (the
+    # weekly review: late entries squared off before they could work). 40-
+    # session replay, account rules: earlier half +0.09R -> +0.20R a trade,
+    # judged half unchanged (+0.20R), drawdown 4.0% -> 3.0%.
+    general_to: "14:00"
+
+# The weekly review of 28 Sept - 2 Oct 2026, for GENERAL setups only (PD
+# sweep, the volatility breakout and SJK 1 keep their own rules):
+#   * RSI guard: no short below RSI 25, no long above 75. 40-session replay,
+#     account rules: earlier half +0.09R -> +0.19R a trade, judged half
+#     +0.20R -> +0.31R, drawdown 4.0% -> 3.0% and 2.7% -> 2.0%.
+risk:
+  rsi_guard: {enabled: true, short_min: 25, long_max: 75}
+
+# TRIAL (the user's call, 5 Oct 2026): a general setup needs 2 analysts
+# voting its way at +/-0.25. The live week: 16 trades with a second analyst
+# agreeing made +3.92R; 12 with the candlestick analyst alone made -0.18R.
+# Not replayable (no news or macro history), so judged on the live weeks.
+consensus:
+  general_min_analysts: 2
 
 derivatives:
   # US equity options are not lot-based; the contract multiplier does the work.

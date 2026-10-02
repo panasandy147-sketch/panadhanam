@@ -40,9 +40,12 @@ T0 = datetime(2026, 9, 28, 10, 0)
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def us(cfg):
-    """The US desk on the shipped $4,000 account, entries allowed all day."""
+    """The US desk on the shipped $4,000 account, entries allowed all day.
+    The general-setup guards (tests/test_general_guards.py) are off here."""
     cfg.switch_market("US")
     cfg.settings["system"]["no_new_entry_after"] = "23:59"
+    cfg.settings["screener"]["windows"]["general_to"] = ""
+    cfg.settings["consensus"]["general_min_analysts"] = 0
     yield cfg
     cfg.switch_market("IN")
 
