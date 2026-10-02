@@ -434,7 +434,7 @@ sjk1:
   enabled: true
   score: 0.9                # the candlestick analyst's vote, like the breakout
   from: "09:45"             # market time (India: markets/india.yaml)
-  to: "15:00"
+  to: "15:15"               # 15 min past the others (the user's call, 2 Oct)
   fast: 50                  # EMA periods, on the 5m close
   slow: 200
   swing_lookback: 3         # bars each side that make a swing high / low (3-5)

@@ -193,4 +193,4 @@ universe:
 # inside NSE hours.
 sjk1:
   from: "09:30"
-  to: "14:45"
+  to: "15:00"               # 15 min later (the user's call, 2 Oct)
