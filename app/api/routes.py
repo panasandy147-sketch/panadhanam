@@ -187,6 +187,24 @@ async def focus(request: Request) -> dict[str, Any]:
     return _engine(request).focus.snapshot()
 
 
+@router.get("/candidate")
+async def candidate(request: Request) -> dict[str, Any]:
+    """The live candidate: what the desk is going through now, and the case
+    for the newest trade the risk desk judged (taken or refused), for the
+    dashboard's chart and card. Read-only."""
+    engine = _engine(request)
+    cfg = get_config()
+    cand = getattr(engine, "candidate", None)
+    # A candidate from the other market (before an Auto switch) is not this
+    # market's: its chart would be drawn on the wrong exchange's prices.
+    if cand and cand.get("market") != cfg.active_market:
+        cand = None
+    return {"scanning": list(getattr(engine, "scanning", []) or []),
+            "candidate": cand,
+            "market": cfg.active_market,
+            "timezone": cfg.market.timezone}
+
+
 @router.get("/rules")
 async def rules(request: Request) -> dict[str, Any]:
     """The rules and strategies in words, with the live config's numbers."""

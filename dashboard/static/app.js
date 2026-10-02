@@ -3,8 +3,10 @@
    One WebSocket carries every live event; REST fills in history on load.
 
    The page is deliberately small: account, the log of what the desk decided
-   and why, what is open, what was signalled, and the reviews. No chart: the
-   desk trades from its analysts, not from what a person reads off a candle. The
+   and why, what is open, what was signalled, and the reviews. One chart
+   only, the live candidate's: the symbol the desk is on, with the entry,
+   stop and target of the newest trade it judged — the desk still trades from
+   its analysts, not from what a person reads off a candle. The
    desk scans, cycles and arms itself — the controls that did those by hand
    are gone from the page (the API still has them), because a button pressed
    by accident on a desk that runs itself is a state nobody chose.
@@ -975,6 +977,188 @@ async function loadFocus() {
 }
 
 /* ====================================================================== */
+/* Live candidate                                                         */
+/* ====================================================================== */
+/* The symbol the desk is on, as a 5m chart with the lines the strategies
+   lean on, and the newest trade the risk desk judged — taken or refused —
+   with its entry, stop and target drawn on the price axis. */
+let candChart = null;
+const candSeries = {};
+let candLines = [];
+let candChartFor = "";
+let candFlashed = "";
+let candTz = "Asia/Kolkata";
+
+const _candParts = (epoch, opts) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone: candTz, ...opts })
+    .format(new Date(epoch * 1000));
+/* Keyed on the EXCHANGE's day and clock: watching New York from India, the
+   viewer's own day rolls over mid-session and the VWAP would reset there. */
+const candDay = (t) => _candParts(t, { year: "numeric", month: "2-digit", day: "2-digit" });
+const candClock = (t) => _candParts(t, { hour: "2-digit", minute: "2-digit", hour12: false });
+
+function candEma(values, n) {
+  const k = 2 / (n + 1);
+  let prev = 0;
+  return values.map((v, i) => (prev = i ? v * k + prev * (1 - k) : v));
+}
+
+function initCandChart() {
+  const el = $("cand-chart");
+  if (!el || candChart || typeof LightweightCharts === "undefined") return;
+  const css = getComputedStyle(document.documentElement);
+  const muted = css.getPropertyValue("--text-muted").trim() || "#898781";
+  const grid = css.getPropertyValue("--grid").trim() || "#2c2c2a";
+  candChart = LightweightCharts.createChart(el, {
+    layout: { background: { color: "transparent" }, textColor: muted, fontSize: 10 },
+    grid: { vertLines: { color: grid }, horzLines: { color: grid } },
+    rightPriceScale: { borderColor: grid },
+    timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false,
+                 tickMarkFormatter: (t) => candClock(t) },
+    localization: { timeFormatter: (t) => `${candClock(t)} ${tzLabel()}` },
+    crosshair: { mode: 0 },
+    height: 320,
+  });
+  candSeries.candles = candChart.addCandlestickSeries({
+    upColor: "#0ca30c", downColor: "#d03b3b", borderUpColor: "#0ca30c",
+    borderDownColor: "#d03b3b", wickUpColor: "#0ca30c", wickDownColor: "#d03b3b",
+  });
+  const line = (color, width) => candChart.addLineSeries(
+    { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false });
+  candSeries.ema9 = line("#4c8dff", 1);
+  candSeries.ema21 = line("#c77dff", 1);
+  candSeries.ema50 = line("#8b949e", 1);
+  candSeries.vwap = line("#d29922", 2);
+  new ResizeObserver(() => candChart.applyOptions({ width: el.clientWidth })).observe(el);
+}
+
+/* Entry, stop and target as dashed lines — on the UNDERLYING only: an
+   option's premiums do not belong on the stock's price axis. */
+function drawCandLevels(c) {
+  if (!candSeries.candles) return;
+  candLines.forEach((l) => candSeries.candles.removePriceLine(l));
+  candLines = [];
+  if (!c) return;
+  const add = (price, color, title) => {
+    if (!price) return;
+    candLines.push(candSeries.candles.createPriceLine({
+      price: Number(price), color, lineWidth: 1, lineStyle: 2,
+      axisLabelVisible: true, title }));
+  };
+  add(c.spot, "#8b949e", "entry");
+  add(c.underlying_stop, "#d03b3b", "stop");
+  add(c.underlying_target, "#0ca30c", "target");
+}
+
+async function loadCandChart(symbol, c) {
+  if (!symbol) return;
+  initCandChart();
+  if (!candChart) return;
+  let d;
+  try {
+    const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/candles` +
+                            "?timeframe=5m&session=true");
+    if (!res.ok) return;
+    d = await res.json();
+  } catch { return; }
+  if (d.timezone) candTz = d.timezone;
+  // Sorted and de-duplicated: the library blanks on a non-monotonic series.
+  const clean = (list) => {
+    const seen = new Set();
+    return (list || []).filter((x) => (seen.has(x.time) ? false : seen.add(x.time)))
+      .sort((a, b) => a.time - b.time);
+  };
+  const bars = clean(d.candles);
+  if (!bars.length) return;
+  // Today is drawn; the bars before it make the lines right (an EMA 50
+  // started from nine bars of today is not an EMA 50).
+  const all = clean([...(d.warmup || []), ...bars]);
+  const first = bars[0].time;
+  const closes = all.map((x) => x.close);
+  const asLine = (arr) => all.map((x, i) => ({ time: x.time, value: arr[i] }))
+    .filter((p) => p.time >= first);
+  candSeries.candles.setData(bars);
+  candSeries.ema9.setData(asLine(candEma(closes, 9)));
+  candSeries.ema21.setData(asLine(candEma(closes, 21)));
+  candSeries.ema50.setData(asLine(candEma(closes, 50)));
+  let pv = 0, vol = 0, day = null;
+  candSeries.vwap.setData(asLine(all.map((x) => {
+    const dd = candDay(x.time);
+    if (dd !== day) { pv = 0; vol = 0; day = dd; }
+    const v = x.volume || 1;
+    pv += ((x.high + x.low + x.close) / 3) * v; vol += v;
+    return pv / vol;
+  })));
+  drawCandLevels(c);
+  if (candChartFor !== symbol) candChart.timeScale().fitContent();
+  candChartFor = symbol;
+  $("cand-symbol").textContent = `${symbol} · 5m · ${d.session_only ? "today" : "recent"}`;
+  const last = bars[bars.length - 1].time;
+  const age = Math.round((Date.now() - last * 1000) / 60000);
+  $("cand-freshness").textContent = age <= 6
+    ? `live · last bar ${candClock(last)} ${tzLabel()}`
+    : `last bar ${candClock(last)} ${tzLabel()} (${age}m ago)`;
+}
+
+function renderCandidate(d) {
+  const c = d.candidate;
+  const scanning = d.scanning || [];
+  $("cand-meta").textContent = scanning.length
+    ? `checking ${scanning.slice(0, 8).join(", ")}${scanning.length > 8 ? ` +${scanning.length - 8}` : ""}`
+    : "between cycles";
+  if (!c) {
+    $("cand-why").innerHTML = `<div class="empty">No trade put to the risk desk yet
+      today.${scanning.length ? ` Checking ${esc(scanning.join(", "))}.` : ""}</div>`;
+    if (scanning.length) loadCandChart(scanning[0], null);
+    return;
+  }
+  const long = c.direction === "LONG";
+  const when = new Date(c.ts).toLocaleTimeString("en-GB",
+    { timeZone: marketTz(), hour: "2-digit", minute: "2-digit" });
+  const status = c.taken
+    ? `<span class="pill up">taken</span>`
+    : `<span class="pill down">refused</span>`;
+  const levels = c.option
+    ? [["Entry (premium)", c.entry], ["Stop (premium)", c.stop], ["Target (premium)", c.target]]
+    : [["Entry", c.entry], ["Stop", c.stop], ["Target", c.target]];
+  $("cand-why").innerHTML = `
+    <div class="side ${long ? "long" : "short"}">${esc(c.action)} · ${esc(c.symbol)} ${status}</div>
+    <div class="levels">${levels.map(([k, v]) =>
+      `<div><div class="k">${esc(k)}</div>${fmt(v)}</div>`).join("")}</div>
+    <p><b>${esc(c.instrument)}</b>${c.setup ? ` · <b>${esc(c.setup)}</b>` : ""}
+      · reward:risk <b>${fmt(c.risk_reward, 1)}</b> · ${esc(when)} ${esc(tzLabel())}
+      ${c.hold_overnight ? " · held overnight (1-4 days)" : ""}</p>
+    ${c.option && c.underlying_stop ? `<p>Underlying stop <b>${fmt(c.underlying_stop)}</b>
+      (spot at entry ${fmt(c.spot)}).</p>` : ""}
+    ${c.rationale ? `<p><b>The case.</b> ${esc(c.rationale)}</p>` : ""}
+    ${(c.confirmations || []).length ? `<ul>${c.confirmations.map((x) =>
+      `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    <p><b>What kills it.</b> ${esc(c.stop_note || `price through the stop ${fmt(c.underlying_stop || c.stop)}`)}</p>
+    ${c.counter ? `<p><b>Against it.</b> ${esc(c.counter)}</p>` : ""}
+    ${c.taken
+      ? `<p>Bought ${fmtInt(c.quantity)} ${esc(c.unit_label || "unit")}${
+          c.quantity === 1 || /s$/.test(c.unit_label || "") ? "" : "s"}.</p>`
+      : `<p><b>Not taken:</b> ${esc(c.refused || "refused by the risk desk")}</p>`}`;
+  loadCandChart(c.symbol, c);
+  const key = `${c.symbol}-${c.ts}`;
+  if (candFlashed !== key) {
+    candFlashed = key;
+    const el = $("s-candidate");
+    el.classList.remove("flash-long", "flash-short");
+    void el.offsetWidth;
+    el.classList.add(long ? "flash-long" : "flash-short");
+    setTimeout(() => el.classList.remove("flash-long", "flash-short"), 15000);
+  }
+}
+
+async function loadCandidate() {
+  try {
+    const res = await fetch("/api/candidate");
+    if (res.ok) renderCandidate(await res.json());
+  } catch { /* the next poll fills it in */ }
+}
+
+/* ====================================================================== */
 /* Rules pop-up                                                           */
 /* ====================================================================== */
 /* Read beside the desk, not instead of it. /api/rules writes the text from
@@ -1077,10 +1261,11 @@ function bind() {
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
   await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay(),
-                     loadFocus(), loadRecord()]);
+                     loadFocus(), loadRecord(), loadCandidate()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(loadFocus, 60_000);
+  setInterval(loadCandidate, 15_000);
   setInterval(loadRecord, 60_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);

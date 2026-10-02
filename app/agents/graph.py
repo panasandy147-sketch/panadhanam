@@ -245,6 +245,7 @@ class TradingDesk:
             # saved them, the risk manager never counted them, and the outcome
             # tracker never saw them to sell. The trade happened and vanished.
             signal=signal if signal and signal.status in _TAKEN else None,
+            proposal=signal,
             rejected=rejected,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )

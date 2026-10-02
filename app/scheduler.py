@@ -66,6 +66,10 @@ class TradingEngine:
         self._last_day_summary: dict[str, Any] | None = None
         self.last_cycle: dict[str, Any] = {}
         self.cycle_count = 0
+        # For the dashboard's live candidate: the names this cycle is going
+        # through, and the newest trade the risk desk judged (taken or not).
+        self.scanning: list[str] = []
+        self.candidate: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------ #
     # Market hours
@@ -325,6 +329,7 @@ class TradingEngine:
         contexts = {**ready,
                     **await self._prefetch(missing, cycle_id, news_items, macro_snap)}
 
+        self.scanning = list(targets)
         for symbol in targets:
             try:
                 result = await self._cycle_for_symbol(
@@ -334,6 +339,7 @@ class TradingEngine:
             except Exception as exc:
                 log.exception("cycle failed for %s: %s", symbol, exc)
                 await bus.publish(Topic.ERROR, {"symbol": symbol, "error": str(exc)})
+        self.scanning = []
 
         # Grade what resolved, then learn from it.
         try:
@@ -383,6 +389,7 @@ class TradingEngine:
             await bus.publish(Topic.QUOTE, ctx.quote)
 
         result = await self.desk.run_cycle(ctx, cycle_id=f"{cycle_id}-{symbol}")
+        self._remember_candidate(symbol, result)
 
         # Persist
         try:
@@ -405,6 +412,53 @@ class TradingEngine:
             "signal_id": result.signal.id if result.signal else None,
             "rejected": result.rejected,
             "duration_ms": result.duration_ms,
+        }
+
+    def _remember_candidate(self, symbol: str, result: Any) -> None:
+        """Keep the case for the newest trade the risk desk judged — taken or
+        refused — for the dashboard's live candidate: the chart of the
+        symbol, the entry, stop and target, and why. A symbol with no setup
+        leaves the last candidate in place."""
+        proposal = result.signal or getattr(result, "proposal", None)
+        if proposal is None:
+            return
+        from app.core.models import InstrumentType, SignalStatus
+        inst = proposal.instrument
+        option = inst.instrument_type in (InstrumentType.CALL, InstrumentType.PUT)
+        taken = proposal.status in (SignalStatus.APPROVED, SignalStatus.OPEN)
+        long = proposal.side.value == "BUY"
+        self.candidate = {
+            "market": self.cfg.active_market,
+            "symbol": symbol,
+            "ts": proposal.ts.isoformat(),
+            "action": (f"BUY {'CALL' if inst.instrument_type is InstrumentType.CALL else 'PUT'}"
+                       if option else ("BUY" if long else "SELL")),
+            "direction": "LONG" if (long if not option else
+                                    inst.instrument_type is InstrumentType.CALL) else "SHORT",
+            "instrument": inst.tradingsymbol,
+            "option": option,
+            "setup": proposal.setup or "",
+            "entry": proposal.entry,
+            "stop": proposal.stop_loss,
+            "target": proposal.target,
+            # On the UNDERLYING, for the chart: an option's entry, stop and
+            # target are premiums and do not belong on the stock's price axis.
+            "spot": proposal.entry_spot if option else proposal.entry,
+            "underlying_stop": (proposal.underlying_stop if option
+                                else proposal.stop_loss),
+            "underlying_target": None if option else proposal.target,
+            "stop_note": proposal.underlying_stop_note,
+            "risk_reward": proposal.risk_reward,
+            "quantity": proposal.quantity,
+            "unit_label": proposal.unit_label,
+            "bias": proposal.bias.value,
+            "score": proposal.composite_score,
+            "rationale": proposal.rationale,
+            "counter": proposal.counter_argument,
+            "confirmations": list(proposal.confirmations)[:8],
+            "taken": taken,
+            "refused": "" if taken else "; ".join(proposal.rejection_reasons[:2]),
+            "hold_overnight": bool(getattr(proposal, "hold_overnight", False)),
         }
 
     # ------------------------------------------------------------------ #

@@ -233,6 +233,21 @@ def test_a_trade_appears_in_every_panel_without_a_reload(desk, page):
     _wait_text(page, "#record-stats", "SPY")
 
 
+def test_the_live_candidate_shows_the_trade_and_its_chart(desk, page):
+    """The trade just taken, as the live candidate: BUY · SPY, its entry,
+    stop and target, why — and the symbol's chart drawn beside it."""
+    page.evaluate("loadCandidate()")
+    _wait_text(page, "#cand-why", "BUY · SPY")
+    why = _text(page, "#cand-why").lower()
+    assert "taken" in why and "entry" in why and "stop" in why and "target" in why
+    assert "what kills it" in why
+    _wait_text(page, "#cand-symbol", "SPY · 5m")
+    assert page.query_selector("#cand-chart canvas") is not None
+    shots = os.getenv("PANEL_SHOTS")
+    if shots:
+        page.query_selector("#s-candidate").screenshot(path=f"{shots}/candidate.png")
+
+
 # --------------------------------------------------------------------------- #
 # 4. The regression from 28 Sept: a burst must not silence the log
 # --------------------------------------------------------------------------- #

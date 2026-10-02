@@ -83,9 +83,34 @@
     <div id="focus-body"><div class="empty">Ranking the watchlist at the next cycle.</div></div>
   </section>
 
+  <!-- ========================= LIVE CANDIDATE ===================== -->
+  <!-- The symbol the desk is on, and the newest trade the risk desk judged —
+       taken or refused — with its entry, stop and target on the chart. -->
+  <section class="card span-all" id="s-candidate">
+    <h2>Live candidate <span class="count" id="cand-meta"></span></h2>
+    <div class="candidate">
+      <div class="candidate-chart">
+        <div class="chart-head">
+          <span id="cand-symbol">—</span>
+          <span id="cand-freshness"></span>
+        </div>
+        <div id="cand-chart"></div>
+        <div class="chart-legend">
+          <span style="color:#4c8dff">EMA 9</span>
+          <span style="color:#c77dff">EMA 21</span>
+          <span style="color:#8b949e">EMA 50</span>
+          <span style="color:#d29922">VWAP</span>
+          <span class="dash-key">entry · stop · target</span>
+        </div>
+      </div>
+      <div class="candidate-why" id="cand-why">
+        <div class="empty">Nothing set up yet — the first cycle fills this in.</div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================ ACTIVITY ======================== -->
-  <!-- Where the chart used to be: what the desk decided and why is what a
-       paper desk is read from. -->
+  <!-- What the desk decided and why is what a paper desk is read from. -->
   <section class="card span-all">
     <h2>Activity Log <span class="count" id="log-meta"></span></h2>
     <div class="chart-toolbar">
@@ -137,6 +162,7 @@
 
 </main>
 
+<script src="/static/vendor-lightweight-charts.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

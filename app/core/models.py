@@ -325,5 +325,8 @@ class CycleResult(BaseModel):
     composite_score: float
     reports: list[AgentReport] = Field(default_factory=list)
     signal: TradeSignal | None = None
+    # What the risk desk was asked to judge, taken or refused: the dashboard's
+    # live candidate shows the case for it either way.
+    proposal: TradeSignal | None = None
     rejected: list[str] = Field(default_factory=list)
     duration_ms: int = 0

@@ -1026,3 +1026,44 @@ tr.why-row td { padding-top: 0; border-top: 0; white-space: normal; }
   min-width: 260px; }
 .record-current { padding: 10px 14px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
 .record-current:empty { display: none; }
+
+
+/* --- Live candidate: chart on the left, the case on the right ----------- */
+.candidate { display: grid; grid-template-columns: 1.35fr 1fr; gap: 0; }
+.candidate-chart { border-right: 1px solid var(--border); min-width: 0; }
+#cand-chart { height: 320px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline;
+  padding: 10px 14px 4px; font-family: var(--mono); }
+.chart-head #cand-symbol { color: var(--market-accent, var(--text-primary));
+  font-size: 14px; letter-spacing: .04em; }
+.chart-head #cand-freshness { color: var(--text-muted); font-size: 11px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 14px 10px;
+  font-size: 11px; font-family: var(--mono); }
+.chart-legend .dash-key { color: var(--text-muted); }
+.candidate-why { padding: 12px 14px; font-size: 12.5px; line-height: 1.6; min-width: 0; }
+.candidate-why .side { font-family: var(--mono); font-size: 18px; font-weight: 600;
+  letter-spacing: .04em; margin-bottom: 10px; }
+.candidate-why .side.long  { color: var(--good); }
+.candidate-why .side.short { color: var(--critical); }
+.candidate-why .side .pill { font-size: 11px; vertical-align: middle; margin-left: 6px; }
+.candidate-why p { margin: 0 0 9px; color: var(--text-secondary); }
+.candidate-why b { color: var(--text-primary); }
+.candidate-why .levels { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 8px; margin-bottom: 12px; }
+.candidate-why .levels div { background: var(--surface-2); padding: 7px 9px;
+  border-radius: var(--radius-sm); font-family: var(--mono); font-size: 13px; }
+.candidate-why .levels .k { color: var(--text-muted); font-size: 10px;
+  text-transform: uppercase; letter-spacing: .06em; font-family: var(--sans); }
+.candidate-why ul { margin: 0 0 9px; padding-left: 18px; color: var(--text-secondary); }
+/* A new candidate flashes for 15 seconds — green to buy, red to sell. */
+@keyframes cand-flash-long  { from { background: rgba(12,163,12,.22); } to { background: transparent; } }
+@keyframes cand-flash-short { from { background: rgba(208,59,59,.22); } to { background: transparent; } }
+#s-candidate.flash-long  { animation: cand-flash-long  1s ease-in-out 15 alternate; }
+#s-candidate.flash-short { animation: cand-flash-short 1s ease-in-out 15 alternate; }
+@media (prefers-reduced-motion: reduce) {
+  #s-candidate.flash-long, #s-candidate.flash-short { animation: none; }
+}
+@media (max-width: 900px) {
+  .candidate { grid-template-columns: 1fr; }
+  .candidate-chart { border-right: none; border-bottom: 1px solid var(--border); }
+}

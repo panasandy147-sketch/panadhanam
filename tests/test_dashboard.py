@@ -224,9 +224,12 @@ def test_the_page_keeps_only_what_the_desk_needs_on_screen():
     page = (STATIC / "index.html").read_text()
     headings = re.findall(r"<h2>([^<]+)", page)
     headings = [h.strip() for h in headings]
-    assert headings == ["Account", "Paper Record", "Watching", "Activity Log",
-                        "Open Positions", "Signals", "Today", "Weekly Review"]
-    for gone in ("Price Action", 'id="chart"', "LightweightCharts",
+    assert headings == ["Account", "Paper Record", "Watching", "Live candidate",
+                        "Activity Log", "Open Positions", "Signals", "Today",
+                        "Weekly Review"]
+    # One chart, the live candidate's (2 Oct 2026, the user's call); the old
+    # all-purpose Price Action chart stays gone.
+    for gone in ("Price Action", 'id="chart"',
                  "Trade Opportunities", "Agent Desk", "Position Sizing",
                  "News &amp; Sentiment", "Macro Backdrop", "Option Chain",
                  "Agent Scorecard", "Trade Journal", "Historical Replay"):
@@ -328,3 +331,77 @@ def test_a_capital_set_on_the_dashboard_is_saved(client, monkeypatch):
     # Saved per market: rupees for India, dollars for the US.
     from app.core.config import get_config
     assert saved == {f"TOTAL_CAPITAL_{get_config().active_market}": "250000"}
+
+
+# --------------------------------------------------------------------------- #
+# The live candidate: the symbol the desk is on and the newest trade it judged
+# --------------------------------------------------------------------------- #
+def test_the_live_candidate_panel_has_a_chart_and_a_case():
+    page = (STATIC / "index.html").read_text()
+    script = (STATIC / "app.js").read_text()
+    assert 'id="cand-chart"' in page and 'id="cand-why"' in page
+    assert page.index("vendor-lightweight-charts.js") < page.index("/static/app.js")
+    assert page.index("Watching") < page.index("Live candidate") < page.index("Activity Log")
+    assert "/api/candidate" in script and "setInterval(loadCandidate" in script
+    # entry, stop and target on the chart only for the underlying's prices
+    assert "underlying_target" in script and "createPriceLine" in script
+
+
+def _proposal(status, instrument_type="EQUITY", side="BUY"):
+    from app.core.models import Instrument, InstrumentType, Side, SignalStatus, TradeSignal
+    return TradeSignal(
+        id="SIG-1", instrument=Instrument(
+            symbol="RELIANCE", tradingsymbol="RELIANCE" if instrument_type == "EQUITY"
+            else "RELIANCE26OCT1400CE", instrument_type=InstrumentType(instrument_type)),
+        side=Side(side), entry=1400.0, stop_loss=1390.0, target=1430.0, quantity=10,
+        status=SignalStatus(status), setup="PD Liquidity Sweep", risk_reward=3.0,
+        rationale="swept the PDL and reclaimed it", rejection_reasons=["daily limit"],
+        entry_spot=1400.0, underlying_stop=1390.0,
+        underlying_stop_note="a close back below 1390")
+
+
+def _engine(cfg):
+    from app.scheduler import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.cfg, eng.candidate, eng.scanning = cfg, None, []
+    return eng
+
+
+def test_the_engine_keeps_the_newest_judged_trade_taken_or_refused(cfg):
+    from app.core.models import Bias, CycleResult
+    eng = _engine(cfg)
+    refused = _proposal("REJECTED")
+    eng._remember_candidate("RELIANCE", CycleResult(
+        cycle_id="c", symbol="RELIANCE", bias=Bias.BULLISH, composite_score=0.6,
+        proposal=refused, rejected=["daily limit"]))
+    c = eng.candidate
+    assert c["action"] == "BUY" and c["direction"] == "LONG" and not c["taken"]
+    assert c["refused"] == "daily limit" and c["underlying_target"] == 1430.0
+    assert c["market"] == cfg.active_market
+    # a symbol with no setup leaves the last candidate in place
+    eng._remember_candidate("TCS", CycleResult(cycle_id="c", symbol="TCS",
+                                               bias=Bias.NEUTRAL, composite_score=0))
+    assert eng.candidate["symbol"] == "RELIANCE"
+    # an option: its premiums stay off the stock's price axis
+    eng._remember_candidate("RELIANCE", CycleResult(
+        cycle_id="c", symbol="RELIANCE", bias=Bias.BULLISH, composite_score=0.6,
+        signal=_proposal("APPROVED", "CE"), proposal=_proposal("APPROVED", "CE")))
+    c = eng.candidate
+    assert c["action"] == "BUY CALL" and c["taken"] and c["option"]
+    assert c["underlying_target"] is None and c["underlying_stop"] == 1390.0
+
+
+def test_the_candidate_endpoint_serves_this_markets_candidate_only(cfg):
+    from app.api.routes import router
+    app = FastAPI()
+    app.include_router(router)
+    eng = _engine(cfg)
+    eng.scanning = ["RELIANCE", "TCS"]
+    eng.candidate = {"market": cfg.active_market, "symbol": "RELIANCE"}
+    app.state.engine = eng
+    client = TestClient(app)
+    body = client.get("/api/candidate").json()
+    assert body["scanning"] == ["RELIANCE", "TCS"]
+    assert body["candidate"]["symbol"] == "RELIANCE"
+    eng.candidate = {"market": "XX", "symbol": "AAPL"}
+    assert client.get("/api/candidate").json()["candidate"] is None
