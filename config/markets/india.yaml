@@ -200,8 +200,11 @@ sjk912_vwapadx:
   from: "09:30"
   to: "15:15"               # 15 min before the close
 
-# sjk912RSi, the user's 9/21 EMA + RSI crossover: a trial from 5 Oct.
+# sjk912RSi, the user's 9/21 EMA + RSI crossover: OFF for India (the user's
+# call, 5 Oct 2026) — 40 sessions through the account rules: 9 trades, -0.3%,
+# the halves +2.2% / -2.6%. The US keeps it (20 trades, +3.7%).
 sjk912rsi:
+  enabled: false
   from: "09:30"
   to: "15:15"
 
