@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Backtest SJK 9-15-21 (the user's 9 / 15 / 21 EMA fan) on real candles.
+"""Backtest the user's SJK strategies on real candles: SJK 9-15-21 (the 9 /
+15 / 21 EMA fan, the default) or SJK 50-200 (the 50 / 200 EMA pullback).
 
     python -m scripts.backtest_sjk_9_15_21 --market US --days 40
     python -m scripts.backtest_sjk_9_15_21 --market IN --days 40 --rr 2.5
+    python -m scripts.backtest_sjk_9_15_21 --strategy sjk50_200 --market IN --days 20
 
 Walks every watchlist symbol's 5m candles bar by bar (no lookahead) through
 app/strategies/sjk_9_15_21.backtest — one position at a time, out at the
@@ -29,21 +31,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.analysis import rules_sim  # noqa: E402
 from app.core.config import get_config  # noqa: E402
 from app.indicators import ta  # noqa: E402
+from app.strategies import sjk50_200  # noqa: E402
 from app.strategies import sjk_9_15_21 as fan  # noqa: E402
 
+# --strategy -> (settings section, name, detector, warmup bars, extra history)
+STRATEGIES = {
+    "sjk_9_15_21": ("sjk_9_15_21", "SJK 9-15-21", fan.detect_candles, 63, 300),
+    "sjk50_200": ("sjk50_200", "SJK 50-200", sjk50_200.detect_candles, 210, 700),
+}
 
-async def trades_for(feed, cfg, symbols: list[str], days: int, tz: str):
+
+async def trades_for(feed, cfg, symbols: list[str], days: int, tz: str,
+                     strategy: str = "sjk_9_15_21"):
+    _, _, detector, warmup, extra = STRATEGIES[strategy]
     rows, dailies = [], {}
     tech = cfg.get("technical", {}) or {}
     for sym in symbols:
         try:
-            bars = await feed.get_candles(sym, "5m", 75 * days + 300)
+            bars = await feed.get_candles(sym, "5m", 75 * days + extra)
             dailies[sym] = await feed.get_candles(sym, "1d", 90)
         except Exception as exc:                          # noqa: BLE001
             print(f"  skip {sym}: {exc}", file=sys.stderr)
             continue
         index = {b.ts.isoformat(): k for k, b in enumerate(bars)}
-        for t in fan.backtest(bars, cfg, tz):
+        # Only the last `days` sessions count; the bars before are warm-up.
+        sessions = sorted({b.ts.date() for b in bars})[-days:]
+        for t in fan.backtest(bars, cfg, tz, warmup=warmup, detector=detector):
+            if t["ts"][:10] < sessions[0].isoformat():
+                continue
             k = index.get(t["ts"])
             snap = ta.compute_all(ta.candles_to_df(bars[max(0, k - 300):k + 1]), tech) \
                 if k is not None else {}
@@ -74,20 +89,22 @@ async def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--market", default="US", choices=["US", "IN"])
     ap.add_argument("--days", type=int, default=40)
-    ap.add_argument("--rr", type=float, default=None, help="override sjk_9_15_21.rr")
+    ap.add_argument("--strategy", default="sjk_9_15_21", choices=sorted(STRATEGIES))
+    ap.add_argument("--rr", type=float, default=None, help="override the strategy's rr")
     args = ap.parse_args()
     cfg = get_config()
     cfg.switch_market(args.market)
+    section, label = STRATEGIES[args.strategy][:2]
     if args.rr:
-        cfg.settings["sjk_9_15_21"]["rr"] = args.rr
+        cfg.settings[section]["rr"] = args.rr
     from app.data.feeds.yahoo import YahooFeed
     feed = YahooFeed()
     await feed.connect()
     tz = str(cfg.get("system.timezone"))
     symbols = [w["symbol"] for w in cfg.watchlist()]
-    print(f"SJK 9-15-21 · {args.market} · {len(symbols)} symbols · {args.days} sessions "
-          f"· 1:{cfg.get('sjk_9_15_21.rr')}")
-    rows, dailies = await trades_for(feed, cfg, symbols, args.days, tz)
+    print(f"{label} · {args.market} · {len(symbols)} symbols · {args.days} sessions "
+          f"· 1:{cfg.get(section + '.rr')}")
+    rows, dailies = await trades_for(feed, cfg, symbols, args.days, tz, args.strategy)
     out = report(cfg, rows, dailies)
     print(f"\n{out['sessions']} sessions, split at {out['split_at']}")
     for name in ("earlier", "later", "all"):

@@ -299,11 +299,15 @@ def detect_candles(bars: list[Any], cfg: Any, tz: str) -> dict[str, Any] | None:
 # 8. The backtest
 # --------------------------------------------------------------------------- #
 def backtest(bars: list[Any], cfg: Any, tz: str, square_off: str | None = None,
-             warmup: int = 63) -> list[dict[str, Any]]:
+             warmup: int = 63, detector: Any = None) -> list[dict[str, Any]]:
     """Walk 5m candles bar by bar (no lookahead): one position at a time,
     entered on the signal bar's close, out at the stop, the target or the
     square-off (system.square_off_time), whichever first; a bar touching both
-    is a stop (pessimistic). Returns one dict per trade with its R."""
+    is a stop (pessimistic). Returns one dict per trade with its R.
+
+    `detector`: any detect_candles(bars, cfg, tz) — SJK 9-15-21's by default;
+    SJK 50-200's (warmup 210) runs through the same walk."""
+    detector = detector or detect_candles
     sq = _minutes(square_off or str(cfg.get("system.square_off_time", "15:15")))
     trades: list[dict[str, Any]] = []
     pos: dict[str, Any] | None = None
@@ -331,12 +335,13 @@ def backtest(bars: list[Any], cfg: Any, tz: str, square_off: str | None = None,
                 pos = None
             else:
                 continue
-        found = detect_candles(bars[max(0, i - 599):i + 1], cfg, tz)
+        found = detector(bars[max(0, i - 599):i + 1], cfg, tz)
         if found:
             pos = {"symbol": getattr(bar, "symbol", ""), "ts": bar.ts.isoformat(),
                    "day": at.date(), "direction": found["direction"],
                    "entry": found["entry"], "stop": found["stop"], "target": found["target"],
-                   "risk": abs(found["entry"] - found["stop"]), "kind": found["kind"]}
+                   "risk": abs(found["entry"] - found["stop"]),
+                   "kind": found.get("kind", found.get("setup", ""))}
     return trades
 
 
