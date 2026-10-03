@@ -57,6 +57,9 @@ def simulate(cfg: Any, trades: list[dict[str, Any]], r_key: str, exit_key: str,
     limit_pct = float(g("risk.max_daily_loss_pct", 3.0))
     max_open = int(g("risk.max_open_positions", 2) or 2)
     max_daily = int(g("risk.max_daily_trades", 0) or 0)
+    # No more entries after this many losing trades in a day (0 = off).
+    max_losses = int(g("risk.max_losses_per_day", 0) or 0)
+    losses: dict[str, int] = defaultdict(int)
     screened = bool(daily) and bool(g("screener.enabled", False))
     pull_atr = float(g("screener.vwap_pullback_atr", 0.5))
 
@@ -76,6 +79,8 @@ def simulate(cfg: Any, trades: list[dict[str, Any]], r_key: str, exit_key: str,
             _, r, day = open_pos.pop(0)
             equity += r * risk_pct
             realised[day] += r * risk_pct
+            if r < 0:
+                losses[day] += 1
             if realised[day] <= -limit_pct:
                 locked.add(day)
             peak = max(peak, equity)
@@ -115,6 +120,9 @@ def simulate(cfg: Any, trades: list[dict[str, Any]], r_key: str, exit_key: str,
                 continue
         if day in locked:
             skipped["daily lockout"] += 1
+            continue
+        if max_losses and losses[day] >= max_losses:
+            skipped[f"{max_losses} losses today — stopped for the day"] += 1
             continue
         if max_daily and count[day] >= max_daily:
             skipped[f"daily trade limit ({max_daily})"] += 1
