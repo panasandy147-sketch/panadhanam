@@ -196,7 +196,7 @@ async def test_an_open_not_in_profit_holds_and_is_judged_once_a_day(cfg, monkeyp
 async def test_after_four_sessions_the_square_off_closes_it(cfg, monkeypatch):
     sid = _open_gold(datetime(2026, 9, 23, 4, 0, tzinfo=UTC), entry=125.0, stop=119.99,
                      target=140.0)                                       # Wed
-    now = datetime(2026, 9, 29, 15, 20, tzinfo=IST)                      # Tue: 4 sessions
+    now = datetime(2026, 9, 29, 15, 26, tzinfo=IST)                      # Tue: 4 sessions
     tracker = _tracker(cfg, monkeypatch, now, 124.0)
     tracker.__dict__["_fpo_judged"] = {(sid, "2026-09-29")}
     [c] = [c for c in await tracker.poll() if c["signal_id"] == sid]

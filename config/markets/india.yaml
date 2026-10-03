@@ -37,7 +37,7 @@ screener:
     morning_from: "09:30"      # Band A only
     morning_to: "11:15"
     afternoon_from: "13:30"    # 11:15-13:30 is the midday freeze
-    afternoon_to: "14:45"      # Band A/B VWAP pullbacks only
+    afternoon_to: "15:15"      # Band A/B VWAP pullbacks only; 15 min before the close (5 Oct 2026)
 
 currency:
   symbol: "₹"
@@ -50,8 +50,8 @@ session:
   market_open: "09:15"
   market_close: "15:30"
   premarket_scan_time: "08:45"
-  no_new_entry_after: "15:00"
-  square_off_time: "15:15"
+  no_new_entry_after: "15:15"      # 15 min before the close (5 Oct 2026; was 15:00)
+  square_off_time: "15:25"         # the user's call, 5 Oct 2026 (was 15:15)
   # Mon-Fri. 0 = Monday.
   trading_days: [0, 1, 2, 3, 4]
 
@@ -193,4 +193,4 @@ universe:
 # inside NSE hours.
 sjk1:
   from: "09:30"
-  to: "15:00"               # 15 min later (the user's call, 2 Oct)
+  to: "15:15"               # 15 min before the close (the user's call, 5 Oct)

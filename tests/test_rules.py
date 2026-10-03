@@ -29,7 +29,7 @@ def test_sizing_is_shown_in_money_for_the_real_account(cfg):
         pct = float(cfg.get("risk.risk_per_trade_pct"))
         assert risk["value"] == f"{pct:g}% = ${1000 * pct:,.0f}"
         [cutoff] = [r for r in _rows(doc) if r["setting"].endswith("no_new_entry_after")]
-        assert cutoff["value"] == "15:30" and "us.yaml" in cutoff["setting"]
+        assert cutoff["value"] == "15:45" and "us.yaml" in cutoff["setting"]
     finally:
         cfg.switch_market("IN")
 

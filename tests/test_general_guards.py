@@ -53,8 +53,7 @@ def test_general_entries_stop_at_general_to(cfg, monkeypatch):
     from app.core import clock
     cfg.switch_market("US")
     try:
-        # The shipped US setting.
-        assert cfg.get("screener.windows.general_to") == "14:00"
+        cfg.settings["screener"]["windows"]["general_to"] = "14:00"
         risk = RiskManager(cfg)
         two = [_r("candlestick", -0.5), _r("macro_flow", -0.3)]
         monkeypatch.setattr(clock, "market_now",
@@ -75,12 +74,14 @@ def test_a_market_file_can_set_the_vote_gate(cfg):
     assert out["consensus"] == {"general_min_analysts": 2, "general_agree_min": 0.25}
 
 
-def test_the_us_desk_ships_all_three_and_india_none(cfg):
+def test_the_us_desk_ships_two_and_india_none(cfg):
+    """The 14:00 general cutoff is off since 5 Oct 2026 (the user's call:
+    every entry runs to 15 min before the close)."""
     cfg.switch_market("US")
     try:
         assert cfg.get("consensus.general_min_analysts") == 2
         assert cfg.get("risk.rsi_guard")["enabled"] is True
-        assert cfg.get("screener.windows.general_to") == "14:00"
+        assert not cfg.get("screener.windows.general_to")
     finally:
         cfg.switch_market("IN")
     assert cfg.get("consensus.general_min_analysts") == 0

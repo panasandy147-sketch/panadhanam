@@ -39,7 +39,7 @@ def test_long_short_and_the_rules_that_stop_them():
 def test_only_inside_its_window_on_the_markets_clock(cfg):
     cfg.switch_market("IN")
     assert sjk1.detect_candles(_candles(), cfg, "Asia/Kolkata")["setup"] == sjk1.SETUP_NAME
-    late = _candles(end=datetime(2026, 9, 29, 9, 30, tzinfo=UTC))      # 15:00 IST
+    late = _candles(end=datetime(2026, 9, 29, 9, 45, tzinfo=UTC))      # 15:15 IST
     assert sjk1.detect_candles(late, cfg, "Asia/Kolkata") is None
 
 

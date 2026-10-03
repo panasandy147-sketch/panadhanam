@@ -149,7 +149,8 @@ def test_no_list_means_no_trades(scfg, monkeypatch):
     (14, 0, "SBIN", Bias.BULLISH, PULLBACK, None),                   # B long pullback
     (14, 0, "SBIN", Bias.BEARISH, {"primary": {"last_close": 99.8, "vwap": 100.0,
                                                "atr": 1.0}}, "longs-only"),
-    (15, 0, "HDFCBANK", Bias.BULLISH, PULLBACK, "Outside the entry windows"),
+    (15, 10, "HDFCBANK", Bias.BULLISH, PULLBACK, None),             # to 15:15 since 5 Oct
+    (15, 15, "HDFCBANK", Bias.BULLISH, PULLBACK, "Outside the entry windows"),
 ])
 def test_the_ist_windows(rm, monkeypatch, hh, mm, sym, bias, ind, blocked):
     _at(monkeypatch, hh, mm)
@@ -164,8 +165,10 @@ def test_the_windows_are_the_ist_ones(scfg):
     assert scr.window(scfg, datetime(2026, 9, 30, 11, 14, tzinfo=IST)) == "morning"
     assert scr.window(scfg, datetime(2026, 9, 30, 11, 15, tzinfo=IST)) == "freeze"
     assert scr.window(scfg, datetime(2026, 9, 30, 13, 30, tzinfo=IST)) == "afternoon"
-    assert scr.window(scfg, datetime(2026, 9, 30, 14, 45, tzinfo=IST)) == "closed"
-    assert scfg.get("system.square_off_time") == "15:15"
+    # Entries until 15 min before the close, sold at 15:25 (5 Oct 2026).
+    assert scr.window(scfg, datetime(2026, 9, 30, 15, 14, tzinfo=IST)) == "afternoon"
+    assert scr.window(scfg, datetime(2026, 9, 30, 15, 15, tzinfo=IST)) == "closed"
+    assert scfg.get("system.square_off_time") == "15:25"
 
 
 @pytest.mark.asyncio
@@ -189,7 +192,7 @@ def test_the_rules_page_explains_the_screener(scfg):
     from app.core.rules import build
     text = json.dumps(build(scfg))
     assert "Band A" in text and "Midday freeze" in text and "11:15" in text
-    assert "13:30" in text and "14:45" in text and "15:15" in text
+    assert "13:30" in text and "15:15" in text and "15:25" in text
 
 
 def test_the_rules_simulation_applies_windows_limits_and_lockout(scfg):

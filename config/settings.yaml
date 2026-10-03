@@ -16,8 +16,10 @@ system:
   market_open: "09:15"
   market_close: "15:30"
   # Stop opening NEW positions this many minutes before close.
-  no_new_entry_after: "15:00"
-  square_off_time: "15:15"
+  # New entries until 15 min before the close, square-off at 15:25 (the
+  # user's call, 5 Oct 2026; was 15:00 / 15:15). The US: markets/us.yaml.
+  no_new_entry_after: "15:15"
+  square_off_time: "15:25"
 
 # --------------------------------------------------------------------------
 # CAPITAL & RISK — the non-negotiable guardrails.
@@ -307,7 +309,7 @@ screener:
     morning_from: "09:30"
     morning_to: "11:15"
     afternoon_from: "13:30"
-    afternoon_to: "14:45"
+    afternoon_to: "15:15"     # 15 min before the close (5 Oct 2026; was 14:45)
     # No new GENERAL entry (no named strategy) from this time, market clock;
     # the named strategies keep their own windows. Empty = off; per market.
     general_to: ""
@@ -416,7 +418,7 @@ swing:
   k: 0.5
   trend_days: 20
   minutes_after_open: 5
-  to: "15:00"
+  to: "15:15"               # 15 min before the close (5 Oct 2026; US 15:45)
   max_hold_days: 4
   first_profitable_open: true
 
@@ -433,7 +435,7 @@ vol_breakout:
   k: 0.5
   score: 0.9
   minutes_after_open: 30
-  to: "14:30"
+  to: "15:15"               # 15 min before the close (5 Oct 2026; was 14:30; US 15:45)
   stop_ticks: 2
 
 # SJK 1 — the user's 50 / 200 EMA pullback continuation (app/strategies/sjk1.py).
@@ -445,7 +447,7 @@ sjk1:
   enabled: true
   score: 0.9                # the candlestick analyst's vote, like the breakout
   from: "09:45"             # market time (India: markets/india.yaml)
-  to: "15:15"               # 15 min past the others (the user's call, 2 Oct)
+  to: "15:45"               # US: 15 min before the close (5 Oct 2026; India 15:15)
   fast: 50                  # EMA periods, on the 5m close
   slow: 200
   swing_lookback: 3         # bars each side that make a swing high / low (3-5)

@@ -43,10 +43,13 @@ def test_a_us_trade_is_not_squared_off_before_the_us_square_off(tracker, cfg, mo
 
 
 def test_an_indian_trade_is_squared_off_on_indian_time(tracker, cfg, monkeypatch):
-    """15:15 IST is 05:45 ET. On a PC in New York the local clock never reads
-    15:15 during the Indian session, so the square-off never came."""
+    """15:25 IST is 05:55 ET. On a PC in New York the local clock never reads
+    15:25 during the Indian session, so the square-off never came. (15:25
+    since 5 Oct 2026, the user's call; 15:15 before.)"""
     cfg.switch_market("IN")
-    _at(monkeypatch, datetime(2026, 9, 24, 15, 16, tzinfo=IST))
+    _at(monkeypatch, datetime(2026, 9, 24, 15, 24, tzinfo=IST))
+    assert tracker._past_squareoff() is False
+    _at(monkeypatch, datetime(2026, 9, 24, 15, 25, tzinfo=IST))
     assert tracker._past_squareoff() is True
     _at(monkeypatch, datetime(2026, 9, 24, 14, 0, tzinfo=IST))
     assert tracker._past_squareoff() is False
