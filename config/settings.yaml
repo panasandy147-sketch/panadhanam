@@ -127,7 +127,8 @@ risk:
   # Setups that are NEVER time-stopped: they run to the target, the stop or
   # the intraday square-off.
   no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout",
-                        "SJK 1 · 50/200 EMA Pullback", "SJK 9-15-21 · EMA Fan"]
+                        "SJK 50-200 · EMA Pullback", "SJK 9-15-21 · EMA Fan",
+                        "SJK 1 · 50/200 EMA Pullback"]   # SJK 50-200's name until 5 Oct
   # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
   # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
   # At +1.0R open: ADD 50% of the base, and the stop for the WHOLE position
@@ -204,7 +205,7 @@ consensus:
   # profile rarely votes, and India's chain has no OI for the derivatives
   # analyst) — it would stop the desk. The model synthesis obeys it when on.
   # A GENERAL setup (no named strategy: not PD sweep, volatility breakout or
-  # SJK 1) needs this many analysts voting its way at +/-general_agree_min.
+  # SJK 50-200) needs this many analysts voting its way at +/-general_agree_min.
   # 0 = off; set per market (config/markets/*.yaml).
   general_min_analysts: 0
   general_agree_min: 0.25
@@ -438,12 +439,12 @@ vol_breakout:
   to: "15:15"               # 15 min before the close (5 Oct 2026; was 14:30; US 15:45)
   stop_ticks: 2
 
-# SJK 1 — the user's 50 / 200 EMA pullback continuation (app/strategies/sjk1.py).
+# SJK 50-200 — the user's 50 / 200 EMA pullback continuation (app/strategies/sjk50_200.py).
 # TRIAL from 2 Oct 2026, the user's call, both markets. Long: above the 200
 # EMA, a pullback to the 50 EMA that never closes below the 200, then the
 # FIRST 5m close above the swing high made before it; stop the pullback's
 # swing low; target 1:rr, sold there. Short: the mirror. One trade per swing.
-sjk1:
+sjk50_200:
   enabled: true
   score: 0.9                # the candlestick analyst's vote, like the breakout
   from: "09:45"             # market time (India: markets/india.yaml)
@@ -467,7 +468,7 @@ sjk1:
 # (else the 21 EMA), target 1:rr, sold there; no time stop.
 sjk_9_15_21:
   enabled: true
-  score: 0.9                # the candlestick analyst's vote, like SJK 1
+  score: 0.9                # the candlestick analyst's vote, like SJK 50-200
   from: "09:45"             # market time (India: markets/india.yaml)
   to: "15:45"               # US: 15 min before the close (India 15:15)
   fast: 9                   # EMA periods on the 5m close (chart: purple)

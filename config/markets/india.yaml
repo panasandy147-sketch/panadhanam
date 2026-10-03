@@ -189,9 +189,9 @@ universe:
     IT: 2
     default: 2
 
-# SJK 1, the user's 50 / 200 EMA pullback: a trial from 2 Oct, as on the US,
+# SJK 50-200, the user's 50 / 200 EMA pullback: a trial from 2 Oct, as on the US,
 # inside NSE hours.
-sjk1:
+sjk50_200:
   from: "09:30"
   to: "15:15"               # 15 min before the close (the user's call, 5 Oct)
 

@@ -182,16 +182,16 @@ GLD (SPDR Gold) in the US.
   Gold rose through 2025–26, which flatters a breakout system. Check it with
   panaoptions' `python run.py --swing-backtest` (its own repository).
 
-**SJK 1 — 50 / 200 EMA pullback (the user's strategy).** Both markets, a trial
-from 2 Oct 2026 (`sjk1:` in `config/settings.yaml`; `app/strategies/sjk1.py`).
+**SJK 50-200 — 50 / 200 EMA pullback (the user's strategy).** Both markets, a trial
+from 2 Oct 2026 (`sjk50_200:` in `config/settings.yaml`; `app/strategies/sjk50_200.py`).
 - **Long:** price above the 200 EMA (5m close); a pullback whose low comes
   within 0.15% of the 50 EMA without a close below the 200; then the
   **first** 5m close above the swing high made before the pullback.
 - **Short:** the mirror.
-- **Stop:** AT the pullback's swing. **Target:** 1:2.5 (`sjk1.rr`), sold
+- **Stop:** AT the pullback's swing. **Target:** 1:2.5 (`sjk50_200.rr`), sold
   there, and judged at 1:2.5 rather than the desk's 1:3.
-- **Options:** breakeven at +1.5R and a trail (`sjk1.breakeven_r`,
-  `sjk1.trail_r`), both off by default. One trade per swing point.
+- **Options:** breakeven at +1.5R and a trail (`sjk50_200.breakeven_r`,
+  `sjk50_200.trail_r`), both off by default. One trade per swing point.
 
 **Volatility Breakout (Larry Williams, 1987 World Cup).** US only, intraday.
 - **Trigger:** the first closed 5m candle beyond today's open ± 0.5 × yesterday's

@@ -1,9 +1,9 @@
-"""Synthetic 5m tapes for SJK 1: an uptrend above the 200 EMA, a swing high,
+"""Synthetic 5m tapes for SJK 50-200: an uptrend above the 200 EMA, a swing high,
 a pullback whose low lands on the 50 EMA, then the break of that swing high
 (and the mirror for shorts)."""
 from __future__ import annotations
 
-from app.strategies.sjk1 import ema
+from app.strategies.sjk50_200 import ema
 
 
 def long_tape(deep: bool = False, shallow: bool = False):

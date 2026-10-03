@@ -1,6 +1,6 @@
-"""SJK 1 — the 50 / 200 EMA pullback continuation (the user's strategy, 2 Oct
+"""SJK 50-200 — the 50 / 200 EMA pullback continuation (the user's strategy, 2 Oct
 2026), as panadhanam trades it: the shares (or the stock's option), stop at
-the pullback's swing, target at 1:sjk1.rr, sold there.
+the pullback's swing, target at 1:sjk50_200.rr, sold there.
 
     LONG   price above the 200 EMA; a pullback down to the 50 EMA (its low
            touches or tests it) that never CLOSES below the 200 EMA; then the
@@ -9,22 +9,22 @@ the pullback's swing, target at 1:sjk1.rr, sold there.
     SHORT  the mirror.
 
 The detector (ema, swing_highs/_lows, detect) is the same code as
-panaoptions' strategies/sjk1.py — the two apps share no code, so it is
+panaoptions' strategies/sjk50_200.py — the two apps share no code, so it is
 carried in both. One trade per swing point: detect() fires only on the bar
 whose close FIRST crosses the swing level.
 
-Wiring: data/market.py puts detect_candles() in ctx.indicators["sjk1"]; the
+Wiring: data/market.py puts detect_candles() in ctx.indicators["sjk50_200"]; the
 candlestick analyst reports it as a complete setup (agents/candlestick.py);
 the risk desk takes its exact stop and 1:rr target (agents/risk.py,
 _sweep_levels) and judges it at that rr, not 1:3; the outcome tracker sells
-at the target and, if sjk1.breakeven_r is set, moves the stop to breakeven.
+at the target and, if sjk50_200.breakeven_r is set, moves the stop to breakeven.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
-SETUP_NAME = "SJK 1 · 50/200 EMA Pullback"
+SETUP_NAME = "SJK 50-200 · EMA Pullback"
 
 
 # --------------------------------------------------------------------------- #
@@ -76,7 +76,7 @@ def detect(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float
            fast: int = 50, slow: int = 200, lookback: int = 3,
            touch_pct: float = 0.15, max_age: int = 36, rr: float = 2.5,
            tick: float = 0.0) -> dict[str, Any] | None:
-    """The SJK 1 setup on the LATEST bar (index -1), or None.
+    """The SJK 50-200 setup on the LATEST bar (index -1), or None.
 
     `touch_pct`: how close (% of price) the pullback's extreme must come to
     the 50 EMA to count as a test — a low at or below 50 EMA x (1 + 0.15%)
@@ -164,13 +164,13 @@ def detect(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float
 
 
 def params(cfg: Any) -> dict[str, Any]:
-    """detect()'s settings from the sjk1: section."""
+    """detect()'s settings from the sjk50_200: section."""
     g = cfg.get
-    return {"fast": int(g("sjk1.fast", 50)), "slow": int(g("sjk1.slow", 200)),
-            "lookback": int(g("sjk1.swing_lookback", 3)),
-            "touch_pct": float(g("sjk1.touch_pct", 0.15)),
-            "max_age": int(g("sjk1.max_age_bars", 36)), "rr": float(g("sjk1.rr", 2.5)),
-            "tick": float(g("sjk1.stop_buffer", 0.0) or 0.0)}
+    return {"fast": int(g("sjk50_200.fast", 50)), "slow": int(g("sjk50_200.slow", 200)),
+            "lookback": int(g("sjk50_200.swing_lookback", 3)),
+            "touch_pct": float(g("sjk50_200.touch_pct", 0.15)),
+            "max_age": int(g("sjk50_200.max_age_bars", 36)), "rr": float(g("sjk50_200.rr", 2.5)),
+            "tick": float(g("sjk50_200.stop_buffer", 0.0) or 0.0)}
 
 
 def _minutes(hhmm: str) -> int:
@@ -179,7 +179,7 @@ def _minutes(hhmm: str) -> int:
 
 
 def detect_candles(bars: list[Any], cfg: Any, tz: str) -> dict[str, Any] | None:
-    """SJK 1 on the latest CLOSED 5m candle, inside sjk1.from - sjk1.to on the
+    """SJK 50-200 on the latest CLOSED 5m candle, inside sjk50_200.from - sjk50_200.to on the
     market's clock, or None. Adds `ts` (that candle) and `setup`."""
     if not bars:
         return None
@@ -190,8 +190,8 @@ def detect_candles(bars: list[Any], cfg: Any, tz: str) -> dict[str, Any] | None:
     except Exception:                                    # noqa: BLE001
         local = last
     now_m = local.hour * 60 + local.minute
-    if not (_minutes(cfg.get("sjk1.from", "09:45")) <= now_m
-            < _minutes(cfg.get("sjk1.to", "15:00"))):
+    if not (_minutes(cfg.get("sjk50_200.from", "09:45")) <= now_m
+            < _minutes(cfg.get("sjk50_200.to", "15:00"))):
         return None
     found = detect([float(b.high) for b in bars], [float(b.low) for b in bars],
                    [float(b.close) for b in bars], **params(cfg))

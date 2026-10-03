@@ -362,41 +362,41 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             ],
         })
 
-    if g("sjk1.enabled", False):
+    if g("sjk50_200.enabled", False):
         sections.append({
-            "title": "Strategy: SJK 1 — 50 / 200 EMA pullback continuation (the user's)",
+            "title": "Strategy: SJK 50-200 — 50 / 200 EMA pullback continuation (the user's)",
             "intro": ("A trial from 2 Oct 2026. Trade WITH the 200 EMA trend, after a "
                       "pullback to the 50 EMA, on the break of the swing made before "
                       "the pullback. One trade per swing point."),
             "rules": [
                 _rule("Long: price above the slow EMA; short: below it",
-                      f"{g('sjk1.slow', 200)} EMA (5m close)", "sjk1.slow"),
+                      f"{g('sjk50_200.slow', 200)} EMA (5m close)", "sjk50_200.slow"),
                 _rule("The pullback's low (long) / high (short) comes within this much "
                       "of the fast EMA, or through it",
-                      f"{g('sjk1.touch_pct', 0.15)}% of the {g('sjk1.fast', 50)} EMA",
-                      "sjk1.touch_pct / sjk1.fast"),
+                      f"{g('sjk50_200.touch_pct', 0.15)}% of the {g('sjk50_200.fast', 50)} EMA",
+                      "sjk50_200.touch_pct / sjk50_200.fast"),
                 _rule("...without a single 5m close beyond the slow EMA", "required",
-                      "sjk1.slow"),
+                      "sjk50_200.slow"),
                 _rule("The trigger: the FIRST 5m close through the swing high (long) / "
                       "low (short) made before the pullback — once per swing",
-                      "first close only", "sjk1.swing_lookback"),
+                      "first close only", "sjk50_200.swing_lookback"),
                 _rule("A swing high / low: beyond this many bars on each side",
-                      g("sjk1.swing_lookback", 3), "sjk1.swing_lookback"),
+                      g("sjk50_200.swing_lookback", 3), "sjk50_200.swing_lookback"),
                 _rule("The pullback's swing at most this many 5m bars old",
-                      g("sjk1.max_age_bars", 36), "sjk1.max_age_bars"),
+                      g("sjk50_200.max_age_bars", 36), "sjk50_200.max_age_bars"),
                 _rule("Entries between (market time)",
-                      f"{g('sjk1.from', '09:45')} – {g('sjk1.to', '15:00')}",
-                      "sjk1.from / sjk1.to"),
+                      f"{g('sjk50_200.from', '09:45')} – {g('sjk50_200.to', '15:00')}",
+                      "sjk50_200.from / sjk50_200.to"),
                 _rule("Stop: AT the pullback's swing low (long) / high (short)",
-                      f"{g('sjk1.stop_ticks', 0)} tick(s) beyond", "sjk1.stop_ticks"),
+                      f"{g('sjk50_200.stop_ticks', 0)} tick(s) beyond", "sjk50_200.stop_ticks"),
                 _rule("Target, sold there — and the reward:risk it is judged at "
-                      "(not the desk's 1:3)", f"1:{g('sjk1.rr', 2.5)}", "sjk1.rr"),
+                      "(not the desk's 1:3)", f"1:{g('sjk50_200.rr', 2.5)}", "sjk50_200.rr"),
                 _rule("Stop to breakeven at this R (0 = off), then trailed this far "
                       "behind the best R (0 = off)",
-                      f"{g('sjk1.breakeven_r', 0)}R / {g('sjk1.trail_r', 0)}R",
-                      "sjk1.breakeven_r / sjk1.trail_r"),
+                      f"{g('sjk50_200.breakeven_r', 0)}R / {g('sjk50_200.trail_r', 0)}R",
+                      "sjk50_200.breakeven_r / sjk50_200.trail_r"),
                 _rule("The candlestick analyst's score for it",
-                      g("sjk1.score", 0.9), "sjk1.score"),
+                      g("sjk50_200.score", 0.9), "sjk50_200.score"),
             ],
         })
 

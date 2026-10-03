@@ -1,4 +1,4 @@
-"""SJK 1 — the user's 50 / 200 EMA pullback continuation, as panadhanam
+"""SJK 50-200 — the user's 50 / 200 EMA pullback continuation, as panadhanam
 trades it: the detector, the candlestick analyst's report, the risk desk's
 exact swing stop and 1:2.5 target (judged at 1:2.5), and the optional
 breakeven / trail in the outcome tracker."""
@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.core.models import Bias, Candle, Quote
-from app.strategies import sjk1
-from tests.sjk1_data import long_tape, mirror
+from app.strategies import sjk50_200
+from tests.sjk50_200_data import long_tape, mirror
 
 
 def _candles(tape=None, end=datetime(2026, 9, 29, 6, 0, tzinfo=UTC)):    # 11:30 IST
@@ -26,21 +26,21 @@ def _candles(tape=None, end=datetime(2026, 9, 29, 6, 0, tzinfo=UTC)):    # 11:30
 # --------------------------------------------------------------------------- #
 def test_long_short_and_the_rules_that_stop_them():
     h, lo, c, i = long_tape()
-    s = sjk1.detect(h, lo, c)
+    s = sjk50_200.detect(h, lo, c)
     assert s["direction"] == "LONG" and s["entry"] == c[i]
     assert abs(s["target"] - (s["entry"] + 2.5 * (s["entry"] - s["stop"]))) < 1e-3
-    assert sjk1.detect(h[:-1], lo[:-1], c[:-1]) is None              # not yet through
-    assert sjk1.detect(h + [h[-1] + .1], lo + [lo[-1] + .1], c + [c[-1] + .1]) is None
-    assert sjk1.detect(*long_tape(deep=True)[:3]) is None             # closed below 200
-    assert sjk1.detect(*long_tape(shallow=True)[:3]) is None          # never at the 50
-    assert sjk1.detect(*mirror(h, lo, c))["direction"] == "SHORT"
+    assert sjk50_200.detect(h[:-1], lo[:-1], c[:-1]) is None              # not yet through
+    assert sjk50_200.detect(h + [h[-1] + .1], lo + [lo[-1] + .1], c + [c[-1] + .1]) is None
+    assert sjk50_200.detect(*long_tape(deep=True)[:3]) is None             # closed below 200
+    assert sjk50_200.detect(*long_tape(shallow=True)[:3]) is None          # never at the 50
+    assert sjk50_200.detect(*mirror(h, lo, c))["direction"] == "SHORT"
 
 
 def test_only_inside_its_window_on_the_markets_clock(cfg):
     cfg.switch_market("IN")
-    assert sjk1.detect_candles(_candles(), cfg, "Asia/Kolkata")["setup"] == sjk1.SETUP_NAME
+    assert sjk50_200.detect_candles(_candles(), cfg, "Asia/Kolkata")["setup"] == sjk50_200.SETUP_NAME
     late = _candles(end=datetime(2026, 9, 29, 9, 45, tzinfo=UTC))      # 15:15 IST
-    assert sjk1.detect_candles(late, cfg, "Asia/Kolkata") is None
+    assert sjk50_200.detect_candles(late, cfg, "Asia/Kolkata") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -49,14 +49,14 @@ def test_only_inside_its_window_on_the_markets_clock(cfg):
 def _ctx(cfg, symbol="RELIANCE"):
     from app.core.models import MarketContext
     bars = _candles()
-    found = sjk1.detect_candles(bars, cfg, "Asia/Kolkata")
+    found = sjk50_200.detect_candles(bars, cfg, "Asia/Kolkata")
     ctx = MarketContext(symbol=symbol, cycle_id="t", candles={"5m": bars},
                         quote=Quote(symbol=symbol, last_price=bars[-1].close))
     ctx.indicators = {"primary": {"last_close": bars[-1].close, "atr": 0.4, "vwap": 112.0,
                                   "above_vwap": True, "high": 113.6, "low": 111.7,
                                   "patterns": []},
                       "previous_day": {"high": 113.55, "low": 108.0, "close": 112.0},
-                      "by_timeframe": {}, "sjk1": found}
+                      "by_timeframe": {}, "sjk50_200": found}
     ctx.__dict__["_reports"] = []
     return ctx, found
 
@@ -77,7 +77,7 @@ def test_the_analyst_reports_it_as_a_complete_setup(cfg):
     cfg.switch_market("IN")
     ctx, found = _ctx(cfg)
     report = CandlestickAgent(cfg).analyse_rules(ctx)
-    assert report.extra["setup"] == sjk1.SETUP_NAME and report.score > 0
+    assert report.extra["setup"] == sjk50_200.SETUP_NAME and report.score > 0
     assert report.invalidation_level == pytest.approx(found["stop"])
 
 
@@ -85,8 +85,8 @@ def test_the_risk_desk_takes_its_swing_stop_and_judges_it_at_one_to_two_and_a_ha
     from app.agents.candlestick import CandlestickAgent
     ctx, found = _ctx(cfg)
     report = CandlestickAgent(cfg).analyse_rules(ctx)
-    sig = rm.evaluate(ctx, Bias.BULLISH, [report], 0.8, [sjk1.SETUP_NAME])
-    assert sig.setup == sjk1.SETUP_NAME
+    sig = rm.evaluate(ctx, Bias.BULLISH, [report], 0.8, [sjk50_200.SETUP_NAME])
+    assert sig.setup == sjk50_200.SETUP_NAME
     assert sig.stop_loss == pytest.approx(found["stop"], abs=0.01)    # AT the swing
     assert sig.risk_reward == pytest.approx(2.5, abs=0.02)
     # 2.5 < the desk's 1:3, and still not refused for it — nor for the PDH
@@ -102,7 +102,7 @@ def _row(stop=99.0):
     return {"id": "SIG-SJK", "symbol": "RELIANCE", "side": "BUY", "instrument_type": "EQ",
             "entry": 100.0, "stop_loss": stop, "target": 102.5, "quantity": 10,
             "notional": 1000.0, "total_risk": 10.0,
-            "payload": json.dumps({"setup": sjk1.SETUP_NAME})}
+            "payload": json.dumps({"setup": sjk50_200.SETUP_NAME})}
 
 
 def test_breakeven_then_trail_only_when_switched_on(cfg, monkeypatch):
@@ -112,8 +112,8 @@ def test_breakeven_then_trail_only_when_switched_on(cfg, monkeypatch):
     monkeypatch.setattr(db, "update_position", lambda sid, **kw: saved.append(kw))
     t = OutcomeTracker(None, cfg)
     assert t._own_stop_step(_row(), 101.6, None)["stop_loss"] == 99.0  # off by default
-    monkeypatch.setitem(cfg.settings["sjk1"], "breakeven_r", 1.5)
-    monkeypatch.setitem(cfg.settings["sjk1"], "trail_r", 1.0)
+    monkeypatch.setitem(cfg.settings["sjk50_200"], "breakeven_r", 1.5)
+    monkeypatch.setitem(cfg.settings["sjk50_200"], "trail_r", 1.0)
     row = t._own_stop_step(_row(), 101.4, None)
     assert row["stop_loss"] == 99.0 and not saved                      # +1.4R
     row = t._own_stop_step(row, 101.6, None)
@@ -127,4 +127,11 @@ def test_the_rules_page_describes_it(cfg):
     from app.core import rules
     cfg.switch_market("IN")
     titles = [s["title"] for s in rules.build(cfg)["sections"]]
-    assert any(t.startswith("Strategy: SJK 1") for t in titles)
+    assert any(t.startswith("Strategy: SJK 50-200") for t in titles)
+
+
+def test_trades_recorded_under_its_old_name_keep_their_plan(cfg):
+    """SJK 50-200 was "SJK 1" until 5 Oct 2026."""
+    from app.strategies import LEGACY_SJK1, OWN_PLAN
+    assert OWN_PLAN[LEGACY_SJK1] == OWN_PLAN[sjk50_200.SETUP_NAME] == ("sjk50_200", 2.5)
+    assert LEGACY_SJK1 in cfg.get("risk.no_time_stop_setups")

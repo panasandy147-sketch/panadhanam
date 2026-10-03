@@ -140,10 +140,10 @@ async def test_non_actionable_entries_still_show_the_projected_trade(engine):
                 assert t["stop_loss"] < t["entry"] < t["target"]
             else:
                 assert t["stop_loss"] > t["entry"] > t["target"]
-            # SJK 1 is judged at its own 1:rr (2.5), every other setup at the
+            # SJK 50-200 is judged at its own 1:rr (2.5), every other setup at the
             # desk's minimum.
-            from app.strategies.sjk1 import SETUP_NAME as SJK1
-            need = (float(eng.cfg.get("sjk1.rr")) if t.get("setup") == SJK1
+            from app.strategies.sjk50_200 import SETUP_NAME as SJK50_200
+            need = (float(eng.cfg.get("sjk50_200.rr")) if t.get("setup") == SJK50_200
                     else float(eng.cfg.get("risk.min_risk_reward")))
             assert t["risk_reward"] >= need - 0.01
 

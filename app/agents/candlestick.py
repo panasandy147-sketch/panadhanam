@@ -29,10 +29,10 @@ class CandlestickAgent(BaseAgent):
         if breakout and (breakout.get("swing")
                          or bool(self.cfg.get("vol_breakout.enabled", False))):
             return self._breakout_report(ctx, primary, breakout)
-        # --- SJK 1, the user's 50 / 200 EMA pullback: a complete setup too.
-        sjk = ind.get("sjk1") or {}
-        if sjk and bool(self.cfg.get("sjk1.enabled", False)):
-            return self._sjk1_report(ctx, primary, sjk)
+        # --- SJK 50-200, the user's 50 / 200 EMA pullback: a complete setup too.
+        sjk = ind.get("sjk50_200") or {}
+        if sjk and bool(self.cfg.get("sjk50_200.enabled", False)):
+            return self._sjk50_200_report(ctx, primary, sjk)
         # --- SJK 9-15-21, the user's 9 / 15 / 21 EMA fan: a complete setup too.
         fan = ind.get("sjk_9_15_21") or {}
         if fan and bool(self.cfg.get("sjk_9_15_21.enabled", False)):
@@ -181,12 +181,12 @@ class CandlestickAgent(BaseAgent):
                    "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 
-    def _sjk1_report(self, ctx: MarketContext, primary: dict, sjk: dict) -> AgentReport:
-        from app.strategies.sjk1 import SETUP_NAME
+    def _sjk50_200_report(self, ctx: MarketContext, primary: dict, sjk: dict) -> AgentReport:
+        from app.strategies.sjk50_200 import SETUP_NAME
         direction = 1 if sjk.get("direction") == "LONG" else -1
-        score = float(self.cfg.get("sjk1.score", 0.9)) * direction
+        score = float(self.cfg.get("sjk50_200.score", 0.9)) * direction
         price = float(primary.get("last_close") or sjk.get("entry") or 0.0)
-        rr = float(self.cfg.get("sjk1.rr", 2.5))
+        rr = float(self.cfg.get("sjk50_200.rr", 2.5))
         return AgentReport(
             agent_id=self.agent_id, symbol=ctx.symbol,
             bias=self._bias_from_score(score), score=round(score, 3), confidence=0.9,
@@ -198,7 +198,7 @@ class CandlestickAgent(BaseAgent):
             invalidation_level=round(float(sjk.get("stop") or 0.0), 4),
             suggested_entry=price,
             suggested_target=round(float(sjk.get("target") or 0.0), 4),
-            extra={"setup": SETUP_NAME, "sjk1": sjk, "patterns": ["sjk1_ema_pullback"],
+            extra={"setup": SETUP_NAME, "sjk50_200": sjk, "patterns": ["sjk50_200"],
                    "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 

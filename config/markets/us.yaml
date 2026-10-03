@@ -55,7 +55,7 @@ screener:
     general_to: ""
 
 # The weekly review of 28 Sept - 2 Oct 2026, for GENERAL setups only (PD
-# sweep, the volatility breakout and SJK 1 keep their own rules):
+# sweep, the volatility breakout and SJK 50-200 keep their own rules):
 #   * RSI guard: no short below RSI 25, no long above 75. 40-session replay,
 #     account rules: earlier half +0.09R -> +0.19R a trade, judged half
 #     +0.20R -> +0.31R, drawdown 4.0% -> 3.0% and 2.7% -> 2.0%.

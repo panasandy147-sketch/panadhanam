@@ -474,7 +474,7 @@ class RiskManager:
             reasons.extend(self.screener_checks(ctx.symbol, bias, ctx.indicators or {},
                                                 composite_score))
         # A general setup (no named strategy) answers to the weekly review's
-        # guards; PD sweep, the volatility breakout and SJK 1 carry their own.
+        # guards; PD sweep, the volatility breakout and SJK 50-200 carry their own.
         if not swing and not signal.setup:
             reasons.extend(self.general_checks(
                 bias, reports or ctx.__dict__.get("_reports") or [], ctx.indicators or {}))
@@ -552,7 +552,7 @@ class RiskManager:
         rr = reward_points / stop_points if stop_points > 0 else 0.0
         min_rr = float(self.cfg.get("risk.min_risk_reward", 2.0))
         # The user's own-plan strategies are judged at their own reward:risk
-        # (sjk1.rr 1:2.5, sjk_9_15_21.rr 1:2), not 1:3.
+        # (sjk50_200.rr 1:2.5, sjk_9_15_21.rr 1:2), not 1:3.
         from app.strategies import OWN_PLAN
         if signal.setup in OWN_PLAN:
             section, default_rr = OWN_PLAN[signal.setup]
@@ -965,7 +965,7 @@ class RiskManager:
         own = OWN_PLAN.get(setup_name or "")
         breakout = setup_name == BREAKOUT or own is not None   # no VWAP target either
         if own:
-            # SJK 1 / SJK 9-15-21: the stop AT the strategy's own level (the
+            # SJK 50-200 / SJK 9-15-21: the stop AT the strategy's own level (the
             # pullback's swing; the swing or the 21 EMA) — <section>.stop_ticks
             # beyond it, 0 by default — and the target at its own 1:rr.
             section, default_rr = own

@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from app.strategies.sjk1 import ema, swing_highs, swing_lows
+from app.strategies.sjk50_200 import ema, swing_highs, swing_lows
 
 KEY = "sjk_9_15_21"                     # the settings section
 SETUP_NAME = "SJK 9-15-21 · EMA Fan"

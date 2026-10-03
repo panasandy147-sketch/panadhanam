@@ -282,7 +282,7 @@ class OutcomeTracker:
     # ------------------------------------------------------------------ #
     def _own_stop_step(self, row: dict[str, Any], price: float,
                        spot: float | None) -> dict[str, Any]:
-        """The own-plan strategies' optional stop management (SJK 1 and SJK
+        """The own-plan strategies' optional stop management (SJK 50-200 and SJK
         9-15-21: <section>.breakeven_r, <section>.trail_r): the stop to
         breakeven once the trade is +breakeven_r on its own risk, then trailed
         trail_r behind the best R reached. Judged on the UNDERLYING for an
@@ -298,7 +298,7 @@ class OutcomeTracker:
         if be_r <= 0 and trail_r <= 0:
             return row
         option = row.get("instrument_type") in {"CE", "PE"}
-        state = payload.setdefault("sjk1_stop", {})
+        state = payload.setdefault("own_stop", {})
         if not state:                                      # the first look
             if option:
                 u_entry = float(payload.get("entry_spot") or spot or 0)
@@ -341,8 +341,8 @@ class OutcomeTracker:
                                notional=float(row.get("notional") or 0),
                                total_risk=float(row.get("total_risk") or 0))
         except Exception as exc:                           # noqa: BLE001
-            log.warning("could not move the SJK 1 stop for %s: %s", row.get("symbol"), exc)
-        log.info("SJK 1 %s at %+.2fR — stop moved to %.2f", row.get("symbol"), r, new)
+            log.warning("could not move the SJK 50-200 stop for %s: %s", row.get("symbol"), exc)
+        log.info("SJK 50-200 %s at %+.2fR — stop moved to %.2f", row.get("symbol"), r, new)
         return row
 
     @staticmethod

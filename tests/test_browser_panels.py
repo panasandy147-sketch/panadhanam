@@ -321,9 +321,22 @@ def test_todays_review_is_this_market_and_explains_the_trade(page):
     assert "target" in _text(page, "#today-body").lower()
 
 
-def test_weekly_review_builds(page):
-    from app.core import audit
+def test_weekly_review_builds(page, monkeypatch):
+    from datetime import timedelta
+
+    from app.core import audit, clock
     from app.core.config import get_config
+    # On a weekend "today" is outside the Monday-Friday week under review:
+    # run on the latest weekday's clock (the server shares this process).
+    real = clock.market_now
+
+    def weekday(tz):
+        now = real(tz)
+        while now.weekday() > 4:
+            now -= timedelta(days=1)
+        return now
+
+    monkeypatch.setattr(clock, "market_now", weekday)
     # A buy in this week's audit log, for the review to show day by day.
     audit._write(get_config(), {
         "event": "BUY", "signal_id": "SIG-BROWSER", "symbol": "SPY",
