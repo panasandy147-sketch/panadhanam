@@ -250,6 +250,16 @@ class MarketDataService:
                 from app.strategies import sjk50_200
                 ctx.indicators["sjk50_200"] = sjk50_200.detect_candles(
                     candles.get("5m") or [], self.cfg, tz)
+            # SJK 9/21 · VWAP · ADX, the user's confluence model.
+            if bool(self.cfg.get("sjk912_vwapadx.enabled", False)) and not swing:
+                from app.strategies import sjk912_vwapadx
+                ctx.indicators["sjk912_vwapadx"] = sjk912_vwapadx.detect_candles(
+                    candles.get("5m") or [], self.cfg, tz)
+            # sjk912RSi, the user's 9/21 EMA + RSI crossover.
+            if bool(self.cfg.get("sjk912rsi.enabled", False)) and not swing:
+                from app.strategies import sjk912rsi
+                ctx.indicators["sjk912rsi"] = sjk912rsi.detect_candles(
+                    candles.get("5m") or [], self.cfg, tz)
             # SJK 9-15-21, the user's 9 / 15 / 21 EMA fan.
             if bool(self.cfg.get("sjk_9_15_21.enabled", False)) and not swing:
                 from app.strategies import sjk_9_15_21

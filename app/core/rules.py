@@ -441,6 +441,61 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             ],
         })
 
+    if g("sjk912_vwapadx.enabled", False):
+        k = "sjk912_vwapadx."
+        sections.append({
+            "title": "Strategy: SJK 9/21 · VWAP · ADX (the user's confluence model)",
+            "intro": ("A trial from 5 Oct 2026. The 9 EMA crossing the 21 EMA, on the "
+                      "right side of the session VWAP, confirmed by the NEXT candle, "
+                      "with a trending ADX. Never entered on the crossover candle "
+                      "itself."),
+            "rules": [
+                _rule("Buy: the 9 EMA crosses ABOVE the 21 EMA (the crossover candle), "
+                      "its close above the session VWAP; sell: the mirror",
+                      f"{g(k + 'fast', 9)} / {g(k + 'slow', 21)} EMA; VWAP of the typical "
+                      "price, reset each day", "sjk912_vwapadx.fast / .slow"),
+                _rule("The next candle must close beyond the 9 EMA and VWAP, the trade's "
+                      "way — the entry is on that close", "required", "sjk912_vwapadx"),
+                _rule("ADX on the confirmation candle above",
+                      f"{g(k + 'adx_min', 20.0)} (ADX {g(k + 'adx_period', 14)})",
+                      "sjk912_vwapadx.adx_min"),
+                _rule("Sideways / Choppy, no entry: the 9 and 21 crossing more than this "
+                      "often, or EMAs, VWAP and price inside this band",
+                      f"{g(k + 'max_crosses', 2)} in {g(k + 'chop_bars', 12)} bars; "
+                      f"{g(k + 'band_pct', 0.10)}%", "sjk912_vwapadx.max_crosses / .band_pct"),
+                _rule("Entries between (market time)",
+                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
+                      "sjk912_vwapadx.from / .to"),
+                _rule("Stop: the crossover candle's low (buy) / high (sell); target, sold "
+                      "there", f"1:{g(k + 'rr', 2.0)}", "sjk912_vwapadx.rr"),
+            ],
+        })
+
+    if g("sjk912rsi.enabled", False):
+        k = "sjk912rsi."
+        sections.append({
+            "title": "Strategy: sjk912RSi — 9/21 EMA + RSI crossover (the user's)",
+            "intro": ("A trial from 5 Oct 2026; the same rules for TradingView in "
+                      "pine/sjk912RSi.pine. One entry per crossover."),
+            "rules": [
+                _rule("Buy: the 9 EMA crosses above the 21 EMA — the entry on that "
+                      "candle or within this many after it, while the 9 stays above",
+                      g(k + "cross_within", 5), "sjk912rsi.cross_within"),
+                _rule("The candle's open AND close strictly above both EMAs, and it "
+                      "closes up (close > open); a sell the mirror", "required",
+                      "sjk912rsi"),
+                _rule("RSI above (buy) / below (sell)",
+                      f"{g(k + 'rsi_level', 50.0)} (RSI {g(k + 'rsi_length', 14)})",
+                      "sjk912rsi.rsi_level"),
+                _rule("Entries between (market time)",
+                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
+                      "sjk912rsi.from / .to"),
+                _rule("Stop: the lowest low (buy) / highest high (sell) of the bars "
+                      "before the entry", g(k + "swing_lookback", 5), "sjk912rsi.swing_lookback"),
+                _rule("Target, sold there", f"1:{g(k + 'rr', 2.0)}", "sjk912rsi.rr"),
+            ],
+        })
+
     # ------------------------------------------------------------------ #
     sections.append({
         "title": "Previous-day F&O confluence",

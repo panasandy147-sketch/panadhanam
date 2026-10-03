@@ -33,6 +33,14 @@ class CandlestickAgent(BaseAgent):
         sjk = ind.get("sjk50_200") or {}
         if sjk and bool(self.cfg.get("sjk50_200.enabled", False)):
             return self._sjk50_200_report(ctx, primary, sjk)
+        # --- SJK 9/21 · VWAP · ADX: a complete setup too.
+        conf = ind.get("sjk912_vwapadx") or {}
+        if conf and bool(self.cfg.get("sjk912_vwapadx.enabled", False)):
+            return self._own_setup_report(ctx, primary, conf, "sjk912_vwapadx")
+        # --- sjk912RSi: a complete setup too.
+        xr = ind.get("sjk912rsi") or {}
+        if xr and bool(self.cfg.get("sjk912rsi.enabled", False)):
+            return self._own_setup_report(ctx, primary, xr, "sjk912rsi")
         # --- SJK 9-15-21, the user's 9 / 15 / 21 EMA fan: a complete setup too.
         fan = ind.get("sjk_9_15_21") or {}
         if fan and bool(self.cfg.get("sjk_9_15_21.enabled", False)):
@@ -199,6 +207,29 @@ class CandlestickAgent(BaseAgent):
             suggested_entry=price,
             suggested_target=round(float(sjk.get("target") or 0.0), 4),
             extra={"setup": SETUP_NAME, "sjk50_200": sjk, "patterns": ["sjk50_200"],
+                   "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
+        )
+
+    def _own_setup_report(self, ctx: MarketContext, primary: dict, found: dict,
+                          section: str) -> AgentReport:
+        """A complete own-plan setup (SJK 9/21 · VWAP · ADX): its direction,
+        its exact stop (the risk desk takes it) and its 1:rr target."""
+        name = str(found.get("setup") or section)
+        direction = 1 if found.get("direction") == "LONG" else -1
+        score = float(self.cfg.get(f"{section}.score", 0.9)) * direction
+        price = float(primary.get("last_close") or found.get("entry") or 0.0)
+        rr = float(self.cfg.get(f"{section}.rr", 2.0))
+        return AgentReport(
+            agent_id=self.agent_id, symbol=ctx.symbol,
+            bias=self._bias_from_score(score), score=round(score, 3), confidence=0.9,
+            rationale=(f"{name}: {found.get('note', '')}. Wrong back through "
+                       f"{float(found.get('stop') or 0):,.2f}; target 1:{rr:g} at "
+                       f"{float(found.get('target') or 0):,.2f}."),
+            evidence=[Evidence(label=name, value=found.get("note", ""), weight=1.0)],
+            invalidation_level=round(float(found.get("stop") or 0.0), 4),
+            suggested_entry=price,
+            suggested_target=round(float(found.get("target") or 0.0), 4),
+            extra={"setup": name, section: found, "patterns": [section],
                    "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 

@@ -1,0 +1,102 @@
+//@version=5
+// sjk912RSi — 9/21 EMA + RSI crossover strategy (the user's, 5 Oct 2026).
+// The same rules run in panadhanam (app/strategies/sjk912rsi.py) and are
+// backtested there with: python -m scripts.backtest_sjk_9_15_21 --strategy sjk912rsi
+//
+// LONG : EMA 9 crosses above EMA 21 (or is still above, within N bars of that
+//        crossover); the candle's open AND close strictly above both EMAs; a
+//        green candle (close > open); RSI(14) > 50. Stop: the lowest low of the
+//        5 bars before entry. Target: entry + 2 x risk.
+// SHORT: the mirror image.
+// One entry per crossover. Orders fill on the bar's close (no repainting).
+strategy("sjk912RSi", overlay = true, process_orders_on_close = true,
+         default_qty_type = strategy.percent_of_equity, default_qty_value = 10,
+         initial_capital = 100000, commission_type = strategy.commission.percent,
+         commission_value = 0.03)
+
+// ---- inputs -----------------------------------------------------------------
+fastLen   = input.int(9,    "Fast EMA",                  minval = 1)
+slowLen   = input.int(21,   "Slow EMA",                  minval = 2)
+rsiLen    = input.int(14,   "RSI length",                minval = 2)
+rsiLevel  = input.float(50, "RSI threshold")
+rr        = input.float(2.0, "Reward : risk (1 : x)",    minval = 0.5, step = 0.5)
+swingN    = input.int(5,    "Swing lookback (stop)",     minval = 1)
+crossN    = input.int(5,    "Enter within N bars of the crossover", minval = 0)
+useSess   = input.bool(false, "Intraday: trade only inside the session below")
+sess      = input.session("0945-1545", "Entry session (exchange time)")
+
+// ---- indicators -------------------------------------------------------------
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+rsi     = ta.rsi(close, rsiLen)
+
+crossUp   = ta.crossover(emaFast, emaSlow)
+crossDown = ta.crossunder(emaFast, emaSlow)
+barsUp    = ta.barssince(crossUp)
+barsDown  = ta.barssince(crossDown)
+
+// One entry per crossover: remember whether this crossover has been used.
+var bool usedUp   = false
+var bool usedDown = false
+if crossUp
+    usedUp := false
+if crossDown
+    usedDown := false
+
+inSession = not useSess or not na(time(timeframe.period, sess))
+
+// ---- entry conditions -------------------------------------------------------
+upTrend   = emaFast > emaSlow and barsUp <= crossN and not usedUp
+downTrend = emaFast < emaSlow and barsDown <= crossN and not usedDown
+
+longCond  = upTrend and open > emaFast and open > emaSlow and close > emaFast and
+             close > emaSlow and close > open and rsi > rsiLevel and inSession
+shortCond = downTrend and open < emaFast and open < emaSlow and close < emaFast and
+             close < emaSlow and close < open and rsi < rsiLevel and inSession
+
+// Stops from the bars BEFORE the entry bar.
+swingLow  = ta.lowest(low, swingN)[1]
+swingHigh = ta.highest(high, swingN)[1]
+
+var float longStop  = na
+var float longTgt   = na
+var float shortStop = na
+var float shortTgt  = na
+
+flat = strategy.position_size == 0
+if longCond and flat and close > swingLow
+    longStop := swingLow
+    longTgt  := close + (close - swingLow) * rr
+    usedUp   := true
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long exit", "Long", stop = longStop, limit = longTgt)
+if shortCond and flat and close < swingHigh
+    shortStop := swingHigh
+    shortTgt  := close - (swingHigh - close) * rr
+    usedDown  := true
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short exit", "Short", stop = shortStop, limit = shortTgt)
+
+// Intraday: flat at the end of the entry session when that option is on.
+if useSess and not inSession and strategy.position_size != 0
+    strategy.close_all("Session end")
+
+// ---- visuals ----------------------------------------------------------------
+plot(emaFast, "EMA 9",  color = color.green, linewidth = 2)
+plot(emaSlow, "EMA 21", color = color.red,   linewidth = 2)
+
+longNow  = longCond and flat and close > swingLow
+shortNow = shortCond and flat and close < swingHigh
+plotshape(longNow,  "Long entry",  shape.triangleup,   location.belowbar, color.green, size = size.small, text = "BUY")
+plotshape(shortNow, "Short entry", shape.triangledown, location.abovebar, color.red,   size = size.small, text = "SELL")
+
+inLong  = strategy.position_size > 0
+inShort = strategy.position_size < 0
+plot(inLong  ? longStop  : na, "Long stop",    color = color.red,   style = plot.style_linebr, linewidth = 1)
+plot(inLong  ? longTgt   : na, "Long target",  color = color.green, style = plot.style_linebr, linewidth = 1)
+plot(inShort ? shortStop : na, "Short stop",   color = color.red,   style = plot.style_linebr, linewidth = 1)
+plot(inShort ? shortTgt  : na, "Short target", color = color.green, style = plot.style_linebr, linewidth = 1)
+
+// ---- alerts -----------------------------------------------------------------
+alertcondition(longNow,  "sjk912RSi Long",  "sjk912RSi: LONG entry on {{ticker}} at {{close}}")
+alertcondition(shortNow, "sjk912RSi Short", "sjk912RSi: SHORT entry on {{ticker}} at {{close}}")

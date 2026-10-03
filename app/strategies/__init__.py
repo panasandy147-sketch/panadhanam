@@ -14,4 +14,6 @@ OWN_PLAN: dict[str, tuple[str, float]] = {
     # Its name until 5 Oct 2026 — trades recorded then still find their plan.
     LEGACY_SJK1: ("sjk50_200", 2.5),
     "SJK 9-15-21 · EMA Fan": ("sjk_9_15_21", 2.0),
+    "SJK 9/21 · VWAP · ADX": ("sjk912_vwapadx", 2.0),
+    "sjk912RSi · 9/21 EMA + RSI": ("sjk912rsi", 2.0),
 }

@@ -128,6 +128,7 @@ risk:
   # the intraday square-off.
   no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout",
                         "SJK 50-200 · EMA Pullback", "SJK 9-15-21 · EMA Fan",
+                        "SJK 9/21 · VWAP · ADX", "sjk912RSi · 9/21 EMA + RSI",
                         "SJK 1 · 50/200 EMA Pullback"]   # SJK 50-200's name until 5 Oct
   # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
   # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
@@ -492,6 +493,59 @@ sjk_9_15_21:
   rr: 2.5                   # target = entry + rr x risk (2, 2.5 or 3); judged at it
   breakeven_r: 0            # 1.5 = stop to breakeven at +1.5R (0 = off)
   trail_r: 0                # after breakeven, trail this many R behind the best (0 = off)
+
+# SJK 9/21 · VWAP · ADX — the user's confluence model (sjk912_vwapadx, 5 Oct
+# 2026), app/strategies/sjk912_vwapadx.py. TRIAL. BUY when the 9 EMA crosses
+# above the 21 EMA with the close above the session VWAP, and the NEXT candle
+# confirms (closes above the 9 EMA and VWAP) with ADX(14) > 20; enter on that
+# close, stop at the crossover candle's low, target 1:rr. SELL the mirror.
+# Sideways / Choppy (ADX <= 20, 9/21 crossing back and forth, or EMAs, VWAP
+# and price bunched in band_pct) = no entry.
+sjk912_vwapadx:
+  enabled: true
+  score: 0.9                # the candlestick analyst's vote, like SJK 50-200
+  from: "09:45"             # market time (India: markets/india.yaml)
+  to: "15:45"
+  fast: 9                   # EMA periods on the 5m close
+  slow: 21
+  adx_period: 14
+  adx_smoothing: 14
+  adx_min: 20.0             # trend strength must be ABOVE this
+  chop_bars: 12             # ...and the 9/21 may cross at most max_crosses
+  max_crosses: 2            #    times in the last chop_bars bars
+  band_pct: 0.10            # ...and EMAs, VWAP and price not all inside 0.10%
+  reset_emas_daily: false   # true: EMAs and ADX restart each day (VWAP always does)
+  rr: 2.0                   # target = entry + 2 x risk; judged at it
+  exit_mode: "target"       # the live desk exits at the 1:rr target; "cross"
+                            # (the opposing 9/21 crossover) and "both" are for
+                            # the backtest only: scripts/backtest_sjk_9_15_21
+  stop_buffer: 0.0          # beyond the crossover candle's low / high (0 = at it)
+  stop_ticks: 0             # ...or in ticks, at the risk desk
+  breakeven_r: 0
+  trail_r: 0
+
+# sjk912RSi — the user's 9/21 EMA + RSI crossover (5 Oct 2026),
+# app/strategies/sjk912rsi.py; the same rules for TradingView in
+# pine/sjk912RSi.pine. TRIAL. LONG when the 9 EMA crosses above the 21 (entry
+# that bar or up to cross_within bars after), a green candle opening and
+# closing above both EMAs, RSI(14) > 50; stop the lowest low of the 5 bars
+# before; target 1:rr. SHORT the mirror. One entry per crossover.
+sjk912rsi:
+  enabled: true
+  score: 0.9
+  from: "09:45"             # market time (India: markets/india.yaml)
+  to: "15:45"
+  fast: 9
+  slow: 21
+  rsi_length: 14
+  rsi_level: 50.0
+  cross_within: 5           # bars after the crossover an entry may still come
+  swing_lookback: 5         # the stop: lowest low / highest high of these bars
+  rr: 2.0
+  stop_buffer: 0.0
+  stop_ticks: 0
+  breakeven_r: 0
+  trail_r: 0
 
 pd_sweep:
   enabled: true

@@ -195,6 +195,16 @@ sjk50_200:
   from: "09:30"
   to: "15:15"               # 15 min before the close (the user's call, 5 Oct)
 
+# SJK 9/21 · VWAP · ADX, the user's confluence model: a trial from 5 Oct.
+sjk912_vwapadx:
+  from: "09:30"
+  to: "15:15"               # 15 min before the close
+
+# sjk912RSi, the user's 9/21 EMA + RSI crossover: a trial from 5 Oct.
+sjk912rsi:
+  from: "09:30"
+  to: "15:15"
+
 # SJK 9-15-21, the user's 9 / 15 / 21 EMA fan: a trial from 5 Oct, as on the US.
 sjk_9_15_21:
   from: "09:30"
