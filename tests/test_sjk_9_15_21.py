@@ -116,7 +116,7 @@ def test_the_analyst_reports_it_as_a_complete_setup(cfg):
     assert report.invalidation_level == pytest.approx(found["stop"])
 
 
-def test_the_risk_desk_takes_its_own_stop_and_judges_it_at_one_to_two(cfg):
+def test_the_risk_desk_takes_its_own_stop_and_judges_it_at_its_own_rr(cfg):
     from app.agents.candlestick import CandlestickAgent
     from app.agents.risk import RiskManager
     cfg.switch_market("IN")
@@ -129,7 +129,8 @@ def test_the_risk_desk_takes_its_own_stop_and_judges_it_at_one_to_two(cfg):
     sig = rm.evaluate(ctx, Bias.BULLISH, [report], 0.8, [m.SETUP_NAME])
     assert sig.setup == m.SETUP_NAME
     assert sig.stop_loss == pytest.approx(found["stop"], abs=0.01)
-    assert sig.risk_reward == pytest.approx(2.0, abs=0.02)
+    assert sig.risk_reward == pytest.approx(float(cfg.get("sjk_9_15_21.rr")), abs=0.02)
+    assert cfg.get("sjk_9_15_21.rr") == 2.5          # backtested, 5 Oct 2026
     assert not any("R:R" in r or "room" in r.lower() for r in sig.rejection_reasons), \
         sig.rejection_reasons
 
@@ -175,7 +176,7 @@ def test_the_backtest_takes_one_trade_per_fan_and_grades_it(cfg):
     [t] = trades
     assert t["direction"] == "LONG" and t["outcome"] in ("TARGET", "STOP", "SQUARE_OFF")
     if t["outcome"] == "TARGET":
-        assert t["r"] == pytest.approx(2.0, abs=0.01)
+        assert t["r"] == pytest.approx(float(cfg.get("sjk_9_15_21.rr")), abs=0.01)
     s = m.summary(trades)
     assert s["trades"] == 1 and "avg_r" in s
     assert m.summary([]) == {"trades": 0}
