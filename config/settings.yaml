@@ -127,7 +127,7 @@ risk:
   # Setups that are NEVER time-stopped: they run to the target, the stop or
   # the intraday square-off.
   no_time_stop_setups: ["PD Liquidity Sweep", "Volatility Breakout",
-                        "SJK 1 · 50/200 EMA Pullback"]
+                        "SJK 1 · 50/200 EMA Pullback", "SJK 9-15-21 · EMA Fan"]
   # --- The Standard Pyramid (Base-50-25): add to winners, never to losers --
   # Base entry at 1R fractional sizing (risk_per_trade_pct / stop distance).
   # At +1.0R open: ADD 50% of the base, and the stop for the WHOLE position
@@ -456,6 +456,34 @@ sjk1:
   rr: 2.5                   # target = entry + 2.5 x risk (2, 3 or 4 also); judged at it
   stop_buffer: 0.0          # beyond the swing for the stop in price (0 = at it)
   stop_ticks: 0             # ...or in ticks, at the risk desk
+  breakeven_r: 0            # 1.5 = stop to breakeven at +1.5R (0 = off)
+  trail_r: 0                # after breakeven, trail this many R behind the best (0 = off)
+
+# SJK 9-15-21 — the user's 9 / 15 / 21 EMA Master Strategy (5 Oct 2026),
+# app/strategies/sjk_9_15_21.py. TRIAL, both markets. Long when the 9 > 15 >
+# 21 EMAs fan out, separated and trending: the confirming close, or a pullback
+# to the 9/15 band that closes back above the 9. Short the mirror. Sideways /
+# Choppy = no order. One trade per continuous alignment. Stop at the swing
+# (else the 21 EMA), target 1:rr, sold there; no time stop.
+sjk_9_15_21:
+  enabled: true
+  score: 0.9                # the candlestick analyst's vote, like SJK 1
+  from: "09:45"             # market time (India: markets/india.yaml)
+  to: "15:45"               # US: 15 min before the close (India 15:15)
+  fast: 9                   # EMA periods on the 5m close (chart: purple)
+  mid: 15                   #   (chart: blue)
+  slow: 21                  #   (chart: dark grey)
+  min_sep_pct: 0.02         # chop filter: each EMA gap at least 0.02% of the price
+  chop_bars: 12             # ...the EMA order changed at most max_flips times
+  max_flips: 2              #    in the last chop_bars bars
+  min_slope_pct: 0.05       # ...and the 21 EMA moved 0.05% the trade's way over them
+  entry_mode: "both"        # "confirm" (the aligning close), "pullback", or both
+  swing_lookback: 3         # bars each side that make a swing high / low (3-5)
+  max_age_bars: 24          # the swing for the stop at most 2 hours old
+  stop_mode: "swing"        # "swing" (else the 21 EMA) or "ema21"
+  stop_buffer: 0.0          # beyond the swing / 21 EMA in price (0 = at it)
+  stop_ticks: 0             # ...or in ticks, at the risk desk
+  rr: 2.0                   # target = entry + 2 x risk (2.5 or 3 also); judged at it
   breakeven_r: 0            # 1.5 = stop to breakeven at +1.5R (0 = off)
   trail_r: 0                # after breakeven, trail this many R behind the best (0 = off)
 

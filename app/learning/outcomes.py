@@ -282,16 +282,20 @@ class OutcomeTracker:
     # ------------------------------------------------------------------ #
     def _own_stop_step(self, row: dict[str, Any], price: float,
                        spot: float | None) -> dict[str, Any]:
-        """SJK 1's optional stop management (sjk1.breakeven_r, sjk1.trail_r):
-        the stop to breakeven once the trade is +breakeven_r on its own risk,
-        then trailed trail_r behind the best R reached. Judged on the
-        UNDERLYING for an option (its underlying stop moves), on the price for
-        shares. Off (0) by default: the stop stays at the pullback's swing."""
-        from app.strategies.sjk1 import SETUP_NAME
+        """The own-plan strategies' optional stop management (SJK 1 and SJK
+        9-15-21: <section>.breakeven_r, <section>.trail_r): the stop to
+        breakeven once the trade is +breakeven_r on its own risk, then trailed
+        trail_r behind the best R reached. Judged on the UNDERLYING for an
+        option (its underlying stop moves), on the price for shares. Off (0)
+        by default: the stop stays where the strategy put it."""
+        from app.strategies import OWN_PLAN
         payload = self._payload(row)
-        be_r = float(self.cfg.get("sjk1.breakeven_r", 0) or 0)
-        trail_r = float(self.cfg.get("sjk1.trail_r", 0) or 0)
-        if payload.get("setup") != SETUP_NAME or (be_r <= 0 and trail_r <= 0):
+        own = OWN_PLAN.get(str(payload.get("setup") or ""))
+        if own is None:
+            return row
+        be_r = float(self.cfg.get(f"{own[0]}.breakeven_r", 0) or 0)
+        trail_r = float(self.cfg.get(f"{own[0]}.trail_r", 0) or 0)
+        if be_r <= 0 and trail_r <= 0:
             return row
         option = row.get("instrument_type") in {"CE", "PE"}
         state = payload.setdefault("sjk1_stop", {})

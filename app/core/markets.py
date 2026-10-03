@@ -183,7 +183,7 @@ class MarketProfile:
         # Setups switched per market (the volatility breakout: on for the US,
         # off for India — each on its own walk-forward), and the vote's
         # per-market gates (consensus.general_min_analysts).
-        for section in ("vol_breakout", "sjk1", "consensus", "swing"):
+        for section in ("vol_breakout", "sjk1", "sjk_9_15_21", "consensus", "swing"):
             if self.data.get(section):
                 out.setdefault(section, {}).update(self.data[section])
 

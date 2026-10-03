@@ -33,6 +33,10 @@ class CandlestickAgent(BaseAgent):
         sjk = ind.get("sjk1") or {}
         if sjk and bool(self.cfg.get("sjk1.enabled", False)):
             return self._sjk1_report(ctx, primary, sjk)
+        # --- SJK 9-15-21, the user's 9 / 15 / 21 EMA fan: a complete setup too.
+        fan = ind.get("sjk_9_15_21") or {}
+        if fan and bool(self.cfg.get("sjk_9_15_21.enabled", False)):
+            return self._sjk_9_15_21_report(ctx, primary, fan)
 
         score = 0.0
         evidence: list[Evidence] = []
@@ -195,6 +199,28 @@ class CandlestickAgent(BaseAgent):
             suggested_entry=price,
             suggested_target=round(float(sjk.get("target") or 0.0), 4),
             extra={"setup": SETUP_NAME, "sjk1": sjk, "patterns": ["sjk1_ema_pullback"],
+                   "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
+        )
+
+    def _sjk_9_15_21_report(self, ctx: MarketContext, primary: dict,
+                            fan: dict) -> AgentReport:
+        from app.strategies.sjk_9_15_21 import SETUP_NAME
+        direction = 1 if fan.get("direction") == "LONG" else -1
+        score = float(self.cfg.get("sjk_9_15_21.score", 0.9)) * direction
+        price = float(primary.get("last_close") or fan.get("entry") or 0.0)
+        rr = float(self.cfg.get("sjk_9_15_21.rr", 2.0))
+        return AgentReport(
+            agent_id=self.agent_id, symbol=ctx.symbol,
+            bias=self._bias_from_score(score), score=round(score, 3), confidence=0.9,
+            rationale=(f"{SETUP_NAME}: {fan.get('note', '')}. Wrong back through "
+                       f"{float(fan.get('stop') or 0):,.2f}; target 1:{rr:g} at "
+                       f"{float(fan.get('target') or 0):,.2f}."),
+            evidence=[Evidence(label=SETUP_NAME, value=fan.get("note", ""), weight=1.0)],
+            # The risk desk places the stop exactly at the swing / 21 EMA.
+            invalidation_level=round(float(fan.get("stop") or 0.0), 4),
+            suggested_entry=price,
+            suggested_target=round(float(fan.get("target") or 0.0), 4),
+            extra={"setup": SETUP_NAME, "sjk_9_15_21": fan, "patterns": ["sjk_9_15_21"],
                    "atr": primary.get("atr", 0.0), "vwap": primary.get("vwap", 0.0)},
         )
 

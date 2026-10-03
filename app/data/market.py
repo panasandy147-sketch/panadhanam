@@ -250,6 +250,11 @@ class MarketDataService:
                 from app.strategies import sjk1
                 ctx.indicators["sjk1"] = sjk1.detect_candles(
                     candles.get("5m") or [], self.cfg, tz)
+            # SJK 9-15-21, the user's 9 / 15 / 21 EMA fan.
+            if bool(self.cfg.get("sjk_9_15_21.enabled", False)) and not swing:
+                from app.strategies import sjk_9_15_21
+                ctx.indicators["sjk_9_15_21"] = sjk_9_15_21.detect_candles(
+                    candles.get("5m") or [], self.cfg, tz)
             if prev:
                 pic = fno_confluence.picture(symbol, prev, ctx.indicators.get("derivatives"))
                 ctx.indicators["fno_picture"] = pic

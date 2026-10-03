@@ -1034,9 +1034,12 @@ function initCandChart() {
   });
   const line = (color, width) => candChart.addLineSeries(
     { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false });
-  candSeries.ema9 = line("#4c8dff", 1);
-  candSeries.ema21 = line("#c77dff", 1);
-  candSeries.ema50 = line("#8b949e", 1);
+  // SJK 9-15-21's three lines in its own colours: 9 purple, 15 blue, 21
+  // dark grey (the user's spec, 5 Oct 2026).
+  candSeries.ema9 = line("#a855f7", 1);
+  candSeries.ema15 = line("#3b82f6", 1);
+  candSeries.ema21 = line("#6b7280", 2);
+  candSeries.ema50 = line("#f472b6", 1);
   candSeries.ema200 = line("#2dd4bf", 2);
   candSeries.vwap = line("#d29922", 2);
   new ResizeObserver(() => candChart.applyOptions({ width: el.clientWidth })).observe(el);
@@ -1103,6 +1106,7 @@ async function loadCandChart(symbol, c) {
     .filter((p) => p.time >= first);
   candSeries.candles.setData(bars);
   candSeries.ema9.setData(asLine(candEma(closes, 9)));
+  candSeries.ema15.setData(asLine(candEma(closes, 15)));
   candSeries.ema21.setData(asLine(candEma(closes, 21)));
   candSeries.ema50.setData(asLine(candEma(closes, 50)));
   candSeries.ema200.setData(asLine(candEma(closes, 200)));

@@ -400,6 +400,47 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
             ],
         })
 
+    if g("sjk_9_15_21.enabled", False):
+        k = "sjk_9_15_21."
+        sections.append({
+            "title": "Strategy: SJK 9-15-21 — the 9 / 15 / 21 EMA fan (the user's)",
+            "intro": ("A trial from 5 Oct 2026. Trade the fan-out of three EMAs — 9 "
+                      "(purple), 15 (blue), 21 (dark grey) on the chart — when they are "
+                      "in order, separated and trending; stand aside when they are "
+                      "Sideways / Choppy. One trade per continuous alignment."),
+            "rules": [
+                _rule("Long: 9 EMA > 15 EMA > 21 EMA; short: 21 > 15 > 9 (5m close)",
+                      f"{g(k + 'fast', 9)} / {g(k + 'mid', 15)} / {g(k + 'slow', 21)}",
+                      "sjk_9_15_21.fast / .mid / .slow"),
+                _rule("Chop filter: each EMA gap at least", f"{g(k + 'min_sep_pct', 0.02)}% "
+                      "of the price", "sjk_9_15_21.min_sep_pct"),
+                _rule("Chop filter: the EMA order changed at most this often in the "
+                      "last N bars", f"{g(k + 'max_flips', 2)} in {g(k + 'chop_bars', 12)}",
+                      "sjk_9_15_21.max_flips / .chop_bars"),
+                _rule("Chop filter: the 21 EMA moved at least this much the trade's way "
+                      "over those bars", f"{g(k + 'min_slope_pct', 0.05)}%",
+                      "sjk_9_15_21.min_slope_pct"),
+                _rule("Entry: the close of the candle where the fan-out confirms, or a "
+                      "pullback that touches the 9/15 band, holds the 21 and closes back "
+                      "beyond the 9", g(k + "entry_mode", "both"), "sjk_9_15_21.entry_mode"),
+                _rule("Entries between (market time)",
+                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
+                      "sjk_9_15_21.from / .to"),
+                _rule("Stop: the recent swing low (long) / high (short), else the 21 EMA",
+                      f"{g(k + 'stop_mode', 'swing')}; swing = {g(k + 'swing_lookback', 3)} "
+                      f"bars each side, at most {g(k + 'max_age_bars', 24)} bars old",
+                      "sjk_9_15_21.stop_mode / .swing_lookback"),
+                _rule("Target, sold there — and the reward:risk it is judged at "
+                      "(not the desk's 1:3)", f"1:{g(k + 'rr', 2.0)}", "sjk_9_15_21.rr"),
+                _rule("Stop to breakeven at this R (0 = off), then trailed this far "
+                      "behind the best R (0 = off)",
+                      f"{g(k + 'breakeven_r', 0)}R / {g(k + 'trail_r', 0)}R",
+                      "sjk_9_15_21.breakeven_r / .trail_r"),
+                _rule("The candlestick analyst's score for it", g(k + "score", 0.9),
+                      "sjk_9_15_21.score"),
+            ],
+        })
+
     # ------------------------------------------------------------------ #
     sections.append({
         "title": "Previous-day F&O confluence",
