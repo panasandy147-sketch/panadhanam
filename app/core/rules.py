@@ -403,95 +403,86 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
     if g("sjk_9_15_21.enabled", False):
         k = "sjk_9_15_21."
         sections.append({
-            "title": "Strategy: SJK 9-15-21 — the 9 / 15 / 21 EMA fan (the user's)",
-            "intro": ("A trial from 5 Oct 2026. Trade the fan-out of three EMAs — 9 "
-                      "(purple), 15 (blue), 21 (dark grey) on the chart — when they are "
-                      "in order, separated and trending; stand aside when they are "
-                      "Sideways / Choppy. One trade per continuous alignment."),
+            "title": "Strategy: SJK 9-15-21 — the 9 / 15 / 21 EMA Master (the user's, v2)",
+            "intro": ("A trial. Trade the fan-out of three EMAs — 9 (purple), 15 (blue), "
+                      "21 (grey) — in order AND all sloping the same way; stand aside when "
+                      "CHOPPY/SIDEWAYS. At most one breakout and one pullback trade per "
+                      "alignment cycle."),
             "rules": [
-                _rule("Long: 9 EMA > 15 EMA > 21 EMA; short: 21 > 15 > 9 (5m close)",
+                _rule("Long: 9 > 15 > 21, all rising; short: 21 > 15 > 9, all falling",
                       f"{g(k + 'fast', 9)} / {g(k + 'mid', 15)} / {g(k + 'slow', 21)}",
                       "sjk_9_15_21.fast / .mid / .slow"),
-                _rule("Chop filter: each EMA gap at least", f"{g(k + 'min_sep_pct', 0.02)}% "
-                      "of the price", "sjk_9_15_21.min_sep_pct"),
-                _rule("Chop filter: the EMA order changed at most this often in the "
-                      "last N bars", f"{g(k + 'max_flips', 2)} in {g(k + 'chop_bars', 12)}",
-                      "sjk_9_15_21.max_flips / .chop_bars"),
-                _rule("Chop filter: the 21 EMA moved at least this much the trade's way "
-                      "over those bars", f"{g(k + 'min_slope_pct', 0.05)}%",
-                      "sjk_9_15_21.min_slope_pct"),
-                _rule("Entry: the close of the candle where the fan-out confirms, or a "
-                      "pullback that touches the 9/15 band, holds the 21 and closes back "
-                      "beyond the 9", g(k + "entry_mode", "both"), "sjk_9_15_21.entry_mode"),
+                _rule("CHOPPY when |EMA9 - EMA21| is under this x ATR(14)",
+                      g(k + "spread_atr", 0.35), "sjk_9_15_21.spread_atr"),
+                _rule("...or the 9 and 21 cross this often in the last N bars",
+                      f"{g(k + 'max_crosses', 2)} in {g(k + 'whipsaw_bars', 12)}",
+                      "sjk_9_15_21.max_crosses / .whipsaw_bars"),
+                _rule("Trigger A — the bar turning into valid alignment, closing in the "
+                      "top part of its range (bottom for a short)",
+                      f"{g(k + 'breakout_body', 0.6):.0%} of the range", "sjk_9_15_21.breakout_body"),
+                _rule("Trigger B — a pullback into the ribbon (low to the 15 EMA, close "
+                      "above the 21) closing up above the 9 EMA", "on", "sjk_9_15_21.triggers"),
+                _rule("Triggers in use", g(k + "triggers", "both"), "sjk_9_15_21.triggers"),
                 _rule("Entries between (market time)",
-                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
-                      "sjk_9_15_21.from / .to"),
-                _rule("Stop: the recent swing low (long) / high (short), else the 21 EMA",
-                      f"{g(k + 'stop_mode', 'swing')}; swing = {g(k + 'swing_lookback', 3)} "
-                      f"bars each side, at most {g(k + 'max_age_bars', 24)} bars old",
-                      "sjk_9_15_21.stop_mode / .swing_lookback"),
-                _rule("Target, sold there — and the reward:risk it is judged at "
-                      "(not the desk's 1:3)", f"1:{g(k + 'rr', 2.0)}", "sjk_9_15_21.rr"),
-                _rule("Stop to breakeven at this R (0 = off), then trailed this far "
-                      "behind the best R (0 = off)",
-                      f"{g(k + 'breakeven_r', 0)}R / {g(k + 'trail_r', 0)}R",
-                      "sjk_9_15_21.breakeven_r / .trail_r"),
-                _rule("The candlestick analyst's score for it", g(k + "score", 0.9),
-                      "sjk_9_15_21.score"),
+                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}", "sjk_9_15_21.from / .to"),
+                _rule("Stop: min(lowest low of the last 5 bars, EMA 21) minus this x ATR "
+                      "(the mirror for a short)", g(k + "stop_atr", 0.2), "sjk_9_15_21.stop_atr"),
+                _rule("Target, sold there", f"1:{g(k + 'rr', 2.0)}", "sjk_9_15_21.rr"),
             ],
         })
 
     if g("sjk912_vwapadx.enabled", False):
         k = "sjk912_vwapadx."
         sections.append({
-            "title": "Strategy: SJK 9/21 · VWAP · ADX (the user's confluence model)",
-            "intro": ("A trial from 5 Oct 2026. The 9 EMA crossing the 21 EMA, on the "
-                      "right side of the session VWAP, confirmed by the NEXT candle, "
-                      "with a trending ADX. Never entered on the crossover candle "
-                      "itself."),
+            "title": "Strategy: SJK 9/21 · VWAP · ADX (the user's confluence model, v2)",
+            "intro": ("A trial. The 9 EMA crossing the 21, confirmed by the NEXT candle "
+                      "(else the setup expires), with a rising, directional ADX and the "
+                      "price on VWAP's side but not over-extended from it."),
             "rules": [
-                _rule("Buy: the 9 EMA crosses ABOVE the 21 EMA (the crossover candle), "
-                      "its close above the session VWAP; sell: the mirror",
-                      f"{g(k + 'fast', 9)} / {g(k + 'slow', 21)} EMA; VWAP of the typical "
-                      "price, reset each day", "sjk912_vwapadx.fast / .slow"),
-                _rule("The next candle must close beyond the 9 EMA and VWAP, the trade's "
-                      "way — the entry is on that close", "required", "sjk912_vwapadx"),
-                _rule("ADX on the confirmation candle above",
+                _rule("The confirmation candle closes beyond the 9 EMA, the 21 EMA and "
+                      "the session VWAP (reset each day), the trade's way", "required",
+                      "sjk912_vwapadx"),
+                _rule("ADX above this AND rising, with the trade's DI leading",
                       f"{g(k + 'adx_min', 20.0)} (ADX {g(k + 'adx_period', 14)})",
                       "sjk912_vwapadx.adx_min"),
-                _rule("Sideways / Choppy, no entry: the 9 and 21 crossing more than this "
-                      "often, or EMAs, VWAP and price inside this band",
-                      f"{g(k + 'max_crosses', 2)} in {g(k + 'chop_bars', 12)} bars; "
-                      f"{g(k + 'band_pct', 0.10)}%", "sjk912_vwapadx.max_crosses / .band_pct"),
+                _rule("No chasing: the close at most this x ATR(14) from VWAP",
+                      g(k + "vwap_cap_atr", 2.5), "sjk912_vwapadx.vwap_cap_atr"),
+                _rule("CHOPPY: ADX at or under the threshold, |EMA9 - EMA21| under this x "
+                      "ATR, or VWAP between the two EMAs", g(k + "min_spread_atr", 0.25),
+                      "sjk912_vwapadx.min_spread_atr"),
                 _rule("Entries between (market time)",
                       f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
                       "sjk912_vwapadx.from / .to"),
-                _rule("Stop: the crossover candle's low (buy) / high (sell); target, sold "
-                      "there", f"1:{g(k + 'rr', 2.0)}", "sjk912_vwapadx.rr"),
+                _rule("Stop: beyond the crossover and confirmation candles by 2 ticks, at "
+                      "least this x ATR away", g(k + "min_stop_atr", 1.0),
+                      "sjk912_vwapadx.min_stop_atr"),
+                _rule("Target 1, sold there (the backtest also runs the half-and-runner "
+                      "variant)", f"1:{g(k + 'rr', 2.0)}", "sjk912_vwapadx.rr / .exit_mode"),
             ],
         })
 
     if g("sjk912rsi.enabled", False):
         k = "sjk912rsi."
         sections.append({
-            "title": "Strategy: sjk912RSi — 9/21 EMA + RSI crossover (the user's)",
-            "intro": ("A trial from 5 Oct 2026; the same rules for TradingView in "
-                      "pine/sjk912RSi.pine. One entry per crossover."),
+            "title": "Strategy: sjk912RSi — 9/21 EMA + RSI crossover (the user's, v2)",
+            "intro": ("A trial; the same rules for TradingView in pine/sjk912RSi.pine. One "
+                      "trade per crossover cycle."),
             "rules": [
-                _rule("Buy: the 9 EMA crosses above the 21 EMA — the entry on that "
-                      "candle or within this many after it, while the 9 stays above",
-                      g(k + "cross_within", 5), "sjk912rsi.cross_within"),
-                _rule("The candle's open AND close strictly above both EMAs, and it "
-                      "closes up (close > open); a sell the mirror", "required",
-                      "sjk912rsi"),
-                _rule("RSI above (buy) / below (sell)",
-                      f"{g(k + 'rsi_level', 50.0)} (RSI {g(k + 'rsi_length', 14)})",
-                      "sjk912rsi.rsi_level"),
+                _rule("Buy within this many bars of the 9 EMA crossing above the 21 "
+                      "(still above); sell the mirror", g(k + "cross_within", 3),
+                      "sjk912rsi.cross_within"),
+                _rule("The candle closes beyond both EMAs, its low (high) clear of the 21 "
+                      "EMA, and closes the trade's way", "required", "sjk912rsi"),
+                _rule("RSI band — longs / shorts",
+                      f"{g(k + 'rsi_level', 50.0)}–{g(k + 'rsi_long_max', 68.0)} / "
+                      f"{g(k + 'rsi_short_min', 32.0)}–{g(k + 'rsi_level', 50.0)}",
+                      "sjk912rsi.rsi_long_max / .rsi_short_min"),
+                _rule("Not before this many bars into the session", g(k + "warmup_bars", 5),
+                      "sjk912rsi.warmup_bars"),
                 _rule("Entries between (market time)",
-                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}",
-                      "sjk912rsi.from / .to"),
-                _rule("Stop: the lowest low (buy) / highest high (sell) of the bars "
-                      "before the entry", g(k + "swing_lookback", 5), "sjk912rsi.swing_lookback"),
+                      f"{g(k + 'from', '09:45')} – {g(k + 'to', '15:45')}", "sjk912rsi.from / .to"),
+                _rule("Stop: the lowest low (highest high) of 5 bars, at least this x ATR "
+                      "away", g(k + "min_stop_atr", 0.5), "sjk912rsi.min_stop_atr"),
                 _rule("Target, sold there", f"1:{g(k + 'rr', 2.0)}", "sjk912rsi.rr"),
             ],
         })

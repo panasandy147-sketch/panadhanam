@@ -469,30 +469,26 @@ sjk50_200:
 # (else the 21 EMA), target 1:rr, sold there; no time stop.
 sjk_9_15_21:
   enabled: true
-  score: 0.9                # the candlestick analyst's vote, like SJK 50-200
+  score: 0.9                # the candlestick analyst's vote
   from: "09:45"             # market time (India: markets/india.yaml)
-  to: "15:45"               # US: 15 min before the close (India 15:15)
-  fast: 9                   # EMA periods on the 5m close (chart: purple)
-  mid: 15                   #   (chart: blue)
-  slow: 21                  #   (chart: dark grey)
-  min_sep_pct: 0.02         # chop filter: each EMA gap at least 0.02% of the price
-  chop_bars: 12             # ...the EMA order changed at most max_flips times
-  max_flips: 2              #    in the last chop_bars bars
-  min_slope_pct: 0.05       # ...and the 21 EMA moved 0.05% the trade's way over them
-  entry_mode: "both"        # "confirm" (the aligning close), "pullback", or both
-  swing_lookback: 3         # bars each side that make a swing high / low (3-5)
-  max_age_bars: 24          # the swing for the stop at most 2 hours old
-  stop_mode: "swing"        # "swing" (else the 21 EMA) or "ema21"
-  stop_buffer: 0.0          # beyond the swing / 21 EMA in price (0 = at it)
-  stop_ticks: 0             # ...or in ticks, at the risk desk
-  # 1:2.5 from 5 Oct 2026 (the user's default 1:2): the 40-session backtest
-  # through the account rules, both halves better in both markets, drawdown
-  # no higher — US +0.05R / -0.01R -> +0.10R / +0.10R a trade (+0.7% -> +3.7%,
-  # DD 5.8% -> 4.8%); India +0.12R / +0.21R -> +0.24R / +0.30R (+3.4% ->
-  # +5.4%, DD 2.0% both). 1:3 was worse in one half in each market.
-  rr: 2.5                   # target = entry + rr x risk (2, 2.5 or 3); judged at it
-  breakeven_r: 0            # 1.5 = stop to breakeven at +1.5R (0 = off)
-  trail_r: 0                # after breakeven, trail this many R behind the best (0 = off)
+  to: "15:45"
+  fast: 9                   # EMA periods on the 5m close (chart: purple / blue / grey)
+  mid: 15
+  slow: 21
+  # v2 (5 Oct 2026, the user's spec): CHOPPY/SIDEWAYS when |EMA9 - EMA21| <
+  # spread_atr x ATR(14), the EMAs not all sloping the trade's way, or EMA 9/21
+  # crossing max_crosses+ times in whipsaw_bars bars.
+  spread_atr: 0.35
+  whipsaw_bars: 12
+  max_crosses: 2
+  breakout_body: 0.60       # trigger A: close in the top 40% of the bar (bottom for a short)
+  triggers: "both"          # "both" (ALIGNMENT_BREAKOUT + RIBBON_PULLBACK) or "pullback"
+  swing_lookback: 5         # stop: min(lowest low of 5 bars, EMA 21) - stop_atr x ATR
+  stop_atr: 0.20
+  stop_ticks: 0             # ...the risk desk adds this many ticks beyond (0 = at it)
+  rr: 2.0                   # target 1:2; judged at it
+  breakeven_r: 0
+  trail_r: 0
 
 # SJK 9/21 · VWAP · ADX — the user's confluence model (sjk912_vwapadx, 5 Oct
 # 2026), app/strategies/sjk912_vwapadx.py. TRIAL. BUY when the 9 EMA crosses
@@ -503,24 +499,26 @@ sjk_9_15_21:
 # and price bunched in band_pct) = no entry.
 sjk912_vwapadx:
   enabled: true
-  score: 0.9                # the candlestick analyst's vote, like SJK 50-200
+  score: 0.9
   from: "09:45"             # market time (India: markets/india.yaml)
   to: "15:45"
-  fast: 9                   # EMA periods on the 5m close
+  fast: 9
   slow: 21
   adx_period: 14
   adx_smoothing: 14
-  adx_min: 20.0             # trend strength must be ABOVE this
-  chop_bars: 12             # ...and the 9/21 may cross at most max_crosses
-  max_crosses: 2            #    times in the last chop_bars bars
-  band_pct: 0.10            # ...and EMAs, VWAP and price not all inside 0.10%
-  reset_emas_daily: false   # true: EMAs and ADX restart each day (VWAP always does)
-  rr: 2.0                   # target = entry + 2 x risk; judged at it
-  exit_mode: "target"       # the live desk exits at the 1:rr target; "cross"
-                            # (the opposing 9/21 crossover) and "both" are for
-                            # the backtest only: scripts/backtest_sjk_9_15_21
-  stop_buffer: 0.0          # beyond the crossover candle's low / high (0 = at it)
-  stop_ticks: 0             # ...or in ticks, at the risk desk
+  # v2 (5 Oct 2026, the user's spec): ADX > adx_min AND rising, with the trade's
+  # DI leading; the confirmation close within vwap_cap_atr x ATR of VWAP; stop
+  # min(crossover low, confirmation low) - stop_ticks ticks, at least
+  # min_stop_atr x ATR away. CHOPPY: ADX <= 20, |EMA9 - EMA21| < min_spread_atr
+  # x ATR, or VWAP trapped between the EMAs.
+  adx_min: 20.0
+  vwap_cap_atr: 2.5
+  min_stop_atr: 1.0
+  stop_ticks: 2
+  min_spread_atr: 0.25
+  rr: 2.0                   # Target 1 at 1:2; judged at it
+  exit_mode: "target"       # live: all at Target 1. The backtest also runs "split"
+                            # (half at Target 1, the runner to the opposing crossover)
   breakeven_r: 0
   trail_r: 0
 
@@ -538,11 +536,19 @@ sjk912rsi:
   fast: 9
   slow: 21
   rsi_length: 14
+  # v2 (5 Oct 2026, the user's spec): RSI strictly inside 50-68 for a long,
+  # 32-50 for a short (no chasing exhaustion); the entry within cross_within
+  # bars of the crossover; the low (high) clear of the 21 EMA; not in the first
+  # warmup_bars bars of the session; stop min(lowest low of 5, close -
+  # min_stop_atr x ATR(14)).
   rsi_level: 50.0
-  cross_within: 5           # bars after the crossover an entry may still come
-  swing_lookback: 5         # the stop: lowest low / highest high of these bars
+  rsi_long_max: 68.0
+  rsi_short_min: 32.0
+  cross_within: 3
+  warmup_bars: 5
+  swing_lookback: 5
+  min_stop_atr: 0.5
   rr: 2.0
-  stop_buffer: 0.0
   stop_ticks: 0
   breakeven_r: 0
   trail_r: 0

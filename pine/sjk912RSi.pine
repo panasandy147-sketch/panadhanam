@@ -1,101 +1,132 @@
 //@version=5
-// sjk912RSi — 9/21 EMA + RSI crossover strategy (the user's, 5 Oct 2026).
+// sjk912RSi v2 — 9/21 EMA + RSI crossover strategy (the user's, 5 Oct 2026).
 // The same rules run in panadhanam (app/strategies/sjk912rsi.py) and are
-// backtested there with: python -m scripts.backtest_sjk_9_15_21 --strategy sjk912rsi
+// backtested there: python -m scripts.backtest_sjk_9_15_21 --strategy sjk912rsi
 //
-// LONG : EMA 9 crosses above EMA 21 (or is still above, within N bars of that
-//        crossover); the candle's open AND close strictly above both EMAs; a
-//        green candle (close > open); RSI(14) > 50. Stop: the lowest low of the
-//        5 bars before entry. Target: entry + 2 x risk.
-// SHORT: the mirror image.
-// One entry per crossover. Orders fill on the bar's close (no repainting).
-strategy("sjk912RSi", overlay = true, process_orders_on_close = true,
-         default_qty_type = strategy.percent_of_equity, default_qty_value = 10,
-         initial_capital = 100000, commission_type = strategy.commission.percent,
-         commission_value = 0.03)
+// LONG : EMA 9 crossed above EMA 21 within the last N (3) bars and is still
+//        above; close strictly above both EMAs with the LOW at or above EMA 21;
+//        a green candle; RSI strictly between 50 and 68; at least 5 bars into
+//        the session. Stop: min(lowest low of 5, close - 0.5 x ATR(14)).
+//        Target: entry + 2 x risk, locked at entry.
+// SHORT: the mirror (RSI between 32 and 50; HIGH at or below EMA 21).
+// One trade per crossover cycle. Orders fill on the bar's close.
+strategy("sjk912RSi", overlay = true, initial_capital = 100000,
+         default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
+         commission_type = strategy.commission.percent, commission_value = 0.03,
+         slippage = 2, process_orders_on_close = true, calc_on_every_tick = false)
 
 // ---- inputs -----------------------------------------------------------------
-fastLen   = input.int(9,    "Fast EMA",                  minval = 1)
-slowLen   = input.int(21,   "Slow EMA",                  minval = 2)
-rsiLen    = input.int(14,   "RSI length",                minval = 2)
-rsiLevel  = input.float(50, "RSI threshold")
-rr        = input.float(2.0, "Reward : risk (1 : x)",    minval = 0.5, step = 0.5)
-swingN    = input.int(5,    "Swing lookback (stop)",     minval = 1)
-crossN    = input.int(5,    "Enter within N bars of the crossover", minval = 0)
-useSess   = input.bool(false, "Intraday: trade only inside the session below")
-sess      = input.session("0945-1545", "Entry session (exchange time)")
+fastLen      = input.int(9,    "Fast EMA",           minval = 1)
+fastSrc      = input.source(close, "Fast EMA source")
+slowLen      = input.int(21,   "Slow EMA",           minval = 2)
+slowSrc      = input.source(close, "Slow EMA source")
+rsiLen       = input.int(14,   "RSI length",         minval = 2)
+rsiSrc       = input.source(close, "RSI source")
+rsiMid       = input.float(50, "RSI midline")
+rsiLongMax   = input.float(68, "RSI bullish cap (longs need RSI below this)")
+rsiShortMin  = input.float(32, "RSI bearish floor (shorts need RSI above this)")
+crossN       = input.int(3,    "Crossover confirmation window (N bars)", minval = 0)
+rr           = input.float(2.0, "Reward : risk (1 : x)", minval = 0.5, step = 0.5)
+swingN       = input.int(5,    "Swing lookback (stop)", minval = 1)
+atrMult      = input.float(0.50, "ATR minimum stop buffer (x ATR 14)", step = 0.05)
+warmupBars   = input.int(5,    "Session warm-up bars", minval = 0)
+squareOffMin = input.int(10,   "Square off this many minutes before the close", minval = 0)
 
 // ---- indicators -------------------------------------------------------------
-emaFast = ta.ema(close, fastLen)
-emaSlow = ta.ema(close, slowLen)
-rsi     = ta.rsi(close, rsiLen)
+ema9  = ta.ema(fastSrc, fastLen)
+ema21 = ta.ema(slowSrc, slowLen)
+rsi   = ta.rsi(rsiSrc, rsiLen)
+atr   = ta.atr(14)
 
-crossUp   = ta.crossover(emaFast, emaSlow)
-crossDown = ta.crossunder(emaFast, emaSlow)
-barsUp    = ta.barssince(crossUp)
-barsDown  = ta.barssince(crossDown)
+crossUp   = ta.crossover(ema9, ema21)
+crossDown = ta.crossunder(ema9, ema21)
 
-// One entry per crossover: remember whether this crossover has been used.
-var bool usedUp   = false
-var bool usedDown = false
-if crossUp
-    usedUp := false
-if crossDown
-    usedDown := false
+// One trade per crossover cycle: re-armed ONLY by a new crossover / crossunder.
+var bool enteredOnCurrentCross = false
+if crossUp or crossDown
+    enteredOnCurrentCross := false
 
-inSession = not useSess or not na(time(timeframe.period, sess))
+// Bars into the current session (prevents the prior day's gap from feeding
+// the 5-bar swing lookback).
+var int sessionBars = 0
+sessionBars := session.isfirstbar ? 1 : sessionBars + 1
+warm = sessionBars > warmupBars
+
+// Minutes left in the session, for the intraday square-off.
+minsLeft = (time_close("D") - time) / 60000
+squareNow = minsLeft <= squareOffMin
 
 // ---- entry conditions -------------------------------------------------------
-upTrend   = emaFast > emaSlow and barsUp <= crossN and not usedUp
-downTrend = emaFast < emaSlow and barsDown <= crossN and not usedDown
-
-longCond  = upTrend and open > emaFast and open > emaSlow and close > emaFast and
-             close > emaSlow and close > open and rsi > rsiLevel and inSession
-shortCond = downTrend and open < emaFast and open < emaSlow and close < emaFast and
-             close < emaSlow and close < open and rsi < rsiLevel and inSession
-
-// Stops from the bars BEFORE the entry bar.
-swingLow  = ta.lowest(low, swingN)[1]
-swingHigh = ta.highest(high, swingN)[1]
-
-var float longStop  = na
-var float longTgt   = na
-var float shortStop = na
-var float shortTgt  = na
+longCond = ta.barssince(crossUp) <= crossN and ema9 > ema21 and
+     close > ema9 and close > ema21 and low >= ema21 and
+     rsi > rsiMid and rsi < rsiLongMax and close > open and warm and not squareNow
+shortCond = ta.barssince(crossDown) <= crossN and ema9 < ema21 and
+     close < ema9 and close < ema21 and high <= ema21 and
+     rsi < rsiMid and rsi > rsiShortMin and close < open and warm and not squareNow
 
 flat = strategy.position_size == 0
-if longCond and flat and close > swingLow
-    longStop := swingLow
-    longTgt  := close + (close - swingLow) * rr
-    usedUp   := true
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long exit", "Long", stop = longStop, limit = longTgt)
-if shortCond and flat and close < swingHigh
-    shortStop := swingHigh
-    shortTgt  := close - (swingHigh - close) * rr
-    usedDown  := true
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short exit", "Short", stop = shortStop, limit = shortTgt)
+longNow  = longCond and flat and not enteredOnCurrentCross
+shortNow = shortCond and flat and not enteredOnCurrentCross
 
-// Intraday: flat at the end of the entry session when that option is on.
-if useSess and not inSession and strategy.position_size != 0
-    strategy.close_all("Session end")
+// Levels locked at the entry bar; they never move mid-trade.
+var float entryPx = na
+var float stopPx  = na
+var float tgtPx   = na
+
+if longNow
+    rawStop = ta.lowest(low, swingN)
+    entryPx := close
+    stopPx  := math.min(rawStop, close - atrMult * atr)
+    tgtPx   := entryPx + (entryPx - stopPx) * rr
+    enteredOnCurrentCross := true
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long exit", "Long", stop = stopPx, limit = tgtPx)
+if shortNow
+    rawStop = ta.highest(high, swingN)
+    entryPx := close
+    stopPx  := math.max(rawStop, close + atrMult * atr)
+    tgtPx   := entryPx - (stopPx - entryPx) * rr
+    enteredOnCurrentCross := true
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short exit", "Short", stop = stopPx, limit = tgtPx)
+
+// Intraday: out before the close.
+if squareNow and strategy.position_size != 0
+    strategy.close_all("Square-off")
 
 // ---- visuals ----------------------------------------------------------------
-plot(emaFast, "EMA 9",  color = color.green, linewidth = 2)
-plot(emaSlow, "EMA 21", color = color.red,   linewidth = 2)
-
-longNow  = longCond and flat and close > swingLow
-shortNow = shortCond and flat and close < swingHigh
+plot(ema9,  "EMA 9",  color = color.green, linewidth = 2)
+plot(ema21, "EMA 21", color = color.red,   linewidth = 2)
+inPos = strategy.position_size != 0
+plot(inPos ? stopPx : na, "Stop loss",   color = color.red,   style = plot.style_linebr)
+plot(inPos ? tgtPx  : na, "Take profit", color = color.green, style = plot.style_linebr)
 plotshape(longNow,  "Long entry",  shape.triangleup,   location.belowbar, color.green, size = size.small, text = "BUY")
 plotshape(shortNow, "Short entry", shape.triangledown, location.abovebar, color.red,   size = size.small, text = "SELL")
 
-inLong  = strategy.position_size > 0
-inShort = strategy.position_size < 0
-plot(inLong  ? longStop  : na, "Long stop",    color = color.red,   style = plot.style_linebr, linewidth = 1)
-plot(inLong  ? longTgt   : na, "Long target",  color = color.green, style = plot.style_linebr, linewidth = 1)
-plot(inShort ? shortStop : na, "Short stop",   color = color.red,   style = plot.style_linebr, linewidth = 1)
-plot(inShort ? shortTgt  : na, "Short target", color = color.green, style = plot.style_linebr, linewidth = 1)
+// ---- on-chart summary (top right) -------------------------------------------
+var table summary = table.new(position.top_right, 2, 6, border_width = 1)
+if barstate.islastconfirmedhistory or barstate.islast
+    total  = strategy.closedtrades
+    wins   = strategy.wintrades
+    grossW = strategy.grossprofit
+    grossL = strategy.grossloss
+    netR = 0.0
+    // Each closed trade is +rr R (target) or -1 R (stop); square-offs count by sign.
+    if total > 0
+        for i = 0 to total - 1
+            netR += strategy.closedtrades.profit(i) > 0 ? rr : -1
+    table.cell(summary, 0, 0, "sjk912RSi", text_color = color.white, bgcolor = color.gray)
+    table.cell(summary, 1, 0, "",          bgcolor = color.gray)
+    table.cell(summary, 0, 1, "Total Trades")
+    table.cell(summary, 1, 1, str.tostring(total))
+    table.cell(summary, 0, 2, "Win Rate %")
+    table.cell(summary, 1, 2, total > 0 ? str.tostring(100.0 * wins / total, "#.0") : "—")
+    table.cell(summary, 0, 3, "Profit Factor")
+    table.cell(summary, 1, 3, grossL > 0 ? str.tostring(grossW / grossL, "#.00") : "—")
+    table.cell(summary, 0, 4, "Net R-Multiple")
+    table.cell(summary, 1, 4, str.tostring(netR, "#.0"))
+    table.cell(summary, 0, 5, "Max Drawdown %")
+    table.cell(summary, 1, 5, str.tostring(100.0 * strategy.max_drawdown / strategy.initial_capital, "#.00"))
 
 // ---- alerts -----------------------------------------------------------------
 alertcondition(longNow,  "sjk912RSi Long",  "sjk912RSi: LONG entry on {{ticker}} at {{close}}")

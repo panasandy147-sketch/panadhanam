@@ -1,252 +1,295 @@
-"""SJK 9-15-21 — the 9 / 15 / 21 EMA Master Strategy (the user's, 5 Oct 2026).
+"""SJK 9-15-21 — the 9 / 15 / 21 EMA Master Trading Strategy, v2 (the user's, 5 Oct 2026).
 
-    LONG   the EMAs fanned out upward: 9 > 15 > 21, separated (not
-           intertwined, not flat). Enter on the close of the candle where that
-           alignment CONFIRMS, or on a pullback whose low touches the 9 EMA
-           (the 9/15 band) and closes back above it, higher than the bar
-           before. Stop: below the recent swing low, or just below the 21 EMA
-           when there is no swing low beneath the entry. Target: 1:rr (2).
-    SHORT  the mirror: 21 > 15 > 9 fanned out downward; the confirming close,
-           or a rejection after a pullback up to the 9 EMA.
-    NONE   "Sideways / Choppy": the EMAs out of order, crossing repeatedly,
-           squeezed together or flat. No new order.
+    LONG   strict ascending fan-out: EMA 9 > EMA 15 > EMA 21, all three rising
+           (EMA[t] > EMA[t-1]), and not Sideways / Choppy.
+           Trigger A  ALIGNMENT_BREAKOUT: the exact bar the market turns into
+                      that valid alignment, on a green candle closing in the
+                      top 40% of its range ((close - low) >= 0.6 x range).
+           Trigger B  RIBBON_PULLBACK: while the alignment holds, the low dips
+                      into the ribbon (low <= EMA 15) without a close under
+                      the 21 (close >= EMA 21), and the candle closes up and
+                      above the 9 EMA.
+           Stop: min(lowest low of the last 5 bars, EMA 21) - 0.2 x ATR(14).
+           Target: entry + rr (2) x risk.
+    SHORT  the mirror (21 > 15 > 9, all falling).
+    NONE   CHOPPY/SIDEWAYS — any of: |EMA9 - EMA21| < spread_atr (0.35) x
+           ATR(14); the three EMAs not all sloping the trade's way; EMA 9 and
+           21 crossing 2+ times in the last 12 bars.
 
-The parts, each a function below:
+One ALIGNMENT_BREAKOUT and one RIBBON_PULLBACK at most per alignment cycle
+(NEUTRAL -> BULL_CYCLE / BEAR_CYCLE; the cycle ends when the EMA order
+breaks), one position at a time, intraday.
 
-  1. ema()                     the 9, 15 and 21 EMAs of the close
-  2. alignment()               +1 bullish fan, -1 bearish fan, 0 no order
-  3. chop_reason()             why the market is Sideways / Choppy, or ""
-  4. market_state()            the state on the latest bar, for the panels
-  5. entry_trigger()           the confirming close / the pullback at bar t
-  6. stop_and_target()         the swing (or 21 EMA) stop and the 1:rr target
-  7. detect()                  the setup on the LATEST closed bar, or None
-  8. backtest() / summary()    the strategy alone over historical candles
-
-One trade per continuous alignment: detect() fires only on the FIRST trigger
-of the current run of same-order EMAs (at or after `start`, the session's
-window), so the same fan-out never fires twice. A cross of the EMAs ends the
-run; a new run may trade again.
-
-detect() works on plain lists of floats, so the same function serves the
-live desk, backtest() below and the tests (panaoptions carries the same code
-in panaoptions/strategies/sjk_9_15_21.py; the two apps share no code).
+The parts: ema_step / Atr (from sjk912_vwapadx), chop_reason(),
+SJK91521Engine.on_bar_update() -> TradeSignal, calculate_signals(history),
+detect_candles() for the live desk, engine_backtest() with per-trigger
+attribution, and the generic bar walker backtest() (SJK 50-200 uses it).
+panaoptions carries the same engine in panaoptions/strategies/sjk_9_15_21.py.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import deque
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from app.strategies.sjk50_200 import ema, swing_highs, swing_lows
+from app.strategies.sjk912_vwapadx import Atr, ema_step
 
 KEY = "sjk_9_15_21"                     # the settings section
 SETUP_NAME = "SJK 9-15-21 · EMA Fan"
-SIDEWAYS = "Sideways / Choppy"
+SIDEWAYS = "CHOPPY/SIDEWAYS"
+BREAKOUT, PULLBACK = "ALIGNMENT_BREAKOUT", "RIBBON_PULLBACK"
+NEUTRAL, BULL, BEAR = "NEUTRAL", "BULL_CYCLE", "BEAR_CYCLE"
 # Chart colours (the dashboards draw the same three lines).
 COLOURS = {"fast": "#a855f7", "mid": "#3b82f6", "slow": "#6b7280"}   # purple, blue, dark grey
 
 
-# --------------------------------------------------------------------------- #
-# 2. Alignment
-# --------------------------------------------------------------------------- #
-def alignment(fast: float, mid: float, slow: float) -> int:
-    """+1 when 9 > 15 > 21 (bullish fan), -1 when 21 > 15 > 9, else 0."""
-    if fast > mid > slow:
-        return 1
-    if fast < mid < slow:
-        return -1
-    return 0
+@dataclass
+class TradeSignal:
+    """The output contract."""
+    timestamp: Any
+    signal_type: str = "HOLD"              # BUY / SELL / HOLD / EXIT
+    trigger_mode: str = ""                 # ALIGNMENT_BREAKOUT / RIBBON_PULLBACK
+    entry_price: float | None = None       # the entry, or the exit price on an EXIT
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
+    risk_reward_ratio: float | None = None
+    reason: str = ""
+    metadata: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        ts = out["timestamp"]
+        out["timestamp"] = ts.isoformat() if hasattr(ts, "isoformat") else ts
+        return out
 
 
-# --------------------------------------------------------------------------- #
-# 3. The chop filter
-# --------------------------------------------------------------------------- #
-def chop_reason(ef: Sequence[float], em: Sequence[float], es: Sequence[float],
-                closes: Sequence[float], i: int, flips: Sequence[int],
-                min_sep_pct: float, chop_bars: int, max_flips: int,
-                min_slope_pct: float) -> str:
-    """'' when bar i trends cleanly, else why it is Sideways / Choppy.
-
-    `flips[t]` counts the changes of EMA order up to bar t (a prefix sum),
-    so the crossings in the last `chop_bars` bars cost one subtraction."""
-    d = alignment(ef[i], em[i], es[i])
-    if d == 0:
-        return "the 9 / 15 / 21 EMAs are intertwined (no clear order)"
-    lo = max(0, i - chop_bars)
-    crossed = flips[i] - flips[lo]
-    if crossed > max_flips:
-        return f"the EMAs changed order {crossed} times in the last {chop_bars} bars"
-    price = float(closes[i]) or 1.0
-    gap = min_sep_pct / 100.0 * price
-    if (ef[i] - em[i]) * d < gap or (em[i] - es[i]) * d < gap:
-        return (f"the EMAs are squeezed together (each gap under {min_sep_pct:g}% "
-                f"of the price)")
-    slope = (es[i] - es[lo]) * d / price * 100.0
-    if slope < min_slope_pct:
-        return (f"the 21 EMA is flat ({slope:+.2f}% over {i - lo} bars, needs "
-                f"{min_slope_pct:g}% its way)")
+def chop_reason(d: int, e9: float, e15: float, e21: float, slopes: tuple[float, float, float],
+                atr: float, crosses_recent: int, spread_atr: float = 0.35,
+                max_crosses: int = 2) -> str:
+    """'' when the fan-out in direction d is clean, else why it is CHOPPY/SIDEWAYS."""
+    if abs(e9 - e21) < spread_atr * atr:
+        return f"spread compression: |EMA9 - EMA21| < {spread_atr:g} x ATR"
+    if not all((s * d) > 0 for s in slopes):
+        return "slope divergence: the 9, 15 and 21 EMAs are not all sloping the same way"
+    if crosses_recent >= max_crosses:
+        return f"whip-saw: EMA 9 and 21 crossed {crosses_recent} times in the last 12 bars"
     return ""
 
 
-def _flip_counts(ef, em, es) -> list[int]:
-    """Prefix sum of EMA-order changes: out[t] = changes in bars 1..t."""
-    out, total, prev = [0], 0, alignment(ef[0], em[0], es[0])
-    for t in range(1, len(ef)):
-        cur = alignment(ef[t], em[t], es[t])
-        total += cur != prev
-        prev = cur
-        out.append(total)
-    return out
+def _hm(value: str) -> int:
+    h, _, m = str(value).partition(":")
+    return int(h) * 60 + int(m or 0)
 
 
-# --------------------------------------------------------------------------- #
-# 4. The market state (for the panels and the skip log)
-# --------------------------------------------------------------------------- #
-def market_state(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
-                 fast: int = 9, mid: int = 15, slow: int = 21, min_sep_pct: float = 0.02,
-                 chop_bars: int = 12, max_flips: int = 2, min_slope_pct: float = 0.05,
-                 **_: Any) -> tuple[str, str]:
-    """("Bullish fan" | "Bearish fan" | "Sideways / Choppy", why)."""
-    if len(closes) < 2:
-        return SIDEWAYS, "not enough bars"
-    ef, em, es = ema(closes, fast), ema(closes, mid), ema(closes, slow)
-    i = len(closes) - 1
-    why = chop_reason(ef, em, es, closes, i, _flip_counts(ef, em, es),
-                      min_sep_pct, chop_bars, max_flips, min_slope_pct)
-    if why:
-        return SIDEWAYS, why
-    return ("Bullish fan" if alignment(ef[i], em[i], es[i]) > 0 else "Bearish fan"), ""
+class SJK91521Engine:
+    """Feed closed bars with on_bar_update(); one TradeSignal each."""
 
+    def __init__(self, fast: int = 9, mid: int = 15, slow: int = 21, atr_period: int = 14,
+                 swing: int = 5, stop_atr: float = 0.20, rr: float = 2.0,
+                 spread_atr: float = 0.35, whipsaw_bars: int = 12, max_crosses: int = 2,
+                 breakout_body: float = 0.60, triggers: str = "both",
+                 tz: str | None = None, window: tuple[str, str] | None = None,
+                 square_off: str | None = None, **_: Any) -> None:
+        self.n = (fast, mid, slow)
+        self.swing, self.stop_atr, self.rr = swing, stop_atr, rr
+        self.spread_atr, self.whipsaw_bars, self.max_crosses = spread_atr, whipsaw_bars, max_crosses
+        self.body, self.triggers = breakout_body, triggers      # "both" | "pullback" | "breakout"
+        self.tz, self.window, self.square_off = tz, window, square_off
+        self.e: list[float | None] = [None, None, None]
+        self.atr = Atr(atr_period)
+        self.lows: deque[float] = deque(maxlen=swing)
+        self.highs: deque[float] = deque(maxlen=swing)
+        self.crosses: deque[int] = deque()
+        self.bar_no = 0
+        self.valid_prev = 0
+        self.cycle = NEUTRAL
+        self.used: set[str] = set()
+        self.position: dict[str, Any] | None = None
+        self.day: Any = None
+        self.state = NEUTRAL
 
-# --------------------------------------------------------------------------- #
-# 5. The entry trigger
-# --------------------------------------------------------------------------- #
-def entry_trigger(t: int, d: int, trend: Sequence[int], highs, lows, closes,
-                  ef, em, es, mode: str = "both") -> str:
-    """'' or the kind of entry at bar t in direction d (trend[t] must be d):
+    def _local(self, ts: Any) -> Any:
+        if self.tz and getattr(ts, "tzinfo", None):
+            from zoneinfo import ZoneInfo
+            return ts.astimezone(ZoneInfo(self.tz))
+        return ts
 
-    'alignment confirmed'  the first bar of a clean fan-out (trend[t-1] != d)
-    'pullback to the 9/15 band'  low touched the 9 EMA, held above the 21 and
-                           closed back above the 9, higher than the bar before
-                           (the mirror for a short)"""
-    if t < 1 or trend[t] != d:
-        return ""
-    if mode in ("both", "confirm") and trend[t - 1] != d:
-        return "alignment confirmed"
-    if mode in ("both", "pullback"):
-        if d > 0 and lows[t] <= max(ef[t], em[t]) and lows[t] > es[t] \
-                and closes[t] > ef[t] and closes[t] > closes[t - 1]:
-            return "pullback to the 9/15 band"
-        if d < 0 and highs[t] >= min(ef[t], em[t]) and highs[t] < es[t] \
-                and closes[t] < ef[t] and closes[t] < closes[t - 1]:
-            return "rejection at the 9/15 band"
-    return ""
+    def on_bar_update(self, bar: Any) -> TradeSignal:
+        ts = bar.ts
+        at = self._local(ts)
+        o, h, lo, c = float(bar.open), float(bar.high), float(bar.low), float(bar.close)
+        day = at.date() if hasattr(at, "date") else None
+        new_day = day != self.day
+        self.day = day
+        prev = list(self.e)
+        self.e = [ema_step(self.e[k], c, self.n[k]) for k in range(3)]
+        e9, e15, e21 = self.e
+        atr = self.atr.update(h, lo, c)
+        self.bar_no += 1
+        self.lows.append(lo)
+        self.highs.append(h)
+        if prev[0] is not None and (prev[0] - prev[2]) * (e9 - e21) < 0:
+            self.crosses.append(self.bar_no)
+        while self.crosses and self.crosses[0] <= self.bar_no - self.whipsaw_bars:
+            self.crosses.popleft()
+        meta = {"ema9": round(e9, 4), "ema15": round(e15, 4), "ema21": round(e21, 4),
+                "atr14": None if atr is None else round(atr, 4)}
+        sig = TradeSignal(timestamp=ts, metadata=meta)
 
+        # ---- the alignment cycle (raw EMA order)
+        order = 1 if e9 > e15 > e21 else -1 if e9 < e15 < e21 else 0
+        cycle = BULL if order > 0 else BEAR if order < 0 else NEUTRAL
+        if cycle != self.cycle:
+            self.cycle, self.used = cycle, set()
+        # ---- valid alignment: order + slopes + no chop
+        valid, why = 0, ""
+        if order and atr is not None and prev[2] is not None:
+            slopes = (e9 - prev[0], e15 - prev[1], e21 - prev[2])
+            why = chop_reason(order, e9, e15, e21, slopes, atr, len(self.crosses),
+                              self.spread_atr, self.max_crosses)
+            valid = 0 if why else order
+        elif not order:
+            why = "the 9 / 15 / 21 EMAs are out of order"
+        self.state = SIDEWAYS if why else self.cycle
+        was_valid, self.valid_prev = self.valid_prev, valid
 
-# --------------------------------------------------------------------------- #
-# 6. Stop and target
-# --------------------------------------------------------------------------- #
-def stop_and_target(i: int, d: int, highs, lows, closes, es, lookback: int,
-                    max_age: int, rr: float, stop_mode: str, tick: float
-                    ) -> tuple[float, float, str] | None:
-    """(stop, target, where the stop came from), or None when there is no
-    risk to define. stop_mode 'swing' (default): the most recent confirmed
-    swing low (high) of the last max_age bars beyond the entry, else the 21
-    EMA; 'ema21': always just beyond the 21 EMA."""
-    entry = float(closes[i])
-    stop, source = None, ""
-    if stop_mode != "ema21":
-        start = max(0, i - max_age - lookback)
+        # ---- the open position
+        if self.position is not None:
+            p = self.position
+            if new_day:
+                return self._exit(ts, p["last_close"], "session ended", meta)
+            long = p["direction"] > 0
+            p["last_close"] = c
+            if (lo <= p["stop"]) if long else (h >= p["stop"]):
+                return self._exit(ts, p["stop"], "stop", meta)
+            if (h >= p["target"]) if long else (lo <= p["target"]):
+                return self._exit(ts, p["target"], "target", meta)
+            if self.square_off and hasattr(at, "hour") and \
+                    at.hour * 60 + at.minute >= _hm(self.square_off):
+                return self._exit(ts, c, "square-off", meta)
+            sig.reason = "in a position"
+            return sig
+
+        if not valid:
+            sig.reason = f"{SIDEWAYS}: {why}" if why else ""
+            return sig
+        d = valid
+        rng = h - lo
+        mode = ""
+        if self.triggers in ("both", "breakout") and was_valid != d and BREAKOUT not in self.used:
+            body_ok = (c > o and (c - lo) >= self.body * rng) if d > 0 else \
+                      (c < o and (h - c) >= self.body * rng)
+            if rng > 0 and body_ok:
+                mode = BREAKOUT
+        if not mode and self.triggers in ("both", "pullback") and was_valid == d \
+                and PULLBACK not in self.used:
+            if d > 0 and lo <= e15 and c >= e21 and c > e9 and c > o:
+                mode = PULLBACK
+            elif d < 0 and h >= e15 and c <= e21 and c < e9 and c < o:
+                mode = PULLBACK
+        if not mode:
+            return sig
+        if self.window and hasattr(at, "hour"):
+            m = at.hour * 60 + at.minute
+            if not (_hm(self.window[0]) <= m < _hm(self.window[1])):
+                sig.reason = "outside the entry window"
+                return sig
         if d > 0:
-            cands = [k for k in swing_lows(lows, lookback, start) if i - max_age <= k < i
-                     and lows[k] < entry]
-            if cands:
-                stop, source = float(lows[cands[-1]]) - tick, f"swing low {lows[cands[-1]]:,.2f}"
+            stop = min(min(self.lows), e21) - self.stop_atr * atr
         else:
-            cands = [k for k in swing_highs(highs, lookback, start) if i - max_age <= k < i
-                     and highs[k] > entry]
-            if cands:
-                stop, source = float(highs[cands[-1]]) + tick, f"swing high {highs[cands[-1]]:,.2f}"
-    if stop is None:
-        stop = float(es[i]) - tick if d > 0 else float(es[i]) + tick
-        source = f"the 21 EMA {es[i]:,.2f}"
-    risk = (entry - stop) * d
-    if risk <= 0:
-        return None
-    return round(stop, 4), round(entry + d * rr * risk, 4), source
+            stop = max(max(self.highs), e21) + self.stop_atr * atr
+        risk = (c - stop) * d
+        if risk <= 0:
+            return sig
+        self.used.add(mode)
+        target = c + d * self.rr * risk
+        sig.signal_type = "BUY" if d > 0 else "SELL"
+        sig.trigger_mode = mode
+        sig.entry_price, sig.stop_loss_price = round(c, 4), round(stop, 4)
+        sig.take_profit_price, sig.risk_reward_ratio = round(target, 4), self.rr
+        sig.reason = (f"{'ascending' if d > 0 else 'descending'} 9/15/21 fan-out, all sloping "
+                      f"{'up' if d > 0 else 'down'}; {mode.lower().replace('_', ' ')}")
+        sig.metadata = {**meta, "risk": round(risk, 4),
+                        "stop_atr": round(risk / atr, 2) if atr else None}
+        self.position = {"direction": d, "entry": c, "stop": stop, "target": target,
+                         "last_close": c, "mode": mode}
+        return sig
+
+    def calculate_signals(self, history: list[Any]) -> list[TradeSignal]:
+        return [self.on_bar_update(b) for b in history]
+
+    def _exit(self, ts: Any, price: float, why: str, meta: dict[str, Any]) -> TradeSignal:
+        p, self.position = self.position, None
+        d = p["direction"]
+        r = (price - p["entry"]) * d / abs(p["entry"] - p["stop"])
+        return TradeSignal(timestamp=ts, signal_type="EXIT", trigger_mode=p["mode"],
+                           entry_price=round(price, 4), reason=why,
+                           metadata={**meta, "r": round(r, 3),
+                                     "direction": "LONG" if d > 0 else "SHORT"})
 
 
-# --------------------------------------------------------------------------- #
-# 7. The setup
-# --------------------------------------------------------------------------- #
-def detect(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
-           fast: int = 9, mid: int = 15, slow: int = 21, lookback: int = 3,
-           min_sep_pct: float = 0.02, chop_bars: int = 12, max_flips: int = 2,
-           min_slope_pct: float = 0.05, rr: float = 2.0, stop_mode: str = "swing",
-           tick: float = 0.0, max_age: int = 24, entry_mode: str = "both",
-           start: int = 0) -> dict[str, Any] | None:
-    """The SJK 9-15-21 setup on the LATEST bar (index -1), or None.
-
-    `start`: the first bar a trigger may count from (the session's window);
-    an earlier trigger in the same run does not use up this run's one trade.
-    Returns {direction, entry, stop, target, kind, stop_source, ema_fast,
-    ema_mid, ema_slow, run_start, note}.
-    """
-    n = len(closes)
-    if n < max(3 * slow, chop_bars + 2 * lookback + 2) or not (len(highs) == len(lows) == n):
-        return None
-    ef, em, es = ema(closes, fast), ema(closes, mid), ema(closes, slow)
-    i = n - 1
-    d = alignment(ef[i], em[i], es[i])
-    if d == 0:
-        return None
-    # The current run of same-order EMAs (bounded: a day and a half of 5m bars).
-    s = i
-    while s - 1 >= max(0, i - 120) and alignment(ef[s - 1], em[s - 1], es[s - 1]) == d:
-        s -= 1
-    flips = _flip_counts(ef, em, es)
-    trend = [0] * n
-    for t in range(max(1, s - 1), i + 1):
-        if not chop_reason(ef, em, es, closes, t, flips, min_sep_pct, chop_bars,
-                           max_flips, min_slope_pct):
-            trend[t] = alignment(ef[t], em[t], es[t])
-    if trend[i] != d:
-        return None                                    # Sideways / Choppy now
-    first, kind = None, ""
-    for t in range(max(s, start, 1), i + 1):
-        kind = entry_trigger(t, d, trend, highs, lows, closes, ef, em, es, entry_mode)
-        if kind:
-            first = t
-            break
-    if first != i:
-        return None                                    # nothing yet, or already fired
-    levels = stop_and_target(i, d, highs, lows, closes, es, lookback, max_age, rr,
-                             stop_mode, tick)
-    if levels is None:
-        return None
-    stop, target, source = levels
-    side = "LONG" if d > 0 else "SHORT"
-    order = "9 > 15 > 21" if d > 0 else "21 > 15 > 9"
-    return {"direction": side, "entry": float(closes[i]), "stop": stop, "target": target,
-            "kind": kind, "stop_source": source, "ema_fast": ef[i], "ema_mid": em[i],
-            "ema_slow": es[i], "run_start": s,
-            "note": (f"EMAs fanned {order} ({ef[i]:,.2f} / {em[i]:,.2f} / {es[i]:,.2f}), "
-                     f"separated and trending; {kind} at {closes[i]:,.2f}; stop at "
-                     f"{source}")}
-
-
-def params(cfg: Any) -> dict[str, Any]:
-    """detect()'s settings from the sjk_9_15_21: section."""
+def engine_from(cfg: Any, tz: str | None = None, **over: Any) -> SJK91521Engine:
     g = cfg.get
     p = f"{KEY}."
-    return {"fast": int(g(p + "fast", 9)), "mid": int(g(p + "mid", 15)),
-            "slow": int(g(p + "slow", 21)), "lookback": int(g(p + "swing_lookback", 3)),
-            "min_sep_pct": float(g(p + "min_sep_pct", 0.02)),
-            "chop_bars": int(g(p + "chop_bars", 12)), "max_flips": int(g(p + "max_flips", 2)),
-            "min_slope_pct": float(g(p + "min_slope_pct", 0.05)),
-            "rr": float(g(p + "rr", 2.0)), "stop_mode": str(g(p + "stop_mode", "swing")),
-            "tick": float(g(p + "stop_buffer", 0.0) or 0.0),
-            "max_age": int(g(p + "max_age_bars", 24)),
-            "entry_mode": str(g(p + "entry_mode", "both"))}
+    kw = dict(fast=int(g(p + "fast", 9)), mid=int(g(p + "mid", 15)), slow=int(g(p + "slow", 21)),  # noqa: C408
+              swing=int(g(p + "swing_lookback", 5)), stop_atr=float(g(p + "stop_atr", 0.20)),
+              rr=float(g(p + "rr", 2.0)), spread_atr=float(g(p + "spread_atr", 0.35)),
+              whipsaw_bars=int(g(p + "whipsaw_bars", 12)),
+              max_crosses=int(g(p + "max_crosses", 2)),
+              breakout_body=float(g(p + "breakout_body", 0.60)),
+              triggers=str(g(p + "triggers", "both")), tz=tz,
+              window=(str(g(p + "from", "09:45")), str(g(p + "to", "15:45"))),
+              square_off=str(g("system.square_off_time", "15:15")))
+    kw.update(over)
+    return SJK91521Engine(**kw)
+
+
+def detect_candles(bars: list[Any], cfg: Any, tz: str) -> dict[str, Any] | None:
+    """A BUY / SELL on the LATEST closed 5m candle, for the analyst, or None."""
+    if len(bars) < 30:
+        return None
+    eng = engine_from(cfg, tz)
+    sig = None
+    for b in bars:
+        sig = eng.on_bar_update(b)
+    if sig is None or sig.signal_type not in ("BUY", "SELL"):
+        return None
+    long = sig.signal_type == "BUY"
+    m = sig.metadata or {}
+    return {"direction": "LONG" if long else "SHORT", "entry": sig.entry_price,
+            "stop": sig.stop_loss_price, "target": sig.take_profit_price,
+            "kind": sig.trigger_mode, "ema_fast": m.get("ema9"), "ema_mid": m.get("ema15"),
+            "ema_slow": m.get("ema21"), "ts": bars[-1].ts.isoformat(), "setup": SETUP_NAME,
+            "note": f"{sig.reason}; stop {sig.stop_loss_price:,.2f} "
+                    f"({m.get('stop_atr')} x ATR)"}
+
+
+def engine_backtest(bars: list[Any], cfg: Any, tz: str, cost_pct: float = 0.0,
+                    **over: Any) -> list[dict[str, Any]]:
+    """The engine over historical candles; each trade tagged with its trigger
+    mode (attribution) and its stop distance in ATR."""
+    over.pop("warmup", None)
+    over.pop("detector", None)
+    eng = engine_from(cfg, tz, **over)
+    trades: list[dict[str, Any]] = []
+    open_: dict[str, Any] | None = None
+    for b in bars:
+        sig = eng.on_bar_update(b)
+        if sig.signal_type in ("BUY", "SELL"):
+            open_ = {"ts": b.ts.isoformat(),
+                     "direction": "LONG" if sig.signal_type == "BUY" else "SHORT",
+                     "entry": sig.entry_price, "stop": sig.stop_loss_price,
+                     "target": sig.take_profit_price,
+                     "risk": abs(sig.entry_price - sig.stop_loss_price),
+                     "kind": sig.trigger_mode, "stop_atr": (sig.metadata or {}).get("stop_atr")}
+        elif sig.signal_type == "EXIT" and open_ is not None:
+            cost_r = cost_pct / 100.0 * open_["entry"] / open_["risk"] if open_["risk"] else 0.0
+            outcome = {"stop": "STOP", "target": "TARGET"}.get(sig.reason, "SQUARE_OFF")
+            trades.append({**open_, "exit": sig.entry_price, "exit_ts": b.ts.isoformat(),
+                           "outcome": outcome,
+                           "r": round(float((sig.metadata or {}).get("r", 0.0)) - cost_r, 3)})
+            open_ = None
+    return trades
 
 
 def _minutes(hhmm: str) -> int:
@@ -274,25 +317,6 @@ def session_start(bars: list[Any], tz: str, opens: str) -> int:
         if at.date() != day or at.hour * 60 + at.minute < start:
             return pos + 1
     return 0
-
-
-def detect_candles(bars: list[Any], cfg: Any, tz: str) -> dict[str, Any] | None:
-    """SJK 9-15-21 on the latest CLOSED 5m candle, inside sjk_9_15_21.from -
-    .to on the market's clock, or None. Adds `ts` (that candle), `setup` and
-    `state` (the market state)."""
-    if not bars:
-        return None
-    at = _local(bars[-1].ts, tz)
-    now_m = at.hour * 60 + at.minute
-    opens = str(cfg.get(f"{KEY}.from", "09:45"))
-    if not (_minutes(opens) <= now_m < _minutes(cfg.get(f"{KEY}.to", "15:45"))):
-        return None
-    h, lo, c = ([float(b.high) for b in bars], [float(b.low) for b in bars],
-                [float(b.close) for b in bars])
-    found = detect(h, lo, c, start=session_start(bars, tz, opens), **params(cfg))
-    if found:
-        found = {**found, "ts": bars[-1].ts.isoformat(), "setup": SETUP_NAME}
-    return found
 
 
 # --------------------------------------------------------------------------- #

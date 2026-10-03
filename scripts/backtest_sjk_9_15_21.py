@@ -36,7 +36,7 @@ from app.strategies import sjk_9_15_21 as fan  # noqa: E402
 
 # --strategy -> (settings section, name, detector, warmup bars, extra history)
 STRATEGIES = {
-    "sjk_9_15_21": ("sjk_9_15_21", "SJK 9-15-21", fan.detect_candles, 63, 300),
+    "sjk_9_15_21": ("sjk_9_15_21", "SJK 9-15-21", None, 63, 300),
     "sjk50_200": ("sjk50_200", "SJK 50-200", sjk50_200.detect_candles, 210, 700),
     # Its own engine walks the bars (and exits on the opposing crossover
     # when exit_mode says so): detector None = sjk912_vwapadx.backtest.
@@ -44,7 +44,8 @@ STRATEGIES = {
     "sjk912rsi": ("sjk912rsi", "sjk912RSi", None, 30, 300),
 }
 # The engines that walk the bars themselves.
-OWN_WALK = {"sjk912_vwapadx": sjk912_vwapadx.backtest, "sjk912rsi": sjk912rsi.backtest}
+OWN_WALK = {"sjk912_vwapadx": sjk912_vwapadx.backtest, "sjk912rsi": sjk912rsi.backtest,
+            "sjk_9_15_21": fan.engine_backtest}
 
 
 async def trades_for(feed, cfg, symbols: list[str], days: int, tz: str,
