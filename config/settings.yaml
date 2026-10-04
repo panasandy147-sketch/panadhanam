@@ -30,6 +30,8 @@ risk:
   # GENERAL setups only: no short below short_min RSI, no long above
   # long_max (stretched moves snap back). Off here; set per market.
   rsi_guard: {enabled: false, short_min: 25, long_max: 75}
+  # No more entries after this many losing trades in a day (0 = off; US: 2).
+  max_losses_per_day: 0
   # Account size every position is sized against. Set it per-machine with
   # TOTAL_CAPITAL in .env, which overrides this file and survives a git pull:
   #

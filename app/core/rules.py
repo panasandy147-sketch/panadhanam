@@ -100,6 +100,8 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
                    f"{(g('risk.rsi_guard') or {}).get('long_max', 75)}")
                   if (g("risk.rsi_guard") or {}).get("enabled") else "off",
                   "risk.rsi_guard"),
+            _rule("No more entries after this many losing trades in a day",
+                  g("risk.max_losses_per_day", 0) or "off", "risk.max_losses_per_day"),
             _rule("No new general setup after (named strategies keep their own "
                   "windows)", g("screener.windows.general_to") or "off",
                   "screener.windows.general_to"),

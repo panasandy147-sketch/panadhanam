@@ -362,6 +362,10 @@ class RiskManager:
                       f"-{self.state.daily_loss_limit:,.0f})")
             reasons.append(self.state.halt_reason)
 
+        max_losses = int(self.cfg.get("risk.max_losses_per_day", 0) or 0)
+        if max_losses and self.state.losses_today >= max_losses:
+            reasons.append(f"{self.state.losses_today} losing trades today (the limit is "
+                           f"{max_losses}) — no more entries until tomorrow")
         max_daily = int(self.cfg.get("risk.max_daily_trades", 0) or 0)
         if max_daily and self.state.trades_today >= max_daily:
             reasons.append(f"Daily trade limit: {self.state.trades_today} of {max_daily} "

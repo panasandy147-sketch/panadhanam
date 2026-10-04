@@ -87,3 +87,18 @@ def test_the_us_desk_ships_two_and_india_none(cfg):
     assert cfg.get("consensus.general_min_analysts") == 0
     assert cfg.get("risk.rsi_guard")["enabled"] is False
     assert not cfg.get("screener.windows.general_to")
+
+
+def test_two_losing_trades_end_the_us_day(cfg):
+    """risk.max_losses_per_day: 2 on the US (5 Oct 2026, the user's test 6)."""
+    cfg.switch_market("US")
+    try:
+        risk = RiskManager(cfg)
+        assert cfg.get("risk.max_losses_per_day") == 2
+        risk.state.losses_today = 1
+        assert not any("losing trades today" in r for r in risk.desk_checks())
+        risk.state.losses_today = 2
+        assert any("2 losing trades today" in r for r in risk.desk_checks())
+    finally:
+        cfg.switch_market("IN")
+    assert not cfg.get("risk.max_losses_per_day")
