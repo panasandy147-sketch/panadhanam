@@ -117,6 +117,7 @@ function handle(event) {
       loadHistory();
       notifyTrade(data);
       break;
+    case "rsi2.trade":          loadRsi2(); break;
   }
 }
 
@@ -169,7 +170,7 @@ async function adoptMarket(profile) {
   $("s-today").hidden = true;
 
   await Promise.all([loadPositions(), loadStatus(), loadTradingDay(), loadFocus(),
-                     loadRecord()]);
+                     loadRecord(), loadRsi2()]);
 }
 
 async function switchMarket(code) {
@@ -725,7 +726,7 @@ const DECISION_TOPICS = new Set([
   "signal.approved", "signal.rejected", "position.update", "focus.updated",
   "news.blackout",
   "trading_day.state", "trading_day.summary", "market.switched",
-  "premarket.scan", "system.error",
+  "premarket.scan", "system.error", "rsi2.trade",
 ]);
 const LOG_LIMIT = { all: 200, decisions: 400 };
 
@@ -770,6 +771,12 @@ function describe(topic, d) {
             `${b}: ${rows.map((r) => r.symbol).join(", ")}`).join(" · "), level: "" };
     case "premarket.scan":
       return { text: "pre-market scan done", level: "" };
+    case "rsi2.trade":
+      return d.action === "BUY"
+        ? { text: `RSI(2) book BUY ${d.symbol} ${fmt(d.qty, 3)} @ ${fmt(d.entry)} `
+            + `(RSI(2) ${fmt(d.rsi2, 1)})`, level: "good" }
+        : { text: `RSI(2) book SELL ${d.symbol} @ ${fmt(d.exit)} · ${signed(d.ret_pct)}% `
+            + `(${d.why})`, level: d.pnl >= 0 ? "good" : "bad" };
     case "system.error":
       return { text: d.error || JSON.stringify(d).slice(0, 160), level: "bad" };
     case "agent.report":
@@ -944,6 +951,61 @@ async function loadRecord() {
   try {
     const res = await fetch("/api/paper-record?period=day");
     if (res.ok) renderRecord(await res.json());
+  } catch { /* the next poll fills it in */ }
+}
+
+/* ====================================================================== */
+/* RSI(2) swing book                                                      */
+/* ====================================================================== */
+/* A separate paper book (app/strategies/rsi2_swing.py): its own capital,
+   up to 5 stocks held 1-10 days. Hidden where it is off. */
+function renderRsi2(b) {
+  const card = $("s-rsi2");
+  if (!b || !b.enabled) { card.hidden = true; return; }
+  card.hidden = false;
+  const m = (v) => `${v < 0 ? "−" : ""}${cur()}${fmt(Math.abs(v || 0))}`;
+  const tile = (k, v, sub = "", cls = "") => `<div class="stat">
+      <div class="label">${k}</div><div class="value ${cls}">${v}</div>
+      ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  $("rsi2-meta").textContent = `paper trial · runs at ${b.at} ${tzLabel()} · `
+    + (b.last_run ? `last run ${b.last_run}` : "not run yet");
+  const pnl = b.equity - b.capital;
+  $("rsi2-stats").innerHTML = [
+    tile("Equity", m(b.equity), `from ${m(b.capital)}`, signClass(pnl)),
+    tile("Held", `${b.open.length} / ${b.slots}`, b.open.map((o) => o.symbol).join(", ") || "flat"),
+    tile("Closed", fmtInt(b.trades), b.win_rate === null ? "—" : `${fmt(b.win_rate, 0)}% win`),
+    tile("Realised", m(b.realised), "", signClass(b.realised)),
+    tile("Open P&amp;L", m(b.unrealised), "", signClass(b.unrealised)),
+  ].join("");
+  const why = { sma5: "closed above the 5-day average", time: "10 sessions held",
+                stop: "emergency stop" };
+  const open = b.open.length ? `
+    <table><thead><tr><th>Held</th><th>Bought</th><th class="num">Qty</th>
+      <th class="num">Entry</th><th class="num">Last</th><th class="num">P&amp;L</th>
+      <th class="num">RSI(2)</th><th class="num">Sessions</th><th class="num">Stop</th></tr></thead><tbody>
+    ${b.open.map((o) => { const p = ((o.last ?? o.entry) - o.entry) * o.qty; return `<tr>
+      <td>${esc(o.symbol)}</td><td>${esc(o.entry_day)}</td><td class="num">${fmt(o.qty, 3)}</td>
+      <td class="num">${fmt(o.entry)}</td><td class="num">${fmt(o.last)}</td>
+      <td class="num ${signClass(p)}">${m(p)}</td><td class="num">${fmt(o.rsi2, 1)}</td>
+      <td class="num">${fmtInt(o.sessions)}</td><td class="num">${fmt(o.stop)}</td></tr>`; }).join("")}
+    </tbody></table>` : `<div class="empty">Nothing held. The book looks for stocks above their
+      200-day average with RSI(2) under 5 at ${esc(b.at)} each trading day.</div>`;
+  const closed = b.closed.length ? `
+    <table><thead><tr><th>Sold</th><th>Symbol</th><th>Bought</th><th class="num">Entry</th>
+      <th class="num">Exit</th><th class="num">%</th><th class="num">P&amp;L</th><th>Why it sold</th></tr></thead><tbody>
+    ${b.closed.map((c) => `<tr><td>${esc(c.exit_day)}</td><td>${esc(c.symbol)}</td>
+      <td>${esc(c.entry_day)}</td><td class="num">${fmt(c.entry)}</td><td class="num">${fmt(c.exit)}</td>
+      <td class="num ${signClass(c.ret_pct)}">${signed(c.ret_pct)}%</td>
+      <td class="num ${signClass(c.pnl)}">${m(c.pnl)}</td>
+      <td class="why-cell">${esc(why[c.why] || c.why)}</td></tr>`).join("")}
+    </tbody></table>` : "";
+  $("rsi2-body").innerHTML = open + closed;
+}
+
+async function loadRsi2() {
+  try {
+    const res = await fetch("/api/rsi2-book");
+    renderRsi2(res.ok ? await res.json() : null);
   } catch { /* the next poll fills it in */ }
 }
 
@@ -1290,12 +1352,13 @@ function bind() {
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
   await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay(),
-                     loadFocus(), loadRecord(), loadCandidate()]);
+                     loadFocus(), loadRecord(), loadCandidate(), loadRsi2()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(loadFocus, 60_000);
   setInterval(loadCandidate, 15_000);
   setInterval(loadRecord, 60_000);
+  setInterval(loadRsi2, 60_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
 })();

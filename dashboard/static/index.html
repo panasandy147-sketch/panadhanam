@@ -75,6 +75,15 @@
     <div id="record-trades"></div>
   </section>
 
+  <!-- ======================= RSI(2) SWING BOOK ==================== -->
+  <!-- Its own paper ledger, run once a day before the close; shown only
+       where it is switched on (rsi2_swing.enabled). -->
+  <section class="card span-all" id="s-rsi2" hidden>
+    <h2>RSI(2) Swing Book <span class="count" id="rsi2-meta"></span></h2>
+    <div class="stats" id="rsi2-stats"></div>
+    <div id="rsi2-body"></div>
+  </section>
+
   <!-- ============================ FOCUS =========================== -->
   <!-- The only names the desk cycles on and may trade: the top of each band,
        re-ranked on its own clock. -->

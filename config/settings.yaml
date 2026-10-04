@@ -427,6 +427,36 @@ swing:
   first_profitable_open: true
 
 # --------------------------------------------------------------------------
+# RSI(2) SWING BOOK — Larry Connors' 2-period RSI pullback (app/strategies/
+# rsi2_swing.py). A separate PAPER book with its own capital and ledger
+# (data/runtime/rsi2_book-<market>.json): not the intraday desk's limits,
+# circuit breaker or records. Nothing is sent to a broker.
+#   once a day at `at`, the live price as today's close:
+#   entry  close > the trend_sma-day average and RSI(2) < rsi_max; the lowest
+#          RSI first, one per symbol, up to `slots` positions of 1/slots of
+#          the book's equity each
+#   exit   the first close above the exit_sma-day average, the close of the
+#          max_hold_days-th session, or the emergency stop stop_pct below
+# Off here; a US TRIAL from 5 Oct 2026 (us.yaml). Backtest Jul 2017 - Oct
+# 2026, US watchlist, 25% stop: 67% wins, +58.6% (2017-22) / +127.4%
+# (2022-26), max drawdown 14.6% (SPY held: +70.8% / +79.7%, 34.1%). India
+# lost in every version (delivery costs). python -m scripts.backtest_rsi2
+# --------------------------------------------------------------------------
+rsi2_swing:
+  enabled: false
+  at: "15:45"               # 15 min before the close, market time
+  capital: 4000             # the book's own paper capital
+  slots: 5                  # positions at once, 1/slots of equity each
+  rsi_max: 5                # RSI(2) below this (Connors' classic is 10; 5 tested better)
+  trend_sma: 200
+  exit_sma: 5
+  max_hold_days: 10
+  stop_pct: 25.0            # emergency stop only (0 = none, as Connors). Tested
+                            # 0/10/15/20/25: 25% beat 15% in both halves with
+                            # less drawdown (+58.6% / +127.4%, max DD 14.6%)
+  fractional: true          # fractional shares, as backtested
+
+# --------------------------------------------------------------------------
 # VOLATILITY BREAKOUT (Larry Williams, 1987 Robbins World Cup) — intraday
 # --------------------------------------------------------------------------
 # The FIRST closed 5m candle beyond today's open +/- k x yesterday's range,

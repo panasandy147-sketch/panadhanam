@@ -336,6 +336,40 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         })
 
     # ------------------------------------------------------------------ #
+    if g("rsi2_swing.enabled", False):
+        sections.append({
+            "title": "RSI(2) Swing Book (Larry Connors, held 1-10 days) — "
+                     + (g("rsi2_swing.note", "") or "on"),
+            "intro": ("A separate paper book with its own capital and ledger, on daily "
+                      "bars: buy a stock in an uptrend after a sharp short dip, sell on "
+                      "the first bounce. Not the intraday desk's limits, circuit breaker "
+                      "or records, and nothing is sent to a broker. Backtest Jul 2017 - "
+                      "Oct 2026 on the US watchlist, with the 25% stop: 67% wins, "
+                      "+58.6% (2017-22) and +127.4% (2022-26), max drawdown 14.6%."),
+            "rules": [
+                _rule("Runs once a day from this time (market time) to the close, the "
+                      "live price standing in for today's close",
+                      g("rsi2_swing.at", "15:45"), "rsi2_swing.at"),
+                _rule("Its own paper capital", g("rsi2_swing.capital", 4000),
+                      "rsi2_swing.capital"),
+                _rule("Positions at once (each 1/N of the book's equity)",
+                      g("rsi2_swing.slots", 5), "rsi2_swing.slots"),
+                _rule("Entry: the close above its N-day average…",
+                      f"{g('rsi2_swing.trend_sma', 200)} days", "rsi2_swing.trend_sma"),
+                _rule("…and the 2-period RSI below (the lowest first)",
+                      g("rsi2_swing.rsi_max", 5), "rsi2_swing.rsi_max"),
+                _rule("Exit: the first close above the N-day average",
+                      f"{g('rsi2_swing.exit_sma', 5)} days", "rsi2_swing.exit_sma"),
+                _rule("…or the close of this session after the entry",
+                      g("rsi2_swing.max_hold_days", 10), "rsi2_swing.max_hold_days"),
+                _rule("Emergency stop below the entry (Connors uses none; a 5% stop "
+                      "cut the tested return, and 25% beat 15% in both halves)",
+                      f"{g('rsi2_swing.stop_pct', 25.0):g}%" if g("rsi2_swing.stop_pct", 25.0)
+                      else "none", "rsi2_swing.stop_pct"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     if g("vol_breakout.enabled", False):
         sections.append({
             "title": "Strategy: Volatility Breakout (Larry Williams, 1987 World Cup)",

@@ -214,6 +214,12 @@ async def rules(request: Request) -> dict[str, Any]:
     return build(get_config(), capital=engine.risk.state.capital)
 
 
+@router.get("/rsi2-book")
+async def rsi2_book(request: Request) -> dict[str, Any]:
+    """The RSI(2) swing book: its own paper ledger (app/strategies/rsi2_swing.py)."""
+    return _engine(request).rsi2.status()
+
+
 @router.get("/positions")
 async def positions(request: Request) -> dict[str, Any]:
     engine = _engine(request)

@@ -50,6 +50,9 @@ class TradingEngine:
         self.focus = FocusList(self, self.cfg)
         self.replay = WeeklyReplay(self, self.cfg)
         self.trading_day = TradingDay(self, self.cfg)
+        # The RSI(2) swing book: its own paper ledger, run once a day.
+        from app.strategies.rsi2_swing import Rsi2Book
+        self.rsi2 = Rsi2Book(broker, self.cfg)
         self.desk.dispatcher.trading_day = self.trading_day
         self.outcomes.trading_day = self.trading_day
         self.outcomes.dispatcher = self.desk.dispatcher
@@ -489,6 +492,7 @@ class TradingEngine:
                     # finds without somebody being at the screen. Paper only.
                     await self.trading_day.maybe_auto_arm()
                     await self.run_cycle()
+                    await self._maybe_run_rsi2()
 
                 elif phase in {"closed", "weekend", "postmarket"}:
                     # Outside hours we still mark and grade open positions.
@@ -507,6 +511,13 @@ class TradingEngine:
 
             sleep_for = interval if self.session_phase() == "open" else max(interval, 120)
             await asyncio.sleep(sleep_for)
+
+    async def _maybe_run_rsi2(self) -> None:
+        """The RSI(2) swing book's daily run (rsi2_swing.at to the close)."""
+        try:
+            await self.rsi2.maybe_run()
+        except Exception as exc:                          # noqa: BLE001
+            log.warning("RSI(2) swing book run failed: %s", exc)
 
     async def maybe_follow_session(self) -> str | None:
         """Move to whichever market is trading, so one app covers both.

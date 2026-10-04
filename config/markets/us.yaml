@@ -217,6 +217,13 @@ vol_breakout:
   k: 0.5
   to: "15:45"                  # 15 min before the close (5 Oct 2026; was 14:30)
 
+# RSI(2) swing book (settings.yaml rsi2_swing): a US TRIAL from 5 Oct 2026,
+# the user's call after the backtest (Jul 2017 - Oct 2026, 25% stop: 67%
+# wins, +58.6% / +127.4% in the two halves, max drawdown 14.6%).
+rsi2_swing:
+  enabled: true
+  note: "US TRIAL from 5 Oct 2026"
+
 # The gold desk's entries (GLD) on the US clock: 15 min before the close.
 swing:
   to: "15:45"
