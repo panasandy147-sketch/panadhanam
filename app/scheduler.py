@@ -53,6 +53,9 @@ class TradingEngine:
         # The RSI(2) swing book: its own paper ledger, run once a day.
         from app.strategies.rsi2_swing import Rsi2Book
         self.rsi2 = Rsi2Book(broker, self.cfg)
+        # The hourly audit email (app/core/email_report.py; .env SMTP_*).
+        from app.core.email_report import AuditEmailer
+        self.mailer = AuditEmailer(self.cfg, self.rsi2)
         self.desk.dispatcher.trading_day = self.trading_day
         self.outcomes.trading_day = self.trading_day
         self.outcomes.dispatcher = self.desk.dispatcher
@@ -502,6 +505,8 @@ class TradingEngine:
                     await self._maybe_publish_day_summary()
                     await self._maybe_write_weekly_review()
 
+                await self.mailer.maybe_send(clock.market_now(self.timezone),
+                                             phase == "open")
                 await bus.publish(Topic.RISK_STATE, self.risk.snapshot())
             except asyncio.CancelledError:
                 raise

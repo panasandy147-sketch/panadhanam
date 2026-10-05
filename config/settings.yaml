@@ -428,6 +428,21 @@ swing:
   first_profitable_open: true
 
 # --------------------------------------------------------------------------
+# HOURLY AUDIT EMAIL (app/core/email_report.py). While a market is open,
+# every `every_minutes`, and once after the close: the hour's buys and sells,
+# the day so far and what is open, with the day's audit attached as text.
+# The account is in .env ONLY: SMTP_USER, SMTP_PASSWORD (a Gmail app
+# password), EMAIL_TO (and SMTP_HOST / SMTP_PORT, default Gmail 587). Any of
+# the three blank = nothing is sent. Check the setup:
+#     python -m app.core.email_report --test --market US
+# --------------------------------------------------------------------------
+email_report:
+  enabled: true
+  every_minutes: 60
+  at_close: true            # one more after the close
+  attach_audit: true        # the day's audit as audit-<market>-<date>.txt
+
+# --------------------------------------------------------------------------
 # RSI(2) SWING BOOK — Larry Connors' 2-period RSI pullback (app/strategies/
 # rsi2_swing.py). A separate PAPER book with its own capital and ledger
 # (data/runtime/rsi2_book-<market>.json): not the intraday desk's limits,
