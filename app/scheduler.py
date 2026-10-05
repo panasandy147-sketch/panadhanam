@@ -669,7 +669,8 @@ class TradingEngine:
             done = await ollama_feedback.run(self.cfg, start, end)
             await bus.publish("feedback.weekly", {
                 "week": done.week, "applied": done.applied, "note": done.note,
-                "changes": done.changes, "weights": done.weights})
+                "changes": done.changes, "weights": done.weights,
+                "advice": done.advice})
         except asyncio.CancelledError:
             raise
         except Exception as exc:                 # noqa: BLE001 - never fatal

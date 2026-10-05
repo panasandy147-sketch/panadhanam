@@ -89,16 +89,21 @@ def test_the_us_desk_ships_two_and_india_none(cfg):
     assert not cfg.get("screener.windows.general_to")
 
 
-def test_two_losing_trades_end_the_us_day(cfg):
-    """risk.max_losses_per_day: 2 on the US (5 Oct 2026, the user's test 6)."""
+def test_the_losing_trades_stop_is_off_and_works_when_set(cfg):
+    """risk.max_losses_per_day: off in both markets from 5 Oct 2026 (the
+    user's call, to compare 3 days without it); 2 still stops the day."""
     cfg.switch_market("US")
     try:
+        assert not cfg.get("risk.max_losses_per_day")
         risk = RiskManager(cfg)
-        assert cfg.get("risk.max_losses_per_day") == 2
+        risk.state.losses_today = 5
+        assert not any("losing trades today" in r for r in risk.desk_checks())
+        cfg.settings["risk"]["max_losses_per_day"] = 2
         risk.state.losses_today = 1
         assert not any("losing trades today" in r for r in risk.desk_checks())
         risk.state.losses_today = 2
         assert any("2 losing trades today" in r for r in risk.desk_checks())
     finally:
+        cfg.settings["risk"]["max_losses_per_day"] = 0
         cfg.switch_market("IN")
     assert not cfg.get("risk.max_losses_per_day")

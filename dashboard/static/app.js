@@ -726,7 +726,7 @@ const DECISION_TOPICS = new Set([
   "signal.approved", "signal.rejected", "position.update", "focus.updated",
   "news.blackout",
   "trading_day.state", "trading_day.summary", "market.switched",
-  "premarket.scan", "system.error", "rsi2.trade",
+  "premarket.scan", "system.error", "rsi2.trade", "feedback.weekly",
 ]);
 const LOG_LIMIT = { all: 200, decisions: 400 };
 
@@ -771,6 +771,16 @@ function describe(topic, d) {
             `${b}: ${rows.map((r) => r.symbol).join(", ")}`).join(" · "), level: "" };
     case "premarket.scan":
       return { text: "pre-market scan done", level: "" };
+    case "feedback.weekly": {
+      // Friday's Ollama review: the vote weights it changed, and its advice
+      // per strategy (to backtest — never applied by the desk).
+      const notes = Object.entries(d.advice?.notes || {}).map(([k, v]) => `${k} ${v}`);
+      const ideas = d.advice?.ideas || [];
+      return { text: `Ollama week review: ${d.note || ""}`
+          + (notes.length || ideas.length
+            ? ` · advice (to test, not applied): ${[...notes, ...ideas].join("; ")}` : ""),
+        level: d.applied ? "good" : "" };
+    }
     case "rsi2.trade":
       return d.action === "BUY"
         ? { text: `RSI(2) book BUY ${d.symbol} ${fmt(d.qty, 3)} @ ${fmt(d.entry)} `

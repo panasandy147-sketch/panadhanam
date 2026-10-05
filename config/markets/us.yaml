@@ -61,10 +61,11 @@ screener:
 #     +0.20R -> +0.31R, drawdown 4.0% -> 3.0% and 2.7% -> 2.0%.
 risk:
   rsi_guard: {enabled: true, short_min: 25, long_max: 75}
-  # No entries after 2 losing trades in a day (the user's test 6, 5 Oct 2026):
-  # 40-session replay with the account rules — first half +2.8% -> +3.8% (DD
-  # 4.0% -> 3.0%), second half unchanged (+2.5%). India: no difference.
-  max_losses_per_day: 2
+  # No entries after N losing trades in a day. OFF (0) from 5 Oct 2026, the
+  # user's call: run without it for 3 days and compare. Tested (test 6, 40
+  # sessions, account rules) at 2: first half +2.8% -> +3.8% (DD 4.0% ->
+  # 3.0%), second half unchanged (+2.5%). Set 2 to switch it back on.
+  max_losses_per_day: 0
 
 # TRIAL (the user's call, 5 Oct 2026): a general setup needs 2 analysts
 # voting its way at +/-0.25. The live week: 16 trades with a second analyst

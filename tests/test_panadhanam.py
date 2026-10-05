@@ -447,3 +447,38 @@ def test_a_corrupt_weights_file_is_ignored(cfg, clean_feedback):
     consensus.STRATEGY_WEIGHTS_PATH.write_text(
         '{"strategy_weights": {"candlestick": 99, "risk": 5}}', encoding="utf-8")
     assert consensus.load_multipliers() == {"candlestick": 1.5}
+
+
+def test_the_friday_review_sees_each_strategy_and_keeps_its_advice_apart(cfg, clean_feedback):
+    """5 Oct 2026: Ollama also reads the week per strategy and the RSI(2)
+    book, and may suggest notes and ideas — recorded, never applied."""
+    from app.core import config as config_mod
+    from app.journal.models import SetupType
+
+    _journal_week(6)
+    book = config_mod.DATA_DIR / "rsi2_book-US.json"
+    book.write_text(json.dumps({"closed": [
+        {"symbol": "KO", "entry_day": "2026-09-22", "exit_day": "2026-09-24",
+         "rsi2": 2.2, "ret_pct": 1.8, "pnl": 14.4, "why": "sma5"},
+        {"symbol": "PFE", "entry_day": "2026-09-01", "exit_day": "2026-09-03",
+         "rsi2": 3.0, "ret_pct": -1.0, "pnl": -8.0, "why": "time"}]}), encoding="utf-8")
+    setup = SetupType.BREAKOUT.value
+    try:
+        done = asyncio.run(fb.run(
+            cfg, date(2026, 9, 21), date(2026, 9, 25),
+            answer=json.dumps({"adjustments": {"candlestick": 0.1}, "rationale": "r",
+                               "notes": {setup: "keep", "Moon Strategy": "keep",
+                                         "general (no named setup)": "double it"},
+                               "ideas": ["Skip breakouts before 10:00", 5, "b", "c", "d"]})))
+    finally:
+        book.unlink(missing_ok=True)
+    assert done.applied                                   # the vote weights, as before
+    assert done.advice == {"notes": {setup: "keep"},
+                           "ideas": ["Skip breakouts before 10:00", "b", "c"]}
+    record = json.loads(open(done.record, encoding="utf-8").read())
+    assert record["advice"] == done.advice
+    assert record["input"]["by_setup"][setup]["trades"] == 6
+    assert [t["symbol"] for t in record["input"]["rsi2_book"]] == ["KO"]  # this week only
+    # Advice never reaches the settings.
+    assert cfg.get("rsi2_swing.enabled") is not None
+    assert fb.parse_advice("no json", [setup]) == {"notes": {}, "ideas": []}

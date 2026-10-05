@@ -32,6 +32,13 @@ What it does:
 
 The multipliers only scale how much each analyst's vote counts. They never
 touch a stop, a size, a cap or the circuit breaker.
+
+Since 5 Oct 2026 the model also sees the week PER STRATEGY (`by_setup`: SJK
+50-200, the Volatility Breakout, the PD sweep, general setups, …) and the
+RSI(2) swing book's closed trades, and may answer with a note per strategy
+(keep / watch / test_off) and up to 3 ideas to test. Those are ADVICE ONLY
+(`parse_advice`): written to the record and the activity log, then
+backtested by hand before anything changes — never applied by this script.
 """
 from __future__ import annotations
 
@@ -66,10 +73,18 @@ SYSTEM = (
     "it; GOOD_LOSSes with clean execution that an analyst kept voting for ARE "
     "evidence its read is weak; BAD_LOSSes point at execution, not at the "
     "analysts. With fewer than 3 votes from an analyst, leave it at 0.0. "
-    "Answer ONLY with JSON: "
+    "by_setup is the same week per strategy; rsi2_book is a separate swing "
+    "book's closed trades. Answer ONLY with JSON: "
     '{"adjustments": {"<analyst>": <number from -0.15 to 0.15>}, '
-    '"rationale": "<two sentences citing the numbers>"}'
+    '"rationale": "<two sentences citing the numbers>", '
+    '"notes": {"<strategy from by_setup>": "keep" | "watch" | "test_off"}, '
+    '"ideas": ["<at most 3 short, testable ideas: a filter, a time window, a '
+    'stop or target change — each citing the trades behind it>"]}. '
+    "notes and ideas are advice for the people running the desk; they are "
+    "backtested before anything changes."
 )
+
+NOTE_VALUES = ("keep", "watch", "test_off")
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +206,36 @@ def parse_response(text: str | None, current: dict[str, float],
     return result
 
 
+def parse_advice(text: str | None, setups: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    """The model's advice — a note per strategy and ideas to test — or empty.
+
+    ADVICE ONLY: recorded for the people running the desk, never applied.
+    Notes on a strategy that is not in this week's `setups`, other note
+    values and anything that is not a short string are dropped."""
+    out: dict[str, Any] = {"notes": {}, "ideas": []}
+    blob = _extract_object(str(text or ""))
+    if blob is None:
+        return out
+    try:
+        data = _loads(blob)
+    except json.JSONDecodeError:
+        return out
+    if not isinstance(data, dict):
+        return out
+    known = {str(k).strip().lower(): str(k) for k in setups}
+    notes = data.get("notes")
+    if isinstance(notes, dict):
+        for name, value in notes.items():
+            key, val = known.get(str(name).strip().lower()), str(value).strip().lower()
+            if key and val in NOTE_VALUES:
+                out["notes"][key] = val
+    ideas = data.get("ideas")
+    if isinstance(ideas, list):
+        out["ideas"] = [str(i).strip()[:300] for i in ideas
+                        if isinstance(i, str) and str(i).strip()][:3]
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # The week's data
 # --------------------------------------------------------------------------- #
@@ -269,6 +314,43 @@ def summarise(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def lead_setup(trade: dict[str, Any]) -> str:
+    """The strategy a trade is filed under: its first named setup, or general."""
+    return str(trade.get("setup") or "").split(",")[0].strip() or "general (no named setup)"
+
+
+def by_setup(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per strategy: trades, wins, R and the process grades — what it earned."""
+    out: dict[str, dict[str, Any]] = {}
+    for t in trades:
+        s = out.setdefault(lead_setup(t), {"trades": 0, "wins": 0, "total_r": 0.0,
+                                           "GOOD_WIN": 0, "GOOD_LOSS": 0,
+                                           "BAD_WIN": 0, "BAD_LOSS": 0})
+        s["trades"] += 1
+        s["wins"] += 1 if t["r_multiple"] > 0 else 0
+        s["total_r"] = round(s["total_r"] + t["r_multiple"], 2)
+        if t.get("verdict") in s:
+            s[t["verdict"]] += 1
+    return out
+
+
+def rsi2_book_trades(since: date, until: date) -> list[dict[str, Any]]:
+    """The RSI(2) swing book's trades closed in the week (its own ledger)."""
+    from app.core import config as config_mod
+
+    out = []
+    for path in sorted(config_mod.DATA_DIR.glob("rsi2_book-*.json")):
+        try:
+            book = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for c in book.get("closed", []):
+            if since.isoformat() <= str(c.get("exit_day", "")) <= until.isoformat():
+                out.append({k: c.get(k) for k in ("symbol", "entry_day", "exit_day",
+                                                  "rsi2", "ret_pct", "pnl", "why")})
+    return out
+
+
 def current_multipliers() -> dict[str, float]:
     saved = consensus.load_multipliers()
     return {a: float(saved.get(a, 1.0)) for a in AGENTS}
@@ -317,6 +399,8 @@ class Feedback:
     changes: dict[str, float] = field(default_factory=dict)
     note: str = ""
     record: str = ""
+    # A note per strategy and ideas to test: advice, never applied.
+    advice: dict[str, Any] = field(default_factory=dict)
 
 
 def last_finished_week(cfg: Any) -> tuple[date, date]:
@@ -340,8 +424,10 @@ async def run(cfg: Any, week_start: date, week_end: date,
     trades = closed_trades(week_start, week_end)
     before = current_multipliers()
     out = Feedback(week=week, applied=False, trades=len(trades), weights=before)
+    setups = by_setup(trades)
     payload = {"week": week, "current_multipliers": before,
-               "by_analyst": summarise(trades), "trades": trades}
+               "by_analyst": summarise(trades), "by_setup": setups,
+               "rsi2_book": rsi2_book_trades(week_start, week_end), "trades": trades}
 
     minimum = int(cfg.get("feedback.min_trades", 5))
     parsed: ParseResult | None = None
@@ -354,6 +440,7 @@ async def run(cfg: Any, week_start: date, week_end: date,
         if answer is None:
             out.note = "Ollama did not answer; weights unchanged"
         else:
+            out.advice = parse_advice(answer, list(setups))
             parsed = parse_response(answer, before, float(cfg.get("feedback.max_step", 0.15)))
             if not parsed.ok:
                 out.note = "unusable model answer: " + "; ".join(parsed.errors)
@@ -371,12 +458,15 @@ async def run(cfg: Any, week_start: date, week_end: date,
         path.write_text(json.dumps({
             "week": week, "applied": out.applied, "note": out.note,
             "multipliers_before": before, "multipliers_after": out.weights,
-            "changes": out.changes, "parse_errors": parsed.errors if parsed else [],
+            "changes": out.changes, "advice": out.advice,
+            "parse_errors": parsed.errors if parsed else [],
             "model_answer": answer, "input": payload}, indent=2, default=str),
             encoding="utf-8")
         out.record = str(path)
     log.info("Friday feedback %s: %s%s", week, out.note,
              f" — {out.changes}" if out.changes else "")
+    if out.advice.get("notes") or out.advice.get("ideas"):
+        log.info("Friday feedback %s advice (not applied): %s", week, out.advice)
     return out
 
 
@@ -404,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
     for agent, weight in done.weights.items():
         change = done.changes.get(agent)
         print(f"  {agent:<16} x{weight:.2f}" + (f"  ({change:+.2f})" if change else ""))
+    if done.advice.get("notes") or done.advice.get("ideas"):
+        print("  Ollama's advice (to backtest, not applied):")
+        for setup, note in done.advice.get("notes", {}).items():
+            print(f"    {setup:<34} {note}")
+        for idea in done.advice.get("ideas", []):
+            print(f"    idea: {idea}")
     if done.applied:
         print(f"  written: {consensus.STRATEGY_WEIGHTS_PATH}")
     if done.record:
