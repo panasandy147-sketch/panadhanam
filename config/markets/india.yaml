@@ -33,6 +33,14 @@ risk:
 # The pre-market screener and the entry windows, on the IST clock.
 screener:
   run_at: "09:00"
+  # Volume floors lowered 5 Oct 2026 (the user asked why so few names were
+  # screened): Band A RVOL 1.2 -> 0.8, Band B 1.5 -> 1.0. 40-session replay
+  # with the account rules: first half -1.89% -> +0.66%, second -5.00% ->
+  # -1.80%, max drawdown 6.9% -> 4.0%, 12 -> 23 trades, ~2.2 -> 4.4 names a
+  # day. Still negative overall (-1.14%): better, not yet good. The US kept
+  # 1.2 / 1.5 — every looser floor there doubled the drawdown.
+  band_a: {min_rvol: 0.8}
+  band_b: {min_rvol: 1.0}
   windows:
     morning_from: "09:30"      # Band A only
     morning_to: "11:15"

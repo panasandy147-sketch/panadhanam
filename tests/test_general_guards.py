@@ -107,3 +107,18 @@ def test_the_losing_trades_stop_is_off_and_works_when_set(cfg):
         cfg.settings["risk"]["max_losses_per_day"] = 0
         cfg.switch_market("IN")
     assert not cfg.get("risk.max_losses_per_day")
+
+
+def test_india_screens_on_lower_volume_floors_the_us_keeps_its_own(cfg):
+    """5 Oct 2026: India Band A RVOL 0.8 / Band B 1.0 (40-session replay:
+    better in both halves, less drawdown); the US keeps 1.2 / 1.5."""
+    cfg.switch_market("IN")
+    assert cfg.get("screener.band_a.min_rvol") == 0.8
+    assert cfg.get("screener.band_b.min_rvol") == 1.0
+    assert cfg.get("screener.band_b.long_close_location") == 0.8      # the rest unchanged
+    cfg.switch_market("US")
+    try:
+        assert cfg.get("screener.band_a.min_rvol") == 1.2
+        assert cfg.get("screener.band_b.min_rvol") == 1.5
+    finally:
+        cfg.switch_market("IN")
