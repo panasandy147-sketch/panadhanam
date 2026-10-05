@@ -20,7 +20,9 @@ Credentials live ONLY in .env on this machine (never in the repo or a chat):
 With any of SMTP_USER, SMTP_PASSWORD or EMAIL_TO blank nothing is sent and
 nothing is attempted. A failed send is logged and never stops trading.
 
-    python -m app.core.email_report --test     sends one now, to check the setup
+    .venv/Scripts/python.exe -m app.core.email_report --test --market US
+                                    sends one now, to check the setup (Windows;
+                                    .venv/bin/python on Mac / Linux)
 """
 from __future__ import annotations
 
@@ -216,9 +218,21 @@ class AuditEmailer:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    import sys
 
-    from app.core import clock
-    from app.core.config import get_config
+    try:
+        from app.core import clock
+        from app.core.config import get_config
+    except Exception as exc:                              # noqa: BLE001
+        # A bare `python` on Windows is the Microsoft Store build, without
+        # this project's packages (tzdata, pandas, ...): say which to use.
+        print(f"This Python ({sys.executable}) is missing the desk's packages ({exc}).\n"
+              "Use the virtual environment beside the project:\n"
+              "    .venv/Scripts/python.exe -m app.core.email_report --test --market US"
+              "   (Windows)\n"
+              "    .venv/bin/python -m app.core.email_report --test --market US"
+              "       (Mac / Linux)")
+        return 1
 
     parser = argparse.ArgumentParser(description="Send the audit email now.")
     parser.add_argument("--test", action="store_true", help="send one now")

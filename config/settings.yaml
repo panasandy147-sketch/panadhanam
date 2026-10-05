@@ -434,7 +434,7 @@ swing:
 # The account is in .env ONLY: SMTP_USER, SMTP_PASSWORD (a Gmail app
 # password), EMAIL_TO (and SMTP_HOST / SMTP_PORT, default Gmail 587). Any of
 # the three blank = nothing is sent. Check the setup:
-#     python -m app.core.email_report --test --market US
+#     .venv/Scripts/python.exe -m app.core.email_report --test --market US
 # --------------------------------------------------------------------------
 email_report:
   enabled: true
