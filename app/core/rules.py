@@ -336,6 +336,46 @@ def build(cfg, capital: float | None = None) -> dict[str, Any]:
         })
 
     # ------------------------------------------------------------------ #
+    if g("williams_swing.enabled", False):
+        sections.append({
+            "title": "Williams-Crabel Swing Book (Larry Williams + Toby Crabel, held 1-4 days) — "
+                     + (g("williams_swing.note", "") or "on"),
+            "intro": ("The two champion strategies in their native setting: a separate paper "
+                      "book with its own capital and ledger, on DAILY ranges with stop orders "
+                      "from the open and positions held overnight — not the 5-minute intraday "
+                      "versions. Nothing is sent to a broker; the intraday desk's limits, "
+                      "breaker and records are untouched. Backtest Nov 2023 - Oct 2026, 61 US "
+                      "names, hourly bars: +70.7% then +34.7%, max drawdown 5.7% / 4.7%."),
+            "rules": [
+                _rule("Its own paper capital", g("williams_swing.capital", 4000),
+                      "williams_swing.capital"),
+                _rule("Setup (Crabel): yesterday's range the narrowest of the last N days",
+                      f"NR{g('williams_swing.nr', 4)}" if g("williams_swing.nr", 4) else "off",
+                      "williams_swing.nr"),
+                _rule("…and the trend agrees: yesterday's close against the close this many "
+                      "sessions before (longs up, shorts down)",
+                      f"{g('williams_swing.trend_days', 20)} days", "williams_swing.trend_days"),
+                _rule("Entry (Williams): a stop order at today's open ± this share of "
+                      "yesterday's range, filled at the level", f"{g('williams_swing.k', 0.3)} x range",
+                      "williams_swing.k"),
+                _rule("A trigger older than this many 5m bars is missed, not chased",
+                      g("williams_swing.fresh_bars", 2), "williams_swing.fresh_bars"),
+                _rule("Stop: today's open, checked every 5m bar while held", "the open", ""),
+                _rule("Exit: the first later session that OPENS in profit (Williams' "
+                      "bail-out); a gap through the stop at that open",
+                      "first profitable open", ""),
+                _rule("…else the close of this session after the entry",
+                      g("williams_swing.max_hold_days", 4), "williams_swing.max_hold_days"),
+                _rule("Size: this share of equity at risk, entry to stop",
+                      f"{g('williams_swing.risk_pct', 1.0):g}%", "williams_swing.risk_pct"),
+                _rule("At most in one name / positions at once",
+                      f"{g('williams_swing.max_position_pct', 25.0):g}% / "
+                      f"{g('williams_swing.slots', 5)}",
+                      "williams_swing.max_position_pct / slots"),
+            ],
+        })
+
+    # ------------------------------------------------------------------ #
     if g("rsi2_swing.enabled", False):
         sections.append({
             "title": "RSI(2) Swing Book (Larry Connors, held 1-10 days) — "

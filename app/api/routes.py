@@ -220,6 +220,12 @@ async def rsi2_book(request: Request) -> dict[str, Any]:
     return _engine(request).rsi2.status()
 
 
+@router.get("/williams-book")
+async def williams_book(request: Request) -> dict[str, Any]:
+    """The Williams-Crabel swing book (app/strategies/williams_swing.py)."""
+    return _engine(request).williams.status()
+
+
 @router.get("/positions")
 async def positions(request: Request) -> dict[str, Any]:
     engine = _engine(request)

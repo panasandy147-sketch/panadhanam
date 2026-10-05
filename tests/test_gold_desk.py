@@ -74,6 +74,7 @@ def test_gold_is_on_both_markets_and_never_screened(cfg):
     cfg.switch_market("US")
     try:
         assert cfg.instrument_meta("GLD").get("swing") is True
+        assert cfg.get("swing.k") == 0.3            # GLD: 0.3 since 6 Oct 2026
     finally:
         cfg.switch_market("IN")
     assert cfg.get("swing.max_hold_days") == 4 and cfg.get("swing.k") == 0.5

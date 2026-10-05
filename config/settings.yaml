@@ -443,6 +443,37 @@ email_report:
   attach_audit: true        # the day's audit as audit-<market>-<date>.txt
 
 # --------------------------------------------------------------------------
+# WILLIAMS-CRABEL SWING BOOK (app/strategies/williams_swing.py) — Larry
+# Williams' volatility breakout as he traded it, after Toby Crabel's NR day:
+# daily ranges, stop orders from the open, held overnight. A separate PAPER
+# book with its own capital and ledger (data/runtime/williams_book-<m>.json).
+#   setup  yesterday the narrowest range of the last `nr` days, and the
+#          trend_days trend agrees
+#   entry  today's open +/- k x yesterday's range, on the trend's side
+#   stop   today's open; exit the first profitable open, a gap through the
+#          stop at the open, else the close of the max_hold_days-th session
+#   size   risk_pct of equity a trade, max_position_pct a name, `slots` open
+# Off here; a US TRIAL from 6 Oct 2026 (us.yaml). Backtest Nov 2023 - Oct
+# 2026, 61 US names, hourly bars: +70.7% / +34.7% in the two halves, max
+# drawdown 5.7% / 4.7%. python -m scripts.backtest_williams
+# --------------------------------------------------------------------------
+williams_swing:
+  enabled: false
+  capital: 4000             # the book's own paper capital
+  k: 0.3                    # x yesterday's range from today's open (0.5 tested flat)
+  nr: 4                     # yesterday the narrowest of the last N days (0 = off)
+  trend_days: 20
+  max_hold_days: 4
+  risk_pct: 1.0             # of the book's equity, entry to stop
+  max_position_pct: 25.0    # of equity in one name
+  slots: 5
+  min_risk_pct: 0.2         # skip a stop closer than this % of the price
+  every_minutes: 5          # how often it looks, in the session
+  fresh_bars: 2             # a trigger older than this many 5m bars is missed, not chased
+  last_entry: "15:45"
+  fractional: true
+
+# --------------------------------------------------------------------------
 # RSI(2) SWING BOOK — Larry Connors' 2-period RSI pullback (app/strategies/
 # rsi2_swing.py). A separate PAPER book with its own capital and ledger
 # (data/runtime/rsi2_book-<market>.json): not the intraday desk's limits,
@@ -487,6 +518,7 @@ vol_breakout:
   minutes_after_open: 30
   to: "15:15"               # 15 min before the close (5 Oct 2026; was 14:30; US 15:45)
   stop_ticks: 2
+  rr: 3.0                   # its own target (was risk.min_risk_reward; tested at 3R)
 
 # SJK 50-200 — the user's 50 / 200 EMA pullback continuation (app/strategies/sjk50_200.py).
 # TRIAL from 2 Oct 2026, the user's call, both markets. Long: above the 200

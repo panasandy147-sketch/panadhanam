@@ -979,7 +979,10 @@ class RiskManager:
             # The volatility breakout: the same exact-level stop, beyond
             # today's open instead of a wick, and the desk's 3R target.
             ticks = int(self.cfg.get("vol_breakout.stop_ticks", 2))
-            need = float(self.cfg.get("risk.min_risk_reward", 3.0))
+            # Its own target (vol_breakout.rr, 3R) since 6 Oct 2026, when the
+            # US general target moved to 2R: the breakout was tested at 3R.
+            need = float(self.cfg.get("vol_breakout.rr")
+                         or self.cfg.get("risk.min_risk_reward", 3.0))
         else:
             ticks = int(self.cfg.get("pd_sweep.stop_ticks", 2))
             need = float(self.cfg.get("pd_sweep.min_reward_risk", 3.0))

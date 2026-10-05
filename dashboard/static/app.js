@@ -118,6 +118,7 @@ function handle(event) {
       notifyTrade(data);
       break;
     case "rsi2.trade":          loadRsi2(); break;
+    case "williams.trade":      loadWilliams(); break;
   }
 }
 
@@ -170,7 +171,7 @@ async function adoptMarket(profile) {
   $("s-today").hidden = true;
 
   await Promise.all([loadPositions(), loadStatus(), loadTradingDay(), loadFocus(),
-                     loadRecord(), loadRsi2()]);
+                     loadRecord(), loadRsi2(), loadWilliams()]);
 }
 
 async function switchMarket(code) {
@@ -726,7 +727,7 @@ const DECISION_TOPICS = new Set([
   "signal.approved", "signal.rejected", "position.update", "focus.updated",
   "news.blackout",
   "trading_day.state", "trading_day.summary", "market.switched",
-  "premarket.scan", "system.error", "rsi2.trade", "feedback.weekly",
+  "premarket.scan", "system.error", "rsi2.trade", "williams.trade", "feedback.weekly",
 ]);
 const LOG_LIMIT = { all: 200, decisions: 400 };
 
@@ -781,6 +782,12 @@ function describe(topic, d) {
             ? ` · advice (to test, not applied): ${[...notes, ...ideas].join("; ")}` : ""),
         level: d.applied ? "good" : "" };
     }
+    case "williams.trade":
+      return d.action === "BUY"
+        ? { text: `Williams-Crabel book ${d.side === "SHORT" ? "SELL SHORT" : "BUY"} ${d.symbol} `
+            + `${fmt(d.qty, 3)} @ ${fmt(d.entry)} · stop ${fmt(d.stop)}`, level: "good" }
+        : { text: `Williams-Crabel book exit ${d.symbol} @ ${fmt(d.exit)} · ${signed(d.r)}R `
+            + `(${d.why})`, level: d.pnl >= 0 ? "good" : "bad" };
     case "rsi2.trade":
       return d.action === "BUY"
         ? { text: `RSI(2) book BUY ${d.symbol} ${fmt(d.qty, 3)} @ ${fmt(d.entry)} `
@@ -1010,6 +1017,58 @@ function renderRsi2(b) {
       <td class="why-cell">${esc(why[c.why] || c.why)}</td></tr>`).join("")}
     </tbody></table>` : "";
   $("rsi2-body").innerHTML = open + closed;
+}
+
+/* The Williams-Crabel swing book (app/strategies/williams_swing.py):
+   Williams' breakout after Crabel's NR4 day, held 1-4 days. */
+function renderWilliams(b) {
+  const card = $("s-williams");
+  if (!b || !b.enabled) { card.hidden = true; return; }
+  card.hidden = false;
+  const m = (v) => `${v < 0 ? "−" : ""}${cur()}${fmt(Math.abs(v || 0))}`;
+  const tile = (k, v, sub = "", cls = "") => `<div class="stat">
+      <div class="label">${k}</div><div class="value ${cls}">${v}</div>
+      ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  $("williams-meta").textContent = `paper trial · NR${b.nr} + ${b.k} x range · `
+    + (b.setups_today.length ? `today's setups: ${b.setups_today.join(", ")}` : "no setups listed yet today");
+  $("williams-stats").innerHTML = [
+    tile("Equity", m(b.equity), `from ${m(b.capital)}`, signClass(b.equity - b.capital)),
+    tile("Held", `${b.open.length} / ${b.slots}`, b.open.map((o) => o.symbol).join(", ") || "flat"),
+    tile("Closed", fmtInt(b.trades), b.win_rate === null ? "—" : `${fmt(b.win_rate, 0)}% win`),
+    tile("Realised", m(b.realised), "", signClass(b.realised)),
+    tile("Open P&amp;L", m(b.unrealised), "", signClass(b.unrealised)),
+  ].join("");
+  const why = { first_profitable_open: "first profitable open", gap_stop: "gapped through the stop",
+                stop: "stop (today's open)", time: "4 sessions held" };
+  const open = b.open.length ? `
+    <table><thead><tr><th>Held</th><th>Side</th><th>Bought</th><th class="num">Qty</th>
+      <th class="num">Entry</th><th class="num">Stop</th><th class="num">Last</th>
+      <th class="num">Sessions</th></tr></thead><tbody>
+    ${b.open.map((o) => `<tr><td>${esc(o.symbol)}</td>
+      <td class="${o.side === "LONG" ? "pos" : "neg"}">${esc(o.side)}</td><td>${esc(o.entry_day)}</td>
+      <td class="num">${fmt(o.qty, 3)}</td><td class="num">${fmt(o.entry)}</td>
+      <td class="num">${fmt(o.stop)}</td><td class="num">${fmt(o.last)}</td>
+      <td class="num">${fmtInt((o.sessions || []).length)}</td></tr>`).join("")}
+    </tbody></table>` : `<div class="empty">Nothing held. Each morning the book lists the
+      names after a narrow-range day, then buys (or sells short) when price runs ${esc(b.k)} x
+      yesterday's range from the open with the trend.</div>`;
+  const closed = b.closed.length ? `
+    <table><thead><tr><th>Sold</th><th>Symbol</th><th>Side</th><th class="num">Entry</th>
+      <th class="num">Exit</th><th class="num">R</th><th class="num">P&amp;L</th><th>Why it sold</th></tr></thead><tbody>
+    ${b.closed.map((c) => `<tr><td>${esc(c.exit_day)}</td><td>${esc(c.symbol)}</td>
+      <td>${esc(c.side)}</td><td class="num">${fmt(c.entry)}</td><td class="num">${fmt(c.exit)}</td>
+      <td class="num ${signClass(c.r)}">${signed(c.r)}R</td>
+      <td class="num ${signClass(c.pnl)}">${m(c.pnl)}</td>
+      <td class="why-cell">${esc(why[c.why] || c.why)}</td></tr>`).join("")}
+    </tbody></table>` : "";
+  $("williams-body").innerHTML = open + closed;
+}
+
+async function loadWilliams() {
+  try {
+    const res = await fetch("/api/williams-book");
+    renderWilliams(res.ok ? await res.json() : null);
+  } catch { /* the next poll fills it in */ }
 }
 
 async function loadRsi2() {
@@ -1362,13 +1421,14 @@ function bind() {
   renderLog();
   await loadMarkets();       // currency, timezone and theme before first render
   await Promise.all([loadHistory(), loadStatus(), loadPositions(), loadTradingDay(),
-                     loadFocus(), loadRecord(), loadCandidate(), loadRsi2()]);
+                     loadFocus(), loadRecord(), loadCandidate(), loadRsi2(), loadWilliams()]);
   connect();
   setInterval(loadPositions, 30_000);
   setInterval(loadFocus, 60_000);
   setInterval(loadCandidate, 15_000);
   setInterval(loadRecord, 60_000);
   setInterval(loadRsi2, 60_000);
+  setInterval(loadWilliams, 60_000);
   setInterval(renderMarketClock, 15_000);
   setInterval(loadTradingDay, 30_000);
 })();

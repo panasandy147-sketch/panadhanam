@@ -225,7 +225,8 @@ def test_the_page_keeps_only_what_the_desk_needs_on_screen():
     headings = re.findall(r"<h2>([^<]+)", page)
     headings = [h.strip() for h in headings]
     # The RSI(2) Swing Book card (5 Oct 2026) shows only where the book is on.
-    assert headings == ["Account", "Paper Record", "RSI(2) Swing Book", "Watching",
+    assert headings == ["Account", "Paper Record", "RSI(2) Swing Book",
+                        "Williams-Crabel Swing Book", "Watching",
                         "Live candidate",
                         "Activity Log", "Open Positions", "Signals", "Today",
                         "Weekly Review"]

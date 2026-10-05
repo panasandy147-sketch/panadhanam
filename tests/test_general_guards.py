@@ -122,3 +122,17 @@ def test_india_screens_on_lower_volume_floors_the_us_keeps_its_own(cfg):
         assert cfg.get("screener.band_b.min_rvol") == 1.5
     finally:
         cfg.switch_market("IN")
+
+
+def test_the_us_target_is_2r_snapped_from_1_5r_and_the_breakout_keeps_3r(cfg):
+    """6 Oct 2026, the 1:3 room test: on the US the target is 2R, snapped
+    inside the previous-day high/low from 1.5R; the volatility breakout keeps
+    its own tested 3R; India keeps 3R."""
+    cfg.switch_market("US")
+    try:
+        assert cfg.get("risk.min_risk_reward") == 2.0
+        assert cfg.get("risk.target_snap") == {"enabled": True, "min_r": 1.5, "ticks": 2}
+        assert cfg.get("vol_breakout.rr") == 3.0
+    finally:
+        cfg.switch_market("IN")
+    assert cfg.get("risk.min_risk_reward") == 3.0

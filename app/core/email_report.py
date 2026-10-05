@@ -111,9 +111,10 @@ def summary(events: list[dict[str, Any]], since: datetime, cur: str) -> dict[str
 class AuditEmailer:
     """Sends the hourly audit email for the market that is trading."""
 
-    def __init__(self, cfg: Any, rsi2_book: Any = None) -> None:
+    def __init__(self, cfg: Any, rsi2_book: Any = None, williams_book: Any = None) -> None:
         self.cfg = cfg
         self.rsi2_book = rsi2_book
+        self.williams_book = williams_book
         self.last_sent: dict[str, datetime] = {}     # market -> last email
         self.sent_today: dict[str, str] = {}        # market -> day of the last hourly
         self.closed_sent: set[tuple[str, str]] = set()
@@ -165,6 +166,11 @@ class AuditEmailer:
         if self.rsi2_book is not None and self.rsi2_book.enabled():
             b = self.rsi2_book.status()
             lines += ["", f"RSI(2) swing book: equity {cur}{b['equity']:,.2f}, "
+                          f"{len(b['open'])} held ({', '.join(o['symbol'] for o in b['open']) or 'flat'}), "
+                          f"{b['trades']} closed"]
+        if self.williams_book is not None and self.williams_book.enabled():
+            b = self.williams_book.status()
+            lines += ["", f"Williams-Crabel swing book: equity {cur}{b['equity']:,.2f}, "
                           f"{len(b['open'])} held ({', '.join(o['symbol'] for o in b['open']) or 'flat'}), "
                           f"{b['trades']} closed"]
         lines += ["", f"The day's full audit is attached (audit-{market}-{day}.txt).",

@@ -184,7 +184,7 @@ class MarketProfile:
         # off for India — each on its own walk-forward), and the vote's
         # per-market gates (consensus.general_min_analysts).
         for section in ("vol_breakout", "sjk50_200", "sjk_9_15_21", "sjk912_vwapadx", "sjk912rsi",
-                        "rsi2_swing", "consensus",
+                        "rsi2_swing", "williams_swing", "consensus",
                         "swing"):
             if self.data.get(section):
                 out.setdefault(section, {}).update(self.data[section])

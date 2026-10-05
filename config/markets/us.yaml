@@ -61,6 +61,14 @@ screener:
 #     +0.20R -> +0.31R, drawdown 4.0% -> 3.0% and 2.7% -> 2.0%.
 risk:
   rsi_guard: {enabled: true, short_min: 25, long_max: 75}
+  # The target 3R -> 2R, snapped inside the previous-day high/low from 1.5R
+  # (was 2.2R), 6 Oct 2026 (the user's "1:3 room test"): 40-session replay
+  # with the account rules, the whole book incl. the volatility breakout
+  # (which keeps its own 3R, vol_breakout.rr): first half +2.86% -> +3.64%,
+  # second +7.78% -> +10.33%, max drawdown 4.0% / 2.0% unchanged. India
+  # keeps 3R (not tested there).
+  min_risk_reward: 2.0
+  target_snap: {enabled: true, min_r: 1.5, ticks: 2}
   # No entries after N losing trades in a day. OFF (0) from 5 Oct 2026, the
   # user's call: run without it for 3 days and compare. Tested (test 6, 40
   # sessions, account rules) at 2: first half +2.8% -> +3.8% (DD 4.0% ->
@@ -225,6 +233,18 @@ rsi2_swing:
   enabled: true
   note: "US TRIAL from 5 Oct 2026"
 
+# Williams-Crabel swing book (settings.yaml williams_swing): a US TRIAL from
+# 6 Oct 2026, the user's call ("fix the champion strategies to what they
+# are"): +70.7% / +34.7% in the two halves of two years of hourly bars.
+williams_swing:
+  enabled: true
+  note: "US TRIAL from 6 Oct 2026"
+
 # The gold desk's entries (GLD) on the US clock: 15 min before the close.
 swing:
   to: "15:45"
+  # k 0.5 -> 0.3 for GLD, 6 Oct 2026: two years of hourly bars, R a trade
+  # on the stock (first / second year) +0.24 / +0.23 -> +0.34 / +0.40.
+  # (An NR4 day helped the stocks but was mixed on GLD: not used here.)
+  # India's GOLDBEES keeps 0.5 (mixed at 0.3).
+  k: 0.3

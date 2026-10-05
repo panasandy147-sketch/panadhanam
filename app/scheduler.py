@@ -53,9 +53,12 @@ class TradingEngine:
         # The RSI(2) swing book: its own paper ledger, run once a day.
         from app.strategies.rsi2_swing import Rsi2Book
         self.rsi2 = Rsi2Book(broker, self.cfg)
+        # The Williams-Crabel swing book: its own ledger, every 5 min.
+        from app.strategies.williams_swing import WilliamsBook
+        self.williams = WilliamsBook(broker, self.cfg)
         # The hourly audit email (app/core/email_report.py; .env SMTP_*).
         from app.core.email_report import AuditEmailer
-        self.mailer = AuditEmailer(self.cfg, self.rsi2)
+        self.mailer = AuditEmailer(self.cfg, self.rsi2, self.williams)
         self.desk.dispatcher.trading_day = self.trading_day
         self.outcomes.trading_day = self.trading_day
         self.outcomes.dispatcher = self.desk.dispatcher
@@ -523,6 +526,10 @@ class TradingEngine:
             await self.rsi2.maybe_run()
         except Exception as exc:                          # noqa: BLE001
             log.warning("RSI(2) swing book run failed: %s", exc)
+        try:
+            await self.williams.maybe_run()
+        except Exception as exc:                          # noqa: BLE001
+            log.warning("Williams-Crabel swing book run failed: %s", exc)
 
     async def maybe_follow_session(self) -> str | None:
         """Move to whichever market is trading, so one app covers both.
