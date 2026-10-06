@@ -58,7 +58,9 @@ def params(cfg: Any) -> dict[str, Any]:
             "max_position_pct": float(g("williams_swing.max_position_pct", 25.0)),
             "min_risk_pct": float(g("williams_swing.min_risk_pct", 0.2)),
             "fresh_bars": max(1, int(g("williams_swing.fresh_bars", 2))),
-            "fractional": bool(g("williams_swing.fractional", True))}
+            "fractional": bool(g("williams_swing.fractional", True)),
+            # India's cash market cannot carry a short overnight: longs only.
+            "longs_only": bool(g("williams_swing.longs_only", False))}
 
 
 def _f(b: Any, key: str) -> float:
@@ -85,7 +87,7 @@ def day_setup(daily_before: Sequence[Any], today_open: float,
         if rng > min(ranges):
             return None
     slope = _f(daily_before[-1], "c") - _f(daily_before[-1 - p["trend_days"]], "c")
-    if slope == 0:
+    if slope == 0 or (slope < 0 and p.get("longs_only")):
         return None
     return {"up": today_open + p["k"] * rng, "dn": today_open - p["k"] * rng,
             "stop": today_open, "range": rng, "slope": slope, "open": today_open}

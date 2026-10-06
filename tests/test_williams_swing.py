@@ -170,3 +170,10 @@ def test_us_trial_on_india_off_and_the_rules_page(cfg):
     assert not cfg.get("williams_swing.enabled")
     assert asyncio.run(m.WilliamsBook(None, cfg).maybe_run(
         datetime(2026, 10, 6, 10, 0, tzinfo=ET))) is None
+
+
+def test_longs_only_skips_a_falling_trend():
+    """India's cash market cannot carry a short overnight (williams_swing.longs_only)."""
+    down = daily(rising=False)
+    assert m.day_setup(down, 120.0, P)["slope"] < 0
+    assert m.day_setup(down, 120.0, {**P, "longs_only": True}) is None

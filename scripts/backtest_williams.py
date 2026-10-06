@@ -8,7 +8,8 @@ known, with the live settings and the book's account rules.
     python -m scripts.backtest_williams --k 0.5 --nr 7
 
 Reports the earlier and the later half and all of it: trades, win rate,
-average R, return, max drawdown and profit factor, 0.03% cost a side.
+average R, return, max drawdown and profit factor; cost a side 0.03% (US),
+0.12% (India: STT, stamp). --market IN --longs-only for India's cash market.
 """
 from __future__ import annotations
 
@@ -49,7 +50,9 @@ async def chart(client: httpx.AsyncClient, ticker: str, interval: str, rng: str,
 
 async def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--market", default="US", choices=["US"])
+    ap.add_argument("--market", default="US", choices=["US", "IN"])
+    ap.add_argument("--longs-only", action="store_true",
+                    help="no shorts (India's cash market cannot hold one overnight)")
     ap.add_argument("--k", type=float, default=None)
     ap.add_argument("--nr", type=int, default=None)
     ap.add_argument("--symbols", nargs="*", default=None)
@@ -61,8 +64,12 @@ async def main() -> None:
         p["k"] = args.k
     if args.nr is not None:
         p["nr"] = args.nr
+    if args.longs_only:
+        p["longs_only"] = True
     tz = ZoneInfo(str(cfg.get("system.timezone")))
-    open_m = 9 * 60 + 30
+    open_m = 9 * 60 + (15 if args.market == "IN" else 30)
+    close_m = 15 * 60 + 30 if args.market == "IN" else 16 * 60
+    cost = 0.12 if args.market == "IN" else 0.03          # % a side (India: STT, stamp)
     from app.data.feeds.yahoo import yahoo_ticker
     symbols = args.symbols or [w["symbol"] for w in cfg.watchlist()]
     trades = []
@@ -72,7 +79,7 @@ async def main() -> None:
             try:
                 daily = await chart(client, yahoo_ticker(sym), "1d", "3y", tz)
                 hourly = [b for b in await chart(client, yahoo_ticker(sym), "60m", "730d", tz)
-                          if open_m <= b["m"] < 16 * 60]
+                          if open_m <= b["m"] < close_m]
             except Exception as exc:                          # noqa: BLE001
                 print(f"skip {sym}: {exc}", file=sys.stderr)
                 continue
@@ -83,9 +90,10 @@ async def main() -> None:
     mid = (datetime.fromisoformat(first) + (datetime.fromisoformat(last)
                                             - datetime.fromisoformat(first)) / 2).date().isoformat()
     out = {"from": first, "mid": mid, "to": last, "settings": p,
-           "earlier": ws.book([t for t in trades if t["day"] < mid], p),
-           "later": ws.book([t for t in trades if t["day"] >= mid], p),
-           "all": ws.book(trades, p)}
+           "cost_pct_a_side": cost,
+           "earlier": ws.book([t for t in trades if t["day"] < mid], p, cost),
+           "later": ws.book([t for t in trades if t["day"] >= mid], p, cost),
+           "all": ws.book(trades, p, cost)}
     print(json.dumps(out, indent=1))
 
 
