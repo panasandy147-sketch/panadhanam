@@ -40,6 +40,18 @@ const money = (n, d = 0) =>
     ? "—"
     : cur() + Number(n).toLocaleString(locale(),
         { minimumFractionDigits: d, maximumFractionDigits: d });
+/* A trade's own currency: the Signals list holds both markets, and a US
+   trade shown in rupees ("risk ₹40" for $40) read as a tiny India trade. */
+const INDIA_EXCHANGES = new Set(["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"]);
+const tradeCur = (s) => {
+  const ex = String(s?.instrument?.exchange || s?.exchange || "").toUpperCase();
+  if (!ex) return cur();
+  return INDIA_EXCHANGES.has(ex) ? "₹" : "$";
+};
+const moneyFor = (s, n) =>
+  n === null || n === undefined || Number.isNaN(n)
+    ? "—"
+    : tradeCur(s) + Number(n).toLocaleString(tradeCur(s) === "₹" ? "en-IN" : "en-US");
 const signed = (n, d = 2) => (n >= 0 ? "+" : "") + fmt(n, d);
 const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neutral-ink");
 const esc = (s) =>
@@ -406,7 +418,7 @@ function renderSignals() {
         <div class="meta">
           <span>qty <b>${qtyLabel(s)}</b></span>
           <span>R:R <b>${fmt(s.risk_reward, 2)}</b></span>
-          <span>risk <b>${money(Math.round(s.total_risk))}</b> (${fmt(s.capital_at_risk_pct, 2)}%)</span>
+          <span>risk <b>${moneyFor(s, Math.round(s.total_risk))}</b> (${fmt(s.capital_at_risk_pct, 2)}%)</span>
           <span>score <b>${signed(s.composite_score)}</b></span>
           <span>${esc(s.regime || "")}</span>
         </div>
