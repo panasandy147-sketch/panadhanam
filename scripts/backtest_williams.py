@@ -56,6 +56,8 @@ async def main() -> None:
     ap.add_argument("--k", type=float, default=None)
     ap.add_argument("--nr", type=int, default=None)
     ap.add_argument("--symbols", nargs="*", default=None)
+    ap.add_argument("--interval", default="60m", choices=["60m", "5m"],
+                    help="5m: the last 60 days at the live book's own resolution")
     args = ap.parse_args()
     cfg = get_config()
     cfg.switch_market(args.market)
@@ -78,7 +80,8 @@ async def main() -> None:
         for sym in symbols:
             try:
                 daily = await chart(client, yahoo_ticker(sym), "1d", "3y", tz)
-                hourly = [b for b in await chart(client, yahoo_ticker(sym), "60m", "730d", tz)
+                hourly = [b for b in await chart(client, yahoo_ticker(sym), args.interval,
+                                                 "730d" if args.interval == "60m" else "60d", tz)
                           if open_m <= b["m"] < close_m]
             except Exception as exc:                          # noqa: BLE001
                 print(f"skip {sym}: {exc}", file=sys.stderr)
