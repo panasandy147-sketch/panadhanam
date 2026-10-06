@@ -148,4 +148,5 @@ def simulate(cfg: Any, trades: list[dict[str, Any]], r_key: str, exit_key: str,
         "max_drawdown_pct": round(drawdown, 2),
         "locked_days": len(locked),
         "skipped": dict(skipped.most_common()),
+        "taken": taken,                    # which trades the desk would have taken
     }
